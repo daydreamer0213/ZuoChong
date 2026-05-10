@@ -42,6 +42,7 @@ async function checkMcpServerContract(): Promise<void> {
   const fakeClient = {
     status: async () => ({ ok: true, appRunning: true, defaultPet: { id: "snoopy", displayName: "Snoopy" } }),
     listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+    installPet: async () => { throw new Error("unused"); },
     acquireLease: async () => ({ leaseId: "lease-1", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }),
     heartbeatLease: async (leaseId: string) => ({ leaseId, expiresAt: Date.now() + 15_000 }),
     releaseLease: async () => ({ released: true }),

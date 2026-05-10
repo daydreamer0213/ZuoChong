@@ -37,6 +37,7 @@ const client = {
   hello: async () => ({}),
   status: async () => ({ ok: true, appRunning: true }),
   listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+  installPet: async () => { throw new Error("unused"); },
   acquireLease: async (options?: { readonly requestedPetId?: string }) => {
     calls.push({ kind: "lease", value: "acquire", requestedPetId: options?.requestedPetId });
     return { leaseId: "lease-fixer", requestedPetId: options?.requestedPetId, targetKind: "explicit" as const, actualTargetPetId: options?.requestedPetId ?? "builtin", actualTargetPetName: "Fixer", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true };
