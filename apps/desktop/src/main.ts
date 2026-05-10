@@ -1,6 +1,6 @@
 import { app } from "electron";
 
-import { initializeAppState, isOnboardingCompleted } from "./app-state.js";
+import { initializeAppState, isOnboardingCompleted, releaseStartupInstallLock } from "./app-state.js";
 import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
 import { startLocalIpcServer } from "./local-ipc.js";
@@ -33,6 +33,7 @@ if (!gotSingleInstanceLock) {
     createAppTray();
     installDefaultPetDisplayHandlers();
     await startLocalIpcServer();
+    releaseStartupInstallLock();
     if (shouldOpenDefaultPetOnLaunch()) {
       showDefaultPet();
     }
@@ -47,6 +48,7 @@ if (!gotSingleInstanceLock) {
     void checkForGitHubReleaseUpdate().then(() => refreshTrayMenu());
     console.log("OpenPets desktop shell ready.");
   }).catch((error: unknown) => {
+    releaseStartupInstallLock();
     console.error("Failed to start OpenPets desktop shell.", error);
     app.quit();
   });

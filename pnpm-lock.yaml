@@ -105,6 +105,25 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/install-pet:
+    dependencies:
+      '@open-pets/client':
+        specifier: workspace:*
+        version: link:../client
+      yauzl:
+        specifier: 3.3.0
+        version: 3.3.0
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.2
+        version: 25.6.2
+      '@types/yauzl':
+        specifier: 2.10.3
+        version: 2.10.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
@@ -1667,7 +1686,7 @@ snapshots:
 
   '@types/yauzl@2.10.3':
     dependencies:
-      '@types/node': 24.12.2
+      '@types/node': 25.6.2
 
   '@xmldom/xmldom@0.8.13': {}
 

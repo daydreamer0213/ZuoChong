@@ -15,6 +15,7 @@ const publishOrder = [
   "packages/claude",
   "packages/opencode",
   "packages/cli",
+  "packages/install-pet",
 ];
 
 const allowedArgs = new Set([
@@ -174,6 +175,7 @@ Packages:
   4. @open-pets/claude
   5. @open-pets/opencode
   6. @open-pets/cli
+  7. install-pet
 
 Options:
   --yes            publish to npm; without this, runs pnpm publish --dry-run

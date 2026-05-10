@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, resolveConfiguredPet, runClaudeMcpAddJson } from "./index.js";
+import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, parseInstallArgs, resolveConfiguredPet, runClaudeMcpAddJson } from "./index.js";
 
 const parsed = parseConfigureArgs(["--agent", "claude", "--pet", "fixer", "--cwd", "/tmp/project", "--yes"]);
 assert.equal(parsed.agent, "claude");
@@ -19,6 +19,9 @@ assert.equal(parseConfigureArgs(["--pet=fixer"]).petId, "fixer");
 assert.equal(parseConfigureArgs(["--agent", "opencode", "--pet", "fixer"]).agent, "opencode");
 assert.throws(() => parseConfigureArgs(["--agent", "cursor"]));
 assert.throws(() => parseConfigureArgs(["--pet", "bad/pet"]));
+assert.deepEqual(parseInstallArgs(["review-owl"]), { petId: "review-owl" });
+assert.throws(() => parseInstallArgs([]));
+assert.throws(() => parseInstallArgs(["bad/pet"]));
 
 const pinned = createVersionPinnedCliCommand("1.2.3", ["mcp", "--pet", "fixer"]);
 assert.deepEqual(pinned, { command: "npx", args: ["-y", `${cliPackageName}@1.2.3`, "mcp", "--pet", "fixer"] });
@@ -118,9 +121,9 @@ try {
   const opencodeConfigPath = join(opencodeProject, ".opencode", "opencode.jsonc");
   const opencodeInstructionPath = join(opencodeProject, ".opencode", "openpets.md");
   const opencodeConfig = JSON.parse(readFileSync(opencodeConfigPath, "utf8")) as { readonly mcp?: Record<string, { readonly command?: readonly string[] }>; readonly instructions?: readonly string[]; readonly plugin?: readonly unknown[] };
-  assert.deepEqual(opencodeConfig.mcp?.openpets?.command, ["npx", "-y", "@open-pets/cli@2.0.1", "mcp", "--pet", "fixer"]);
+  assert.deepEqual(opencodeConfig.mcp?.openpets?.command, ["npx", "-y", "@open-pets/cli@2.0.2", "mcp", "--pet", "fixer"]);
   assert.deepEqual(opencodeConfig.instructions, [".opencode/openpets.md"]);
-  assert.deepEqual(opencodeConfig.plugin, [["@open-pets/opencode@2.0.1", { pet: "fixer" }]]);
+  assert.deepEqual(opencodeConfig.plugin, [["@open-pets/opencode@2.0.2", { pet: "fixer" }]]);
   assert.match(readFileSync(opencodeInstructionPath, "utf8"), /OPENPETS:START/);
   await configureProject({ agent: "opencode", petId: "fixer", cwd: opencodeProject, yes: true, force: false, localDev: false });
   const opencodeConfigAgain = readFileSync(opencodeConfigPath, "utf8");
@@ -146,7 +149,7 @@ try {
   const lowerTop = readFileSync(join(lowerOwnerProject, "opencode.json"), "utf8");
   const lowerOwned = JSON.parse(readFileSync(join(lowerOwnerProject, ".opencode", "opencode.jsonc"), "utf8")) as { readonly mcp?: Record<string, { readonly command?: readonly string[] }> };
   assert.equal(lowerTop.includes("@open-pets/cli"), false);
-  assert.deepEqual(lowerOwned.mcp?.openpets?.command, ["npx", "-y", "@open-pets/cli@2.0.1", "mcp", "--pet", "fixer"]);
+  assert.deepEqual(lowerOwned.mcp?.openpets?.command, ["npx", "-y", "@open-pets/cli@2.0.2", "mcp", "--pet", "fixer"]);
 
   const customProject = join(dir, "opencode-custom");
   mkdirSync(customProject);
@@ -179,7 +182,7 @@ assert.equal(invalidHook.status, 1);
 const missingPetHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(missingPetHook.status, 1);
 
-for (const args of [["--help"], ["-h"], ["configure", "--help"], ["configure", "-h"], ["mcp", "--help"], ["hook", "--help"]]) {
+for (const args of [["--help"], ["-h"], ["install", "--help"], ["configure", "--help"], ["configure", "-h"], ["mcp", "--help"], ["hook", "--help"]]) {
   const help = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, ...args], { encoding: "utf8" });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage:/);

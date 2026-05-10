@@ -7,7 +7,8 @@ import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
 import { cleanupUnixSocket, createIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
-import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
+import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
+import { installPet } from "./pet-installation.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
@@ -160,6 +161,15 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       })),
       defaultPetId: state.preferences.defaultPetId,
     };
+  }
+
+  if (request.method === "pets.install") {
+    const params = isRecord(request.params) ? request.params : {};
+    const petId = validateInstallPetId(params.petId);
+    const state = await installPet(petId);
+    const installed = state.pets.installed.find((pet) => pet.id === petId);
+    if (!installed) throw new IpcProtocolError("install_failed", "Pet install did not complete.");
+    return { ok: true, petId: installed.id, displayName: installed.displayName, installed: true };
   }
 
   if (request.method === "lease.acquire") {

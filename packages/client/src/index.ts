@@ -38,6 +38,13 @@ export interface OpenPetsPetListResult {
   readonly defaultPetId: string;
 }
 
+export interface OpenPetsPetInstallResult {
+  readonly ok: true;
+  readonly petId: string;
+  readonly displayName: string;
+  readonly installed: true;
+}
+
 export interface OpenPetsPetListItem {
   readonly id: string;
   readonly displayName: string;
@@ -49,6 +56,7 @@ export interface OpenPetsClient {
   hello(): Promise<unknown>;
   status(options?: { readonly leaseId?: string }): Promise<OpenPetsStatusResult>;
   listPets(): Promise<OpenPetsPetListResult>;
+  installPet(petId: string): Promise<OpenPetsPetInstallResult>;
   acquireLease(options?: { readonly requestedPetId?: string }): Promise<OpenPetsLeaseResult>;
   heartbeatLease(leaseId: string): Promise<{ readonly leaseId: string; readonly expiresAt: number }>;
   releaseLease(leaseId: string): Promise<{ readonly released: boolean }>;
@@ -71,12 +79,27 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       }
     },
     listPets: async () => parsePetListResult(await sendDiscoveredRequest("pets.list", {}, options)),
+    installPet: async (petId) => parsePetInstallResult(await sendDiscoveredRequest("pets.install", { petId: validatePetId(petId) }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 })),
     acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId }, options),
     heartbeatLease: (leaseId) => sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
     releaseLease: (leaseId) => sendDiscoveredRequest("lease.release", { leaseId }, options),
     react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId }, options),
     say: (message, sayOptions) => sendDiscoveredRequest("pet.say", { message, reaction: sayOptions?.reaction, leaseId: sayOptions?.leaseId }, options),
   };
+}
+
+export function parsePetInstallResult(value: unknown): OpenPetsPetInstallResult {
+  if (!isRecord(value) || value.ok !== true || typeof value.petId !== "string" || typeof value.displayName !== "string" || value.installed !== true) {
+    throw new OpenPetsClientError("invalid_response", "OpenPets pet install response is invalid.");
+  }
+  return { ok: true, petId: value.petId, displayName: value.displayName, installed: true };
+}
+
+function validatePetId(value: string): string {
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) || value === "builtin") {
+    throw new OpenPetsClientError("invalid_pet_id", "Invalid OpenPets pet id.");
+  }
+  return value;
 }
 
 export function parsePetListResult(value: unknown): OpenPetsPetListResult {

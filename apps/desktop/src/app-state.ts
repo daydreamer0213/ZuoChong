@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
@@ -50,15 +50,27 @@ export interface OpenPetsStateV1 {
 export { defaultPetScale, normalizePetScale, petScaleOptions, type PetScaleValue };
 
 const stateFileName = "openpets-state.json";
+const directInstallLockName = ".install-pet.lock";
+const directInstallLockStaleMs = 10 * 60 * 1000;
 let statePath: string | null = null;
 let currentState: OpenPetsStateV1 | null = null;
+let startupInstallLockPath: string | null = null;
 
 export function initializeAppState(): void {
-  statePath = join(app.getPath("userData"), stateFileName);
+  const userDataPath = app.getPath("userData");
+  startupInstallLockPath = acquireStartupInstallLock(userDataPath);
+
+  statePath = join(userDataPath, stateFileName);
   const nextState = normalizeState(readStateFile(statePath));
   writeStateToDisk(nextState);
   currentState = nextState;
   console.log(`OpenPets state initialized at ${statePath}.`);
+}
+
+export function releaseStartupInstallLock(): void {
+  const lockPath = startupInstallLockPath;
+  startupInstallLockPath = null;
+  if (lockPath) rmSync(lockPath, { recursive: true, force: true });
 }
 
 export function getAppStateSnapshot(): OpenPetsStateV1 {
@@ -428,6 +440,52 @@ function normalizePosition(value: Partial<Point>): Point | undefined {
 
 function cloneState(state: OpenPetsStateV1): OpenPetsStateV1 {
   return structuredClone(state) as OpenPetsStateV1;
+}
+
+function acquireStartupInstallLock(userDataPath: string): string {
+  mkdirSync(userDataPath, { recursive: true, mode: 0o700 });
+  const lockPath = join(userDataPath, directInstallLockName);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      writeFileSync(join(lockPath, "owner.json"), `${JSON.stringify({ pid: process.pid, createdAt: Date.now(), command: "openpets-startup" })}\n`, "utf8");
+      return lockPath;
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (code !== "EEXIST") throw error;
+      if (isStaleInstallLock(lockPath)) {
+        rmSync(lockPath, { recursive: true, force: true });
+        continue;
+      }
+      throw new Error("OpenPets cannot start while a direct pet install is in progress. Wait for install-pet to finish, then reopen OpenPets.");
+    }
+  }
+  throw new Error("Could not acquire OpenPets startup lock.");
+}
+
+function isStaleInstallLock(lockPath: string): boolean {
+  try {
+    const owner = JSON.parse(readFileSync(join(lockPath, "owner.json"), "utf8")) as { readonly pid?: unknown; readonly createdAt?: unknown };
+    if (typeof owner.createdAt === "number" && Date.now() - owner.createdAt > directInstallLockStaleMs) return true;
+    if (typeof owner.pid === "number" && owner.pid > 0) return !isProcessAlive(owner.pid);
+  } catch {
+    // Fall back to mtime for old/partial locks.
+  }
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs > directInstallLockStaleMs;
+  } catch {
+    return true;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    return code === "EPERM";
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

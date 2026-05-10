@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { validateDiscovery } from "./discovery.js";
-import { parsePetListResult } from "./index.js";
+import { parsePetInstallResult, parsePetListResult } from "./index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "./protocol.js";
 
 const baseDiscovery = {
@@ -31,6 +31,8 @@ if (err.ok || err.error.code !== "invalid_token") throw new Error("Failed to par
 assertRejects(() => parseIpcResponse({ ok: true }));
 assert.deepEqual(parsePetListResult({ ok: true, defaultPetId: "builtin", pets: [{ id: "fixer", displayName: "Fixer", builtIn: false, broken: false }] }), { ok: true, defaultPetId: "builtin", pets: [{ id: "fixer", displayName: "Fixer", builtIn: false, broken: false }] });
 assertRejects(() => parsePetListResult({ ok: true, pets: [{ id: "fixer" }], defaultPetId: "builtin" }));
+assert.deepEqual(parsePetInstallResult({ ok: true, petId: "fixer", displayName: "Fixer", installed: true }), { ok: true, petId: "fixer", displayName: "Fixer", installed: true });
+assertRejects(() => parsePetInstallResult({ ok: true, petId: "fixer" }));
 
 console.log("Client protocol validation passed.");
 

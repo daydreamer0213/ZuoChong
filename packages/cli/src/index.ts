@@ -22,6 +22,10 @@ interface ConfigureOptions {
   readonly localDev: boolean;
 }
 
+interface InstallOptions {
+  readonly petId: string;
+}
+
 interface CommandSpec {
   readonly command: string;
   readonly args: readonly string[];
@@ -53,6 +57,14 @@ async function main(): Promise<void> {
     await configureProject(parseConfigureArgs(args));
     return;
   }
+  if (command === "install") {
+    if (hasHelp(args)) {
+      printInstallUsage();
+      return;
+    }
+    await installPetFromCatalog(parseInstallArgs(args));
+    return;
+  }
   if (command === "mcp") {
     if (hasHelp(args)) {
       printMcpUsage();
@@ -71,6 +83,12 @@ async function main(): Promise<void> {
     return;
   }
   throw new CliError(`Unknown command: ${command}`);
+}
+
+async function installPetFromCatalog(options: InstallOptions): Promise<void> {
+  const client = createOpenPetsClient({ responseTimeoutMs: 60_000 });
+  const result = await client.installPet(options.petId);
+  process.stdout.write(`Installed OpenPets pet: ${sanitizeTerminalText(result.displayName)} (${result.petId})\n`);
 }
 
 export async function configureProject(options: ConfigureOptions): Promise<void> {
@@ -138,6 +156,11 @@ export function parseConfigureArgs(args: readonly string[]): ConfigureOptions {
   }
   if (agent !== "claude" && agent !== "opencode") throw new CliError(`Unsupported agent: ${agent}. Supported agents: claude, opencode.`);
   return { agent, petId, cwd, yes, force, localDev };
+}
+
+export function parseInstallArgs(args: readonly string[]): InstallOptions {
+  if (args.length !== 1) throw new CliError("Usage: openpets install <pet-id>");
+  return { petId: validateOpenPetsPetArg(args[0] ?? "") };
 }
 
 export function createVersionPinnedCliCommand(version: string, args: readonly string[]): CommandSpec {
@@ -334,7 +357,11 @@ function getPackageVersion(): string {
 }
 
 function printUsage(): void {
-  process.stdout.write("Usage:\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
+  process.stdout.write("Usage:\n  openpets install <pet-id>\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
+}
+
+function printInstallUsage(): void {
+  process.stdout.write("Usage:\n  openpets install <pet-id>\n\nDownloads a gallery pet through the running OpenPets desktop app and installs it locally.\n");
 }
 
 function printConfigureUsage(): void {
