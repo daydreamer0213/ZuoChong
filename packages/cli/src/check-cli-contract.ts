@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 
-import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, parseInstallArgs, resolveConfiguredPet, runClaudeMcpAddJson } from "./index.js";
+import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, parseInstallArgs, parseReactArgs, parseSayArgs, resolveConfiguredPet, runClaudeMcpAddJson } from "./index.js";
 
 const parsed = parseConfigureArgs(["--agent", "claude", "--pet", "fixer", "--cwd", "/tmp/project", "--yes"]);
 assert.equal(parsed.agent, "claude");
@@ -22,6 +22,15 @@ assert.throws(() => parseConfigureArgs(["--pet", "bad/pet"]));
 assert.deepEqual(parseInstallArgs(["review-owl"]), { petId: "review-owl" });
 assert.throws(() => parseInstallArgs([]));
 assert.throws(() => parseInstallArgs(["bad/pet"]));
+assert.deepEqual(parseReactArgs(["success"]), { reaction: "success" });
+assert.throws(() => parseReactArgs([]));
+assert.throws(() => parseReactArgs(["bad"]));
+assert.deepEqual(parseSayArgs(["Build", "finished"]), { message: "Build finished", reaction: undefined });
+assert.deepEqual(parseSayArgs(["Build finished", "--reaction", "celebrating"]), { message: "Build finished", reaction: "celebrating" });
+assert.deepEqual(parseSayArgs(["--reaction=success", "Tests", "passed"]), { message: "Tests passed", reaction: "success" });
+assert.throws(() => parseSayArgs([]));
+assert.throws(() => parseSayArgs(["Hello", "--reaction", "bad"]));
+assert.throws(() => parseSayArgs(["Hello", "--unknown"]));
 
 const pinned = createVersionPinnedCliCommand("1.2.3", ["mcp", "--pet", "fixer"]);
 assert.deepEqual(pinned, { command: "npx", args: ["-y", `${cliPackageName}@1.2.3`, "mcp", "--pet", "fixer"] });
@@ -182,7 +191,7 @@ assert.equal(invalidHook.status, 1);
 const missingPetHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(missingPetHook.status, 1);
 
-for (const args of [["--help"], ["-h"], ["install", "--help"], ["configure", "--help"], ["configure", "-h"], ["mcp", "--help"], ["hook", "--help"]]) {
+for (const args of [["--help"], ["-h"], ["status", "--help"], ["pets", "--help"], ["react", "--help"], ["say", "--help"], ["install", "--help"], ["configure", "--help"], ["configure", "-h"], ["mcp", "--help"], ["hook", "--help"]]) {
   const help = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, ...args], { encoding: "utf8" });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage:/);

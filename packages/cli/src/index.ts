@@ -7,7 +7,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { createOpenPetsClient, OpenPetsClientError, type OpenPetsPetListItem } from "@open-pets/client";
+import { allowedReactions, createOpenPetsClient, OpenPetsClientError, type OpenPetsPetListItem, type OpenPetsReaction } from "@open-pets/client";
 import { claudeHookEvents, openPetsHookMarker, removeOpenPetsHooks, runClaudeHookFromStdin, validateOpenPetsPetArg } from "@open-pets/claude";
 import { prepareOpenCodeProjectSetup, writePreparedOpenCodeProjectSetup } from "@open-pets/opencode";
 
@@ -24,6 +24,15 @@ interface ConfigureOptions {
 
 interface InstallOptions {
   readonly petId: string;
+}
+
+interface ReactOptions {
+  readonly reaction: OpenPetsReaction;
+}
+
+interface SayOptions {
+  readonly message: string;
+  readonly reaction?: OpenPetsReaction;
 }
 
 interface CommandSpec {
@@ -65,6 +74,38 @@ async function main(): Promise<void> {
     await installPetFromCatalog(parseInstallArgs(args));
     return;
   }
+  if (command === "status") {
+    if (hasHelp(args)) {
+      printStatusUsage();
+      return;
+    }
+    await showStatus(args);
+    return;
+  }
+  if (command === "pets") {
+    if (hasHelp(args)) {
+      printPetsUsage();
+      return;
+    }
+    await showPets(args);
+    return;
+  }
+  if (command === "react") {
+    if (hasHelp(args)) {
+      printReactUsage();
+      return;
+    }
+    await sendReaction(parseReactArgs(args));
+    return;
+  }
+  if (command === "say") {
+    if (hasHelp(args)) {
+      printSayUsage();
+      return;
+    }
+    await sendMessage(parseSayArgs(args));
+    return;
+  }
   if (command === "mcp") {
     if (hasHelp(args)) {
       printMcpUsage();
@@ -89,6 +130,32 @@ async function installPetFromCatalog(options: InstallOptions): Promise<void> {
   const client = createOpenPetsClient({ responseTimeoutMs: 60_000 });
   const result = await client.installPet(options.petId);
   process.stdout.write(`Installed OpenPets pet: ${sanitizeTerminalText(result.displayName)} (${result.petId})\n`);
+}
+
+async function showStatus(args: readonly string[]): Promise<void> {
+  if (args.length !== 0) throw new CliError(`Unknown status option: ${args[0]}`);
+  const result = await createOpenPetsClient().status();
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  if (!result.ok || !result.appRunning) process.exitCode = 1;
+}
+
+async function showPets(args: readonly string[]): Promise<void> {
+  if (args.length !== 0) throw new CliError(`Unknown pets option: ${args[0]}`);
+  const result = await createOpenPetsClient().listPets();
+  for (const pet of result.pets) {
+    const flags = [pet.id === result.defaultPetId ? "default" : undefined, pet.broken ? "broken" : undefined].filter(Boolean).join(", ");
+    process.stdout.write(`${sanitizeTerminalText(pet.displayName)} (${pet.id})${flags ? ` [${flags}]` : ""}\n`);
+  }
+}
+
+async function sendReaction(options: ReactOptions): Promise<void> {
+  await createOpenPetsClient().react(options.reaction);
+  process.stdout.write(`OpenPets reaction sent: ${options.reaction}\n`);
+}
+
+async function sendMessage(options: SayOptions): Promise<void> {
+  await createOpenPetsClient().say(options.message, options.reaction ? { reaction: options.reaction } : undefined);
+  process.stdout.write("OpenPets message sent.\n");
 }
 
 export async function configureProject(options: ConfigureOptions): Promise<void> {
@@ -161,6 +228,39 @@ export function parseConfigureArgs(args: readonly string[]): ConfigureOptions {
 export function parseInstallArgs(args: readonly string[]): InstallOptions {
   if (args.length !== 1) throw new CliError("Usage: openpets install <pet-id>");
   return { petId: validateOpenPetsPetArg(args[0] ?? "") };
+}
+
+export function parseReactArgs(args: readonly string[]): ReactOptions {
+  if (args.length !== 1) throw new CliError("Usage: openpets react <reaction>");
+  return { reaction: parseReaction(args[0] ?? "") };
+}
+
+export function parseSayArgs(args: readonly string[]): SayOptions {
+  let reaction: OpenPetsReaction | undefined;
+  const messageParts: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--reaction") {
+      reaction = parseReaction(readRequiredArg(args, index, "--reaction"));
+      index += 1;
+    } else if (arg.startsWith("--reaction=")) {
+      reaction = parseReaction(arg.slice("--reaction=".length));
+    } else if (arg.startsWith("--")) {
+      throw new CliError(`Unknown say option: ${arg}`);
+    } else {
+      messageParts.push(arg);
+    }
+  }
+  const message = messageParts.join(" ").trim();
+  if (!message) throw new CliError("Usage: openpets say <message> [--reaction <reaction>]");
+  return { message, reaction };
+}
+
+function parseReaction(value: string): OpenPetsReaction {
+  if (!allowedReactions.includes(value as OpenPetsReaction)) {
+    throw new CliError(`Invalid OpenPets reaction: ${value}. Allowed reactions: ${allowedReactions.join(", ")}.`);
+  }
+  return value as OpenPetsReaction;
 }
 
 export function createVersionPinnedCliCommand(version: string, args: readonly string[]): CommandSpec {
@@ -357,11 +457,27 @@ function getPackageVersion(): string {
 }
 
 function printUsage(): void {
-  process.stdout.write("Usage:\n  openpets install <pet-id>\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
+  process.stdout.write("Usage:\n  openpets status\n  openpets pets\n  openpets react <reaction>\n  openpets say <message> [--reaction <reaction>]\n  openpets install <pet-id>\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
 }
 
 function printInstallUsage(): void {
   process.stdout.write("Usage:\n  openpets install <pet-id>\n\nDownloads a gallery pet through the running OpenPets desktop app and installs it locally.\n");
+}
+
+function printStatusUsage(): void {
+  process.stdout.write("Usage:\n  openpets status\n\nChecks whether the OpenPets desktop app is reachable and prints the status response as JSON.\n");
+}
+
+function printPetsUsage(): void {
+  process.stdout.write("Usage:\n  openpets pets\n\nLists pets installed in the running OpenPets desktop app.\n");
+}
+
+function printReactUsage(): void {
+  process.stdout.write(`Usage:\n  openpets react <reaction>\n\nSends a reaction to the running OpenPets desktop app.\nAllowed reactions: ${allowedReactions.join(", ")}.\n`);
+}
+
+function printSayUsage(): void {
+  process.stdout.write(`Usage:\n  openpets say <message> [--reaction <reaction>]\n\nShows a short message in the running OpenPets desktop app. Optionally sends a reaction with the message.\nAllowed reactions: ${allowedReactions.join(", ")}.\n`);
 }
 
 function printConfigureUsage(): void {
