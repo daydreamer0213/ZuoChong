@@ -1,87 +1,29 @@
 name: Submit a pet
 description: Suggest a pet for the OpenPets gallery.
-title: "Pet submission: <pet name>"
+title: "Pet submission: "
 labels: ["pet submission"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for suggesting a pet for OpenPets.
-
-        Please submit only original work, properly licensed work, public-domain/CC0 work, or fan-made content you are comfortable having reviewed. If the pet references third-party characters, brands, games, shows, products, or artwork, say so clearly.
-
-        Submissions are reviewed manually. Opening an issue does not guarantee the pet will be added.
+        Thanks for suggesting a pet. Keep it short — we only need the essentials.
 
   - type: input
-    id: pet-name
+    id: pet-idea
     attributes:
-      label: Pet name
-      description: The display name you want shown in the gallery.
-      placeholder: "Pixel Penguin"
+      label: Pet idea or name
+      description: What should the pet be called, and what is it?
+      placeholder: "Pixel Penguin — a tiny penguin coding companion"
     validations:
       required: true
 
   - type: textarea
-    id: description
+    id: source-rights
     attributes:
-      label: Short description
-      description: One or two sentences about the pet.
-      placeholder: "A tiny penguin companion for coding sessions."
-    validations:
-      required: true
-
-  - type: dropdown
-    id: rights-status
-    attributes:
-      label: Rights / source status
-      description: Pick the closest option. This helps us review IP risk.
-      options:
-        - Original work created by me
-        - Original work created by someone else, with permission
-        - Openly licensed / public domain / CC0
-        - Unofficial fan-made content referencing third-party IP
-        - Unsure / needs review
-    validations:
-      required: true
-
-  - type: textarea
-    id: source-credit
-    attributes:
-      label: Source, credit, and permission details
-      description: Link the source/artist/license/permission. If fan-made, name the third-party character, brand, or work it references.
+      label: Asset/source and rights
+      description: Link the asset, repo, preview, or source. Mention if it is original, licensed, public domain/CC0, or fan-made.
       placeholder: |
-        Source: https://...
-        Creator: ...
-        License or permission: ...
-        Third-party IP referenced, if any: ...
+        Link: https://...
+        Rights: original / licensed / CC0 / fan-made / unsure
     validations:
       required: true
-
-  - type: textarea
-    id: asset-link
-    attributes:
-      label: Asset link
-      description: Link to the pet files, zip, repo, or image preview. Do not attach copyrighted material unless you have the right to share it.
-      placeholder: "https://github.com/... or https://drive.google.com/..."
-    validations:
-      required: false
-
-  - type: checkboxes
-    id: confirmations
-    attributes:
-      label: Submission confirmations
-      options:
-        - label: I am not submitting malware, secrets, private data, or anything intended to impersonate an official rights holder.
-          required: true
-        - label: I understand OpenPets may reject, rename, edit, or remove this pet at any time, including after a rights-owner request.
-          required: true
-        - label: I have disclosed any third-party IP, brand, character, or artwork this pet references.
-          required: true
-
-  - type: textarea
-    id: notes
-    attributes:
-      label: Extra notes
-      description: Anything else maintainers should know.
-    validations:
-      required: false
