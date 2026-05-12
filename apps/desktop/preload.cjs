@@ -175,6 +175,7 @@ async function renderAgentSetup(selectedPetId, commandMode) {
   const result = requireElement("claude-action-result");
   const devMode = requireInput("claude-dev-mode");
   const claudeCommandPath = requireInput("claude-command-path");
+  const nodeCommandPath = requireInput("node-command-path");
   const hookStatus = requireElement("claude-hooks-status");
   const hookDetails = requireElement("claude-hooks-details");
   const hookPreview = requireElement("claude-hooks-preview");
@@ -191,6 +192,7 @@ async function renderAgentSetup(selectedPetId, commandMode) {
   devMode.checked = snapshot.commandMode === "local";
   devMode.disabled = !snapshot.localDevAvailable;
   claudeCommandPath.value = snapshot.commandPaths.claude || "";
+  nodeCommandPath.value = snapshot.commandPaths.node || "";
   commandPreview.textContent = snapshot.preview.displayCommand;
   jsonPreview.textContent = JSON.stringify(snapshot.preview.mcpJson, null, 2);
   warning.textContent = createClaudeSetupWarning(snapshot);
@@ -203,6 +205,7 @@ async function renderAgentSetup(selectedPetId, commandMode) {
   memoryStatus.className = `agent-status-pill ${memoryStatusClassFor(snapshot.memoryStatus.status)}`;
   memoryDetails.textContent = `${snapshot.memoryStatus.message} Files: ${snapshot.memoryStatus.claudeMdPath}, ${snapshot.memoryStatus.openPetsMemoryPath}`;
   updateClaudeIntegrationCard(snapshot);
+  updateClaudeCommandPathHelp(snapshot);
   updateOpenCodeIntegration(snapshot, selected);
 
   select.onchange = () => { void renderAgentSetup(select.value, getCommandMode()); };
@@ -212,6 +215,7 @@ async function renderAgentSetup(selectedPetId, commandMode) {
   bindIntegrationHubButtons(snapshot, select);
   bindAgentSetupButton("claude-refresh", () => renderAgentSetup(select.value, getCommandMode()), snapshot.busy, "Refreshing…");
   bindAgentSetupButton("claude-command-path-save", () => saveAgentCommandPath("claude", claudeCommandPath.value, select.value, getCommandMode()), snapshot.busy, "Saving…");
+  bindAgentSetupButton("node-command-path-save", () => saveAgentCommandPath("node", nodeCommandPath.value, select.value, getCommandMode()), snapshot.busy, "Saving…");
   bindAgentSetupButton("claude-copy-command", async () => copyText(snapshot.preview.displayCommand), false);
   bindAgentSetupButton("claude-configure", () => runAgentAction("configure", select.value, getCommandMode()), snapshot.busy || !snapshot.status.canConfigure, "Installing…");
   bindAgentSetupButton("claude-replace", () => runAgentAction("replace", select.value, getCommandMode()), snapshot.busy || !snapshot.status.canReplace, "Replacing…");
@@ -249,10 +253,13 @@ function updateOpenCodeIntegration(snapshot, selected) {
   if (title) title.textContent = opencode.state === "configured" ? "OpenCode global setup installed" : "Global setup available";
   const details = document.getElementById("opencode-details");
   if (details) details.textContent = opencode.details;
+  updateOpenCodeCommandPathHelp(opencode);
   const select = document.getElementById("opencode-pet-select");
   if (select instanceof HTMLSelectElement) renderPetSelect(select, snapshot, selected);
   const opencodeCommandPath = document.getElementById("opencode-command-path");
   if (opencodeCommandPath instanceof HTMLInputElement) opencodeCommandPath.value = snapshot.commandPaths.opencode || "";
+  const opencodeNodeCommandPath = document.getElementById("opencode-node-command-path");
+  if (opencodeNodeCommandPath instanceof HTMLInputElement) opencodeNodeCommandPath.value = snapshot.commandPaths.node || "";
   const paths = document.getElementById("opencode-paths");
   if (paths) {
     const cleanup = Array.isArray(preview.cleanupConfigPaths) && preview.cleanupConfigPaths.length > 0 ? `. Cleanup: ${preview.cleanupConfigPaths.join(", ")}` : "";
@@ -266,6 +273,7 @@ function updateOpenCodeIntegration(snapshot, selected) {
   bindAgentSetupButton("opencode-remove", () => runAgentAction("opencode-remove", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy || !opencode.canRemove, "Removing…");
   bindAgentSetupButton("opencode-refresh", () => renderAgentSetup(select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Refreshing…");
   bindAgentSetupButton("opencode-command-path-save", () => saveAgentCommandPath("opencode", opencodeCommandPath instanceof HTMLInputElement ? opencodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Saving…");
+  bindAgentSetupButton("opencode-node-command-path-save", () => saveAgentCommandPath("node", opencodeNodeCommandPath instanceof HTMLInputElement ? opencodeNodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Saving…");
   bindAgentSetupButton("opencode-copy-config", async () => copyText(requireElement("opencode-json-preview").textContent || "", "opencode-action-result", "Copied OpenCode config preview."), false);
   if (select instanceof HTMLSelectElement) select.onchange = () => { void renderAgentSetup(select.value, getCommandMode()); };
 }
@@ -302,6 +310,25 @@ function updateClaudeIntegrationCard(snapshot) {
     configure.disabled = false;
     configure.className = "agent-action secondary";
   }
+}
+
+function updateClaudeCommandPathHelp(snapshot) {
+  const needsNode = snapshot.status.label === "Node required" || /Node\.js is required|set the Node\.js command path/i.test(snapshot.status.details || "");
+  const details = document.querySelector("#claude-detail-view .agent-command-paths");
+  const card = document.querySelector("#claude-detail-view .connection-card");
+  if (details instanceof HTMLElement) {
+    details.classList.toggle("needs-command-path", needsNode);
+  }
+  if (card instanceof HTMLElement) card.classList.toggle("needs-command-path", needsNode);
+  if (needsNode) renderError("Node.js was not found. Open Claude configuration → Advanced detection, set the Node.js command path, then retry.");
+}
+
+function updateOpenCodeCommandPathHelp(opencode) {
+  const needsNode = /Node\.js is required|set the Node\.js command path/i.test(opencode.details || "");
+  const paths = document.querySelector("#opencode-detail-view .agent-command-paths");
+  const card = document.querySelector("#opencode-detail-view .connection-card");
+  if (paths instanceof HTMLElement) paths.classList.toggle("needs-command-path", needsNode);
+  if (card instanceof HTMLElement) card.classList.toggle("needs-command-path", needsNode);
 }
 
 function cardStatusClassFor(state) {
@@ -431,12 +458,13 @@ function memoryStatusClassFor(status) {
 }
 
 function decorateAgentSetupButtons() {
-  for (const id of ["claude-configure", "claude-refresh", "claude-command-path-save", "claude-copy-command", "claude-replace", "claude-remove", "claude-memory-install", "claude-hooks-doctor", "claude-hooks-install", "claude-hooks-uninstall", "opencode-install", "opencode-remove", "opencode-refresh", "opencode-command-path-save", "opencode-copy-config"]) {
+  for (const id of ["claude-configure", "claude-refresh", "claude-command-path-save", "node-command-path-save", "claude-copy-command", "claude-replace", "claude-remove", "claude-memory-install", "claude-hooks-doctor", "claude-hooks-install", "claude-hooks-uninstall", "opencode-install", "opencode-remove", "opencode-refresh", "opencode-command-path-save", "opencode-node-command-path-save", "opencode-copy-config"]) {
     delete requireButton(id).dataset.loading;
   }
   setIconButtonContent(requireButton("claude-configure"), "plug", "Install integration");
   setIconButtonContent(requireButton("claude-refresh"), "refresh", "Refresh");
   setIconButtonContent(requireButton("claude-command-path-save"), "check", "Save path");
+  setIconButtonContent(requireButton("node-command-path-save"), "check", "Save path");
   setIconButtonContent(requireButton("claude-copy-command"), "copy", "Copy command");
   setIconButtonContent(requireButton("claude-replace"), "repeat", "Replace configuration");
   requireButton("claude-replace").className = "agent-action primary";
@@ -449,6 +477,7 @@ function decorateAgentSetupButtons() {
   setIconButtonContent(requireButton("opencode-remove"), "trash", "Remove global setup");
   setIconButtonContent(requireButton("opencode-refresh"), "refresh", "Refresh");
   setIconButtonContent(requireButton("opencode-command-path-save"), "check", "Save path");
+  setIconButtonContent(requireButton("opencode-node-command-path-save"), "check", "Save path");
   setIconButtonContent(requireButton("opencode-copy-config"), "copy", "Copy config preview");
 }
 
@@ -546,6 +575,7 @@ function setAgentSetupControlsBusy(busy) {
     "claude-memory-install",
     "claude-refresh",
     "claude-command-path-save",
+    "node-command-path-save",
     "claude-copy-command",
     "claude-hooks-doctor",
     "claude-hooks-install",
@@ -554,6 +584,7 @@ function setAgentSetupControlsBusy(busy) {
     "opencode-remove",
     "opencode-refresh",
     "opencode-command-path-save",
+    "opencode-node-command-path-save",
     "opencode-copy-config",
   ];
   if (busy) {
@@ -595,10 +626,10 @@ async function runAgentAction(action, selectedPetId, commandMode) {
 }
 
 async function saveAgentCommandPath(kind, path, selectedPetId, commandMode) {
-  const patch = kind === "claude" ? { claude: path } : { opencode: path };
+  const patch = kind === "claude" ? { claude: path } : kind === "node" ? { node: path } : { opencode: path };
   await agentSetupApi.updateCommandPaths(patch);
   await renderAgentSetup(selectedPetId || "", commandMode);
-  const result = document.getElementById(kind === "claude" ? "claude-action-result" : "opencode-action-result");
+  const result = document.getElementById(kind === "opencode" ? "opencode-action-result" : "claude-action-result");
   if (result) result.textContent = path.trim() ? "Saved command path. Refreshed detection using the saved path." : "Cleared command path. Refreshed automatic detection.";
 }
 
@@ -1301,6 +1332,7 @@ function renderError(message) {
   const error = document.querySelector("[data-error]");
   if (error) {
     error.textContent = message;
+    error.title = message;
   }
 }
 
@@ -1396,6 +1428,7 @@ function isAgentSetupSnapshot(value) {
     && typeof value.memoryStatus.claudeMdPath === "string"
     && typeof value.memoryStatus.openPetsMemoryPath === "string"
     && typeof value.commandPaths.claude === "string"
+    && typeof value.commandPaths.node === "string"
     && typeof value.commandPaths.opencode === "string";
 }
 

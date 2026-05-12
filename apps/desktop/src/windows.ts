@@ -594,11 +594,12 @@ function createAgentSetupHtml(definition: TaskWindowDefinition): string {
                   <select id="claude-pet-select" class="agent-select"></select>
                 </div>
 
-                <details class="agent-inline-details">
-                  <summary><span><small>Advanced detection</small><strong>Claude command path</strong></span></summary>
-                  <p class="agent-note">If Claude is not detected, paste the full path to the Claude executable or command shim. Leave blank for automatic PATH detection.</p>
-                  <div class="agent-path-row"><input id="claude-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/alvin/.local/bin/claude" /><button id="claude-command-path-save" class="agent-action secondary compact">Save path</button></div>
-                </details>
+                <section class="agent-command-paths" aria-labelledby="claude-command-paths-title">
+                  <div class="agent-command-paths-title"><small>Configuration</small><strong id="claude-command-paths-title">Command paths</strong></div>
+                  <p class="agent-note">If Claude or Node.js is not detected from the app, paste the full executable path. Leave blank for automatic PATH detection.</p>
+                  <label class="agent-subfield" for="claude-command-path"><span>Claude command</span><div class="agent-path-row"><input id="claude-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/alvin/.local/bin/claude" /><button id="claude-command-path-save" class="agent-action secondary compact">Save path</button></div></label>
+                  <label class="agent-subfield" for="node-command-path"><span>Node.js command</span><div class="agent-path-row"><input id="node-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/name/.nvm/versions/node/v22/bin/node" /><button id="node-command-path-save" class="agent-action secondary compact">Save path</button></div></label>
+                </section>
 
                 <label class="agent-mode-row dev-mode-row" hidden>
                   <span>
@@ -688,7 +689,7 @@ function createAgentSetupHtml(definition: TaskWindowDefinition): string {
                 <div class="agent-section-header"><span><small>Global connection</small><strong id="opencode-status-title">Checking setup…</strong></span><span id="opencode-status" class="agent-status-pill">Checking</span></div>
                 <p id="opencode-details" class="agent-note">Checking OpenCode…</p>
                 <div class="agent-control-group"><label class="agent-field-label" for="opencode-pet-select">Pet routing</label><select id="opencode-pet-select" class="agent-select"></select></div>
-                <details class="agent-inline-details"><summary><span><small>Advanced detection</small><strong>OpenCode command path</strong></span></summary><p class="agent-note">If OpenCode is not detected, paste the full path to the OpenCode executable or command shim. Leave blank for automatic PATH detection.</p><div class="agent-path-row"><input id="opencode-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/alvin/.opencode/bin/opencode" /><button id="opencode-command-path-save" class="agent-action secondary compact">Save path</button></div></details>
+                <section class="agent-command-paths" aria-labelledby="opencode-command-paths-title"><div class="agent-command-paths-title"><small>Configuration</small><strong id="opencode-command-paths-title">Command paths</strong></div><p class="agent-note">If OpenCode or Node.js is not detected from the app, paste the full executable path. Leave blank for automatic PATH detection.</p><label class="agent-subfield" for="opencode-command-path"><span>OpenCode command</span><div class="agent-path-row"><input id="opencode-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/alvin/.opencode/bin/opencode" /><button id="opencode-command-path-save" class="agent-action secondary compact">Save path</button></div></label><label class="agent-subfield" for="opencode-node-command-path"><span>Node.js command</span><div class="agent-path-row"><input id="opencode-node-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/name/.nvm/versions/node/v22/bin/node" /><button id="opencode-node-command-path-save" class="agent-action secondary compact">Save path</button></div></label></section>
                 <p class="agent-hook-warning warning">Desktop OpenCode setup is global and can affect every OpenCode project. For project-local setup, run <code>openpets configure --agent opencode --pet &lt;id&gt;</code>. OpenCode may need npm/network access to load the published OpenPets plugin unless it is already cached or installed.</p>
                 <div class="agent-actions agent-main-actions"><button id="opencode-install" class="agent-action primary">Install global setup</button><button id="opencode-remove" class="agent-action danger">Remove global setup</button><button id="opencode-refresh" class="agent-action secondary">Refresh</button></div>
                 <details class="agent-inline-details" open><summary><span><small>Preview</small><strong>Global OpenCode config</strong></span></summary><p id="opencode-paths" class="agent-note"></p><div class="agent-actions advanced-actions"><button id="opencode-copy-config" class="agent-action secondary compact">Copy config preview</button></div><pre id="opencode-json-preview" class="agent-preview-code json-preview" aria-label="OpenCode config preview" aria-live="polite"></pre></details>
@@ -917,7 +918,13 @@ function createTaskWindowStyles(): string {
     body[data-openpets-view="agent-setup"] .agent-field-label { display: block; margin: 0 0 8px; color: #102149; font-weight: 900; }
     body[data-openpets-view="agent-setup"] .agent-select { width: 100%; box-sizing: border-box; min-height: 42px; border: 1px solid rgba(126, 161, 210, 0.54); border-radius: 12px; background: rgba(255,255,255,0.82); color: #17284f; padding: 0 12px; font: inherit; outline: none; }
     body[data-openpets-view="agent-setup"] .agent-select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+    body[data-openpets-view="agent-setup"] .agent-command-paths { display: grid; gap: 10px; margin-top: 2px; padding: 14px; border: 1px solid rgba(126, 161, 210, 0.28); border-radius: 16px; background: rgba(239, 246, 255, 0.5); }
+    body[data-openpets-view="agent-setup"] .agent-command-paths-title { display: grid; gap: 4px; }
+    body[data-openpets-view="agent-setup"] .agent-command-paths-title small { color: #2478ff; font-size: 11px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
+    body[data-openpets-view="agent-setup"] .agent-command-paths-title strong { color: #102149; font-size: 15px; }
     body[data-openpets-view="agent-setup"] .agent-path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+    body[data-openpets-view="agent-setup"] .agent-subfield { display: grid; gap: 7px; margin-top: 10px; }
+    body[data-openpets-view="agent-setup"] .agent-subfield span { color: #102149; font-size: 12px; font-weight: 900; }
     body[data-openpets-view="agent-setup"] .agent-text-input { width: 100%; box-sizing: border-box; min-height: 38px; border: 1px solid rgba(126, 161, 210, 0.54); border-radius: 11px; background: rgba(255,255,255,0.82); color: #17284f; padding: 0 11px; font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; outline: none; }
     body[data-openpets-view="agent-setup"] .agent-text-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
     body[data-openpets-view="agent-setup"] .agent-mode-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 0; color: #17284f; }
@@ -962,7 +969,10 @@ function createTaskWindowStyles(): string {
     body[data-openpets-view="agent-setup"] .hook-actions { margin-top: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
     body[data-openpets-view="agent-setup"] .memory-actions { margin-top: 12px; }
     body[data-openpets-view="agent-setup"] .advanced-actions { margin-top: 12px; }
-    body[data-openpets-view="agent-setup"] [data-error] { position: fixed; left: 18px; right: 18px; bottom: 8px; margin: 0; color: #b91c1c; pointer-events: none; }
+    body[data-openpets-view="agent-setup"] [data-error] { position: fixed; left: 18px; right: 18px; bottom: 8px; max-height: 3.4em; overflow: hidden; margin: 0; color: #b91c1c; pointer-events: none; line-height: 1.35; text-overflow: ellipsis; }
+    body[data-openpets-view="agent-setup"] .connection-card.needs-command-path { border-color: rgba(239, 68, 68, 0.42); box-shadow: 0 16px 38px rgba(185, 28, 28, 0.12), 0 0 0 3px rgba(239, 68, 68, 0.08), inset 0 1px 0 rgba(255,255,255,0.94); }
+    body[data-openpets-view="agent-setup"] .agent-command-paths.needs-command-path { border-color: rgba(239, 68, 68, 0.44); background: rgba(254, 242, 242, 0.58); }
+    body[data-openpets-view="agent-setup"] .agent-command-paths.needs-command-path .agent-command-paths-title strong { color: #b91c1c; }
     @media (prefers-reduced-motion: reduce) { body[data-openpets-view="agent-setup"] .agent-action:hover:not(:disabled), body[data-openpets-view="agent-setup"] .agent-action:active:not(:disabled) { transform: none; } }
     @media (max-width: 980px) { body[data-openpets-view="agent-setup"] .integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 860px) { body[data-openpets-view="agent-setup"] { overflow: auto; } body[data-openpets-view="agent-setup"] .agent-shell { height: auto; min-height: calc(100vh - 36px); overflow: visible; } body[data-openpets-view="agent-setup"] .integrations-view, body[data-openpets-view="agent-setup"] .claude-detail-view { height: auto; overflow: visible; } body[data-openpets-view="agent-setup"] .integration-grid { overflow: visible; } }

@@ -39,6 +39,10 @@ assert.equal(bundledPreview.mcpJson.mcpServers.openpets.command, "node");
 assert.deepEqual(bundledPreview.mcpJson.mcpServers.openpets.args, [getBundledMcpEntryPath(), "--pet", "snoopy"]);
 const bundledGet = parseClaudeMcpGetOutput(JSON.stringify({ command: "node", args: [getBundledMcpEntryPath(), "--pet", "snoopy"] }), "snoopy", "bundled");
 assert.equal(bundledGet.matchesExpected, true);
+const customNode = "/Users/test/Library/Application Support/Herd/config/nvm/versions/node/v22.22.2/bin/node";
+const customNodePreview = buildClaudeMcpPreview("snoopy", "bundled", customNode);
+assert.equal(customNodePreview.mcpJson.mcpServers.openpets.command, customNode);
+assert.equal(parseClaudeMcpGetOutput(JSON.stringify({ command: customNode, args: [getBundledMcpEntryPath(), "--pet", "snoopy"] }), "snoopy", "bundled", customNode).matchesExpected, true);
 
 const spacedPath = "/Applications/OpenPets Test.app/Contents/Resources/app/node_modules/@open-pets/mcp/dist/index.js";
 assert.equal(formatCommandForDisplay({ command: "node", args: [spacedPath, "--pet", "snoopy"] }), 'node "/Applications/OpenPets Test.app/Contents/Resources/app/node_modules/@open-pets/mcp/dist/index.js" --pet snoopy');

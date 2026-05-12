@@ -37,6 +37,7 @@ export interface OpenPetsStateV1 {
     readonly petScale: number;
     readonly onboardingCompleted: boolean;
     readonly claudeCommandPath?: string;
+    readonly nodeCommandPath?: string;
     readonly opencodeCommandPath?: string;
   };
   readonly pets: {
@@ -292,6 +293,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     petScale: normalizePetScale(value.petScale),
     onboardingCompleted: normalizeOnboardingCompleted(value),
     claudeCommandPath: normalizeCommandPath(value.claudeCommandPath),
+    nodeCommandPath: normalizeCommandPath(value.nodeCommandPath),
     opencodeCommandPath: normalizeCommandPath(value.opencodeCommandPath),
   };
 }
@@ -357,6 +359,7 @@ function createDefaultState(): OpenPetsStateV1 {
       petScale: defaultPetScale,
       onboardingCompleted: false,
       claudeCommandPath: undefined,
+      nodeCommandPath: undefined,
       opencodeCommandPath: undefined,
     },
     pets: {

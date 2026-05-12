@@ -50,6 +50,7 @@ export interface AgentSetupSnapshot {
 
 export interface AgentSetupCommandPaths {
   readonly claude: string;
+  readonly node: string;
   readonly opencode: string;
 }
 
@@ -136,10 +137,11 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
 export function updateAgentSetupCommandPaths(patch: unknown): AgentSetupCommandPaths {
   if (!isRecord(patch)) throw new Error("Invalid command path settings.");
   for (const key of Object.keys(patch)) {
-    if (key !== "claude" && key !== "opencode") throw new Error("Invalid command path setting.");
+    if (key !== "claude" && key !== "node" && key !== "opencode") throw new Error("Invalid command path setting.");
   }
   const updates: Writable<Partial<OpenPetsStateV1["preferences"]>> = {};
   if ("claude" in patch) updates.claudeCommandPath = normalizeOptionalCommandPath(patch.claude, "Claude");
+  if ("node" in patch) updates.nodeCommandPath = normalizeOptionalCommandPath(patch.node, "Node.js");
   if ("opencode" in patch) updates.opencodeCommandPath = normalizeOptionalCommandPath(patch.opencode, "OpenCode");
   updatePreferences(updates);
   return getAgentSetupCommandPaths();
@@ -175,7 +177,7 @@ export function sanitizeAgentSetupOutput(value: string): string {
 
 function safeBuildClaudeMcpPreview(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): { readonly preview: ClaudeMcpPreview; readonly error?: string } {
   try {
-    return { preview: withPreferredClaudeCommand(buildClaudeMcpPreview(selectedPetId, commandMode)) };
+    return { preview: withPreferredClaudeCommand(buildClaudeMcpPreview(selectedPetId, commandMode, getPreferredNodeCommand())) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Packaged OpenPets command resources are unavailable.";
     return { preview: createErrorPreview(commandMode, message), error: message };
@@ -184,7 +186,7 @@ function safeBuildClaudeMcpPreview(selectedPetId: string | undefined, commandMod
 
 function safeDoctorClaudeHooks(commandMode: OpenPetsCommandMode, selectedPetId: string | undefined): ClaudeHookDoctorResult {
   try {
-    return doctorClaudeHooks(undefined, commandMode, selectedPetId);
+    return doctorClaudeHooks(undefined, commandMode, selectedPetId, getPreferredNodeCommand());
   } catch (error) {
     return createHookErrorStatus(error instanceof Error ? error.message : "Packaged OpenPets hook resources are unavailable.");
   }
@@ -247,8 +249,8 @@ async function runAction(action: AgentSetupAction, selectedPetId: string | undef
     return runRemove(createErrorPreview(commandMode, ""), selectedPetId, "Unknown", action);
   }
   if (commandMode === "bundled") {
-    const node = await runCommand({ command: "node", args: ["--version"] });
-    if (!node.ok) return { ok: false, action, message: `Packaged OpenPets Claude commands require node on Claude's PATH: ${summarizeCommandResult(node)}`, changed: false };
+    const node = await runCommand({ command: getPreferredNodeCommand(), args: ["--version"] });
+    if (!node.ok) return { ok: false, action, message: `Node.js is required for packaged OpenPets commands. Open Claude configuration, set the Node.js command path, then try again. ${summarizeCommandResult(node)}`, changed: false };
   }
   const previewResult = safeBuildClaudeMcpPreview(selectedPetId, commandMode);
   if (previewResult.error) return { ok: false, action, message: previewResult.error, changed: false };
@@ -256,7 +258,7 @@ async function runAction(action: AgentSetupAction, selectedPetId: string | undef
   if (action === "install-hooks") {
     let result;
     try {
-      result = installClaudeHooks(undefined, commandMode, selectedPetId);
+      result = installClaudeHooks(undefined, commandMode, selectedPetId, getPreferredNodeCommand());
     } catch (error) {
       return { ok: false, action, message: error instanceof Error ? error.message : "OpenPets hook install failed.", changed: false };
     }
@@ -340,12 +342,17 @@ function getAgentSetupCommandPaths(): AgentSetupCommandPaths {
   const preferences = getAppStateSnapshot().preferences;
   return {
     claude: preferences.claudeCommandPath ?? "",
+    node: preferences.nodeCommandPath ?? "",
     opencode: preferences.opencodeCommandPath ?? "",
   };
 }
 
 function getPreferredClaudeCommand(): string {
   return getAppStateSnapshot().preferences.claudeCommandPath || "claude";
+}
+
+function getPreferredNodeCommand(): string {
+  return getAppStateSnapshot().preferences.nodeCommandPath || "node";
 }
 
 function getPreferredOpenCodeCommand(): string {
@@ -389,8 +396,8 @@ function safePrepareOpenCode(configDir: string, selectedPetId: string | undefine
 
 async function installOpenCodeGlobal(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
   if (commandMode === "bundled") {
-    const node = await runCommand({ command: "node", args: ["--version"] });
-    if (!node.ok) return { ok: false, action: "opencode-install", message: `Packaged OpenPets OpenCode setup requires node on OpenCode's PATH: ${summarizeCommandResult(node)}`, changed: false };
+    const node = await runCommand({ command: getPreferredNodeCommand(), args: ["--version"] });
+    if (!node.ok) return { ok: false, action: "opencode-install", message: `Node.js is required for packaged OpenPets commands. Open OpenCode configuration, set the Node.js command path, then try again. ${summarizeCommandResult(node)}`, changed: false };
   }
   try {
     const configDir = getGlobalOpenCodeConfigDir(process.env, app.getPath("home"), process.platform);
@@ -486,8 +493,8 @@ function safeUninstallClaudeMemory(): { readonly ok: true; readonly message: str
 
 async function detectClaudeCodeStatus(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<ClaudeCodeStatus> {
   if (commandMode === "bundled") {
-    const node = await runCommand({ command: "node", args: ["--version"] });
-    if (!node.ok) return createStatus("error", "Node required", `Packaged OpenPets Claude commands require node on Claude's PATH: ${summarizeCommandResult(node)}`, undefined, node, { present: false, source: "none", verified: false, matchesExpected: false });
+    const node = await runCommand({ command: getPreferredNodeCommand(), args: ["--version"] });
+    if (!node.ok) return createStatus("error", "Node required", `Node.js is required for packaged OpenPets commands. Open Claude configuration, expand Advanced detection, set the Node.js command path, then try again. ${summarizeCommandResult(node)}`, undefined, node, { present: false, source: "none", verified: false, matchesExpected: false });
   }
 
   const version = await runClaudeCommand({ command: "claude", args: ["--version"] });
@@ -501,11 +508,11 @@ async function detectClaudeCodeStatus(selectedPetId: string | undefined, command
     return createStatus("error", "Error / needs attention", `Claude Code was detected, but MCP status failed: ${summarizeCommandResult(list)}`, sanitizeAgentSetupOutput(version.stdout || version.stderr), list, { present: false, source: "none", verified: false, matchesExpected: false });
   }
 
-  const listed = classifyClaudeMcpStatus(list.stdout, undefined, selectedPetId, commandMode);
+  const listed = classifyClaudeMcpStatus(list.stdout, undefined, selectedPetId, commandMode, getPreferredNodeCommand());
   let entry = listed;
   if (listed.present) {
     const get = await runClaudeCommand(buildClaudeMcpGetCommand());
-    if (get.ok) entry = classifyClaudeMcpStatus(list.stdout, get.stdout, selectedPetId, commandMode);
+    if (get.ok) entry = classifyClaudeMcpStatus(list.stdout, get.stdout, selectedPetId, commandMode, getPreferredNodeCommand());
   }
 
   if (!entry.present) return createStatus("needs_setup", "Needs setup", "Claude Code is detected, but OpenPets MCP is not configured.", sanitizeAgentSetupOutput(version.stdout || version.stderr), list, entry);
