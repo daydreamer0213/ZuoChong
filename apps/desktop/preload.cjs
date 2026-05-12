@@ -3,7 +3,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 const api = {
   getState: () => ipcRenderer.invoke("openpets:get-state"),
   getCatalog: () => ipcRenderer.invoke("openpets:get-catalog"),
-  getCatalogPage: (pageIndex) => ipcRenderer.invoke("openpets:get-catalog-page", pageIndex),
   getCodexPets: () => ipcRenderer.invoke("openpets:get-codex-pets"),
   updatePreferences: (patch) => ipcRenderer.invoke("openpets:update-preferences", patch),
   getLaunchAtLogin: () => ipcRenderer.invoke("openpets:get-launch-at-login"),
@@ -37,10 +36,6 @@ let activePetManagerSelection = "";
 let activePetManagerFilter = "all";
 let activePetManagerItems = [];
 let activePetManagerDefaultId = "";
-let activePetManagerCatalogState = null;
-let activePetManagerCodexState = null;
-let activePetManagerAppState = null;
-let activePetManagerLoadingPage = false;
 
 contextBridge.exposeInMainWorld("openPets", api);
 contextBridge.exposeInMainWorld("openpetsAgentSetup", agentSetupApi);
@@ -617,9 +612,6 @@ async function copyText(text, resultId = "claude-action-result", successMessage 
 async function renderPetManager(state) {
   const defaultPetId = state.preferences.defaultPetId;
   const [catalogState, codexState] = await Promise.all([api.getCatalog(), api.getCodexPets()]);
-  activePetManagerCatalogState = catalogState;
-  activePetManagerCodexState = codexState;
-  activePetManagerAppState = state;
   renderPetGallery(catalogState, codexState, state, defaultPetId);
 }
 
@@ -638,12 +630,10 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
     return;
   }
 
-  const sourceLabel = catalogState.source === "remote" ? catalogState.version === 3 ? "Live v3" : "Live" : catalogState.source === "fixture" ? "Fixture" : "Error";
+  const sourceLabel = catalogState.source === "remote" ? "Live" : catalogState.source === "fixture" ? "Fixture" : "Error";
   const codexLabel = codexState.error ? "Codex unavailable" : `${codexState.pets.length} Codex`;
-  const totalLabel = catalogState.v3 ? `${catalogState.pets.length}/${catalogState.v3.total} pets` : `${catalogState.pets.length} pets`;
-  status.textContent = catalogState.error ? `${sourceLabel}: ${catalogState.error} · ${codexLabel}` : `${sourceLabel}: ${totalLabel} · ${codexLabel}`;
+  status.textContent = catalogState.error ? `${sourceLabel}: ${catalogState.error} · ${codexLabel}` : `${sourceLabel}: ${catalogState.pets.length} pets · ${codexLabel}`;
   status.className = `pm-status-pill ${catalogState.error || codexState.error ? "error" : "success"}`;
-  updateCategoryFilterAvailability(catalogState);
   const pets = createPetManagerItems(catalogState, codexState, state, defaultPetId, defaultThumbnailSrc);
   activePetManagerItems = pets;
   activePetManagerDefaultId = defaultPetId;
@@ -670,7 +660,6 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
     const visiblePets = pets.filter((pet) => {
       if (activePetManagerFilter === "installed" && !pet.installed) return false;
       if (activePetManagerFilter === "codex" && !pet.codexPet && !pet.codexImported) return false;
-      if ((activePetManagerFilter === "western" || activePetManagerFilter === "asian") && pet.category !== activePetManagerFilter) return false;
       const haystack = `${pet.id} ${pet.displayName} ${pet.description}`.toLowerCase();
       return haystack.includes(query);
     });
@@ -688,20 +677,6 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
       grid.append(empty);
     }
 
-    if (catalogState.v3?.hasMore) {
-      const hint = document.createElement("div");
-      hint.className = "pm-page-hint";
-      hint.textContent = "Showing loaded pets only. Load more to continue browsing and filtering the full catalog.";
-      grid.append(hint);
-      const loadMore = document.createElement("button");
-      loadMore.className = "pm-load-more";
-      loadMore.type = "button";
-      loadMore.textContent = activePetManagerLoadingPage ? "Loading…" : "Load more pets";
-      loadMore.disabled = activePetManagerLoadingPage;
-      loadMore.addEventListener("click", () => { void loadNextCatalogPage(); });
-      grid.append(loadMore);
-    }
-
     const selected = visiblePets.find((pet) => pet.id === activePetManagerSelection) || visiblePets[0] || pets.find((pet) => pet.id === activePetManagerSelection) || pets[0];
     if (selected) {
       renderPetDetail(detail, selected, defaultPetId);
@@ -710,36 +685,6 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
 
   search.oninput = render;
   render();
-}
-
-function updateCategoryFilterAvailability(catalogState) {
-  const v3Available = catalogState.version === 3 && catalogState.v3;
-  for (const id of ["western", "asian"]) {
-    const button = document.querySelector(`[data-pet-filter="${id}"]`);
-    if (!(button instanceof HTMLButtonElement)) continue;
-    button.hidden = !v3Available;
-    button.disabled = !v3Available;
-  }
-  if (!v3Available && (activePetManagerFilter === "western" || activePetManagerFilter === "asian")) activePetManagerFilter = "all";
-}
-
-async function loadNextCatalogPage() {
-  if (activePetManagerLoadingPage || !activePetManagerCatalogState?.v3) return;
-  const loaded = activePetManagerCatalogState.v3.loadedPages || [];
-  const nextPage = loaded.length ? Math.max(...loaded) + 1 : 0;
-  activePetManagerLoadingPage = true;
-  try {
-    const catalogState = await api.getCatalogPage(nextPage);
-    activePetManagerCatalogState = catalogState;
-    activePetManagerLoadingPage = false;
-    if (activePetManagerCodexState && activePetManagerAppState) {
-      renderPetGallery(catalogState, activePetManagerCodexState, activePetManagerAppState, activePetManagerAppState.preferences.defaultPetId);
-    }
-  } catch (error) {
-    renderCaughtError(error);
-  } finally {
-    activePetManagerLoadingPage = false;
-  }
 }
 
 function createPetManagerItems(catalogState, codexState, state, defaultPetId, defaultThumbnailSrc) {
@@ -769,11 +714,8 @@ function createPetManagerItems(catalogState, codexState, state, defaultPetId, de
 }
 
 function createPetManagerItem(id, displayName, description, installed, catalogPet, codexPet, codexImported, defaultPetId, defaultThumbnailSrc) {
-  const catalogPreview = catalogPet?.thumbnail || catalogPet?.preview || "";
-  const installedPreview = installed?.source?.kind !== "codex" && isAllowedCatalogPreview(installed?.source?.preview) ? installed.source.preview : "";
-  const preview = codexPet?.preview || (catalogPet && isAllowedCatalogPreview(catalogPreview) ? catalogPreview : "") || installedPreview;
+  const preview = codexPet?.preview || (catalogPet && isAllowedCatalogPreview(catalogPet.preview) ? catalogPet.preview : "");
   const usesThumbnail = Boolean(installed?.builtIn && defaultThumbnailSrc);
-  const previewIsThumbnail = usesThumbnail || Boolean(catalogPet?.thumbnail) || Boolean(installedPreview && installed?.source?.catalogVersion === 3 && preview === installedPreview);
   return {
     id,
     displayName,
@@ -783,9 +725,8 @@ function createPetManagerItem(id, displayName, description, installed, catalogPe
     codexPet,
     codexImported,
     previewSrc: usesThumbnail ? defaultThumbnailSrc : preview,
-    previewIsSpriteSheet: !previewIsThumbnail,
+    previewIsSpriteSheet: !usesThumbnail,
     isDefault: id === defaultPetId,
-    category: catalogPet?.category || "",
     protected: Boolean(installed?.protected),
     broken: Boolean(installed?.broken),
     brokenReason: installed?.brokenReason || "",
