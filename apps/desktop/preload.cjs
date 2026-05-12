@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 const api = {
   getState: () => ipcRenderer.invoke("openpets:get-state"),
   getCatalog: () => ipcRenderer.invoke("openpets:get-catalog"),
+  getCatalogPage: (page) => ipcRenderer.invoke("openpets:get-catalog-page", page),
+  getCatalogSearch: () => ipcRenderer.invoke("openpets:get-catalog-search"),
   getCodexPets: () => ipcRenderer.invoke("openpets:get-codex-pets"),
   updatePreferences: (patch) => ipcRenderer.invoke("openpets:update-preferences", patch),
   getLaunchAtLogin: () => ipcRenderer.invoke("openpets:get-launch-at-login"),
@@ -630,11 +632,17 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
     return;
   }
 
-  const sourceLabel = catalogState.source === "remote" ? "Live" : catalogState.source === "fixture" ? "Fixture" : "Error";
-  const codexLabel = codexState.error ? "Codex unavailable" : `${codexState.pets.length} Codex`;
-  status.textContent = catalogState.error ? `${sourceLabel}: ${catalogState.error} · ${codexLabel}` : `${sourceLabel}: ${catalogState.pets.length} pets · ${codexLabel}`;
+  status.textContent = catalogState.error ? "Catalog unavailable" : `${catalogState.total || catalogState.pets.length} pets`;
+  if (catalogState.error) status.title = catalogState.error;
   status.className = `pm-status-pill ${catalogState.error || codexState.error ? "error" : "success"}`;
-  const pets = createPetManagerItems(catalogState, codexState, state, defaultPetId, defaultThumbnailSrc);
+  let catalogPets = [...catalogState.pets];
+  const loadedCatalogPages = new Set(Number.isInteger(catalogState.page) ? [catalogState.page] : []);
+  const catalogPageCount = catalogState.pageCount || 1;
+  let catalogSearchState = null;
+  let remoteResultLimit = 100;
+  let activeRemoteResultIds = null;
+  let activeRemoteHasMore = false;
+  let pets = createPetManagerItems({ ...catalogState, pets: catalogPets }, codexState, state, defaultPetId, defaultThumbnailSrc);
   activePetManagerItems = pets;
   activePetManagerDefaultId = defaultPetId;
   if (!activePetManagerSelection || !pets.some((pet) => pet.id === activePetManagerSelection)) {
@@ -642,25 +650,84 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
   }
 
   for (const filter of document.querySelectorAll("[data-pet-filter]")) {
+    if ((filter.dataset.petFilter === "western" || filter.dataset.petFilter === "asian") && !catalogState.supportsCategories) {
+      filter.hidden = true;
+      if (activePetManagerFilter === filter.dataset.petFilter) activePetManagerFilter = "all";
+    } else {
+      filter.hidden = false;
+    }
     filter.classList.toggle("active", filter.dataset.petFilter === activePetManagerFilter);
     filter.setAttribute("aria-pressed", filter.dataset.petFilter === activePetManagerFilter ? "true" : "false");
     filter.onclick = () => {
       activePetManagerFilter = filter.dataset.petFilter || "all";
-      render();
+      remoteResultLimit = 100;
+      void render();
     };
   }
 
-  const render = () => {
+  const loadCatalogPage = async (page) => {
+    if (loadedCatalogPages.has(page)) return;
+    const pageState = await api.getCatalogPage(page);
+    if (!isCatalogUiState(pageState) || pageState.source === "error") throw new Error(pageState?.error || "Catalog page unavailable.");
+    loadedCatalogPages.add(page);
+    const known = new Set(catalogPets.map((pet) => pet.id));
+    catalogPets = [...catalogPets, ...pageState.pets.filter((pet) => !known.has(pet.id))];
+    pets = createPetManagerItems({ ...catalogState, pets: catalogPets }, codexState, state, defaultPetId, defaultThumbnailSrc);
+    activePetManagerItems = pets;
+  };
+
+  const loadNextCatalogPage = async () => {
+    for (let page = 0; page < catalogPageCount; page += 1) {
+      if (!loadedCatalogPages.has(page)) {
+        await loadCatalogPage(page);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const shouldUseRemoteResults = (query) => catalogState.version === 3 && (Boolean(query) || activePetManagerFilter === "western" || activePetManagerFilter === "asian");
+
+  const ensureRemoteResultsLoaded = async (query) => {
+    activeRemoteResultIds = null;
+    activeRemoteHasMore = false;
+    if (!shouldUseRemoteResults(query)) return;
+    catalogSearchState ||= await api.getCatalogSearch();
+    if (!isCatalogSearchUiState(catalogSearchState) || catalogSearchState.source === "error") throw new Error(catalogSearchState?.error || "Catalog search unavailable.");
+    const matches = catalogSearchState.pets.filter((pet) => {
+      if (activePetManagerFilter !== "all" && activePetManagerFilter !== "installed" && activePetManagerFilter !== "codex" && pet.category !== activePetManagerFilter) return false;
+      return !query || pet.searchText.includes(query);
+    });
+    const visibleMatches = matches.slice(0, remoteResultLimit);
+    activeRemoteResultIds = new Set(visibleMatches.map((pet) => pet.id));
+    activeRemoteHasMore = matches.length > visibleMatches.length;
+    const pages = new Set(visibleMatches.map((pet) => pet.catalogPage));
+    await Promise.all([...pages].map((page) => loadCatalogPage(page)));
+  };
+
+  const render = async () => {
     for (const filter of document.querySelectorAll("[data-pet-filter]")) {
       filter.classList.toggle("active", filter.dataset.petFilter === activePetManagerFilter);
       filter.setAttribute("aria-pressed", filter.dataset.petFilter === activePetManagerFilter ? "true" : "false");
     }
 
     const query = search.value.trim().toLowerCase();
+    if (shouldUseRemoteResults(query)) {
+      try {
+        await ensureRemoteResultsLoaded(query);
+      } catch (error) {
+        renderCaughtError(error);
+      }
+    }
     const visiblePets = pets.filter((pet) => {
       if (activePetManagerFilter === "installed" && !pet.installed) return false;
       if (activePetManagerFilter === "codex" && !pet.codexPet && !pet.codexImported) return false;
+      if ((activePetManagerFilter === "western" || activePetManagerFilter === "asian") && pet.category !== activePetManagerFilter) return false;
       const haystack = `${pet.id} ${pet.displayName} ${pet.description}`.toLowerCase();
+      if (activeRemoteResultIds) {
+        const remoteMatch = Boolean(pet.catalogPet && activeRemoteResultIds.has(pet.id));
+        return query ? remoteMatch || haystack.includes(query) : remoteMatch;
+      }
       return haystack.includes(query);
     });
 
@@ -673,8 +740,37 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
     if (visiblePets.length === 0) {
       const empty = document.createElement("div");
       empty.className = "pm-empty-state";
-      empty.textContent = activePetManagerFilter === "installed" ? "No installed pets match your search." : activePetManagerFilter === "codex" ? "No Codex pets match your search." : "No pets match your search.";
+      empty.textContent = activePetManagerFilter === "installed" ? "No installed pets match your search." : activePetManagerFilter === "codex" ? "No Codex pets match your search." : activePetManagerFilter === "western" || activePetManagerFilter === "asian" ? `No ${activePetManagerFilter} pets match your search.` : "No pets match your search.";
       grid.append(empty);
+    }
+
+    const hasMoreCatalogPages = catalogState.version === 3 && !query && !shouldUseRemoteResults(query) && loadedCatalogPages.size < catalogPageCount;
+    const hasMoreRemoteResults = activeRemoteHasMore;
+    if (hasMoreCatalogPages || hasMoreRemoteResults) {
+      const loadMore = document.createElement("button");
+      loadMore.className = "pm-load-more";
+      loadMore.type = "button";
+      loadMore.textContent = "Load more pets";
+      loadMore.onclick = async () => {
+        loadMore.disabled = true;
+        loadMore.textContent = "Loading…";
+        try {
+          if (hasMoreRemoteResults) {
+            remoteResultLimit += 100;
+          } else {
+            await loadNextCatalogPage();
+          }
+          await render();
+        } catch (error) {
+          renderCaughtError(error);
+          loadMore.disabled = false;
+          loadMore.textContent = "Load more pets";
+        }
+      };
+      const wrapper = document.createElement("div");
+      wrapper.className = "pm-load-more-wrap";
+      wrapper.append(loadMore);
+      grid.append(wrapper);
     }
 
     const selected = visiblePets.find((pet) => pet.id === activePetManagerSelection) || visiblePets[0] || pets.find((pet) => pet.id === activePetManagerSelection) || pets[0];
@@ -683,17 +779,21 @@ function renderPetGallery(catalogState, codexState, state, defaultPetId) {
     }
   };
 
-  search.oninput = render;
-  render();
+  search.oninput = () => {
+    remoteResultLimit = 100;
+    void render();
+  };
+  void render();
 }
 
 function createPetManagerItems(catalogState, codexState, state, defaultPetId, defaultThumbnailSrc) {
   const installedById = new Map(state.pets.installed.map((pet) => [pet.id, pet]));
+  const catalogById = new Map(catalogState.pets.map((pet) => [pet.id, pet]));
   const codexById = new Map(codexState.pets.map((pet) => [pet.id, pet]));
   const items = [];
 
   for (const installed of state.pets.installed) {
-    const catalogPet = catalogState.pets.find((pet) => pet.id === installed.id);
+    const catalogPet = catalogById.get(installed.id) || null;
     const codexPet = codexById.get(installed.id) || null;
     const codexImported = installed.source?.kind === "codex";
     items.push(createPetManagerItem(installed.id, installed.displayName, installed.description || catalogPet?.description || codexPet?.description || "A friendly coding companion.", installed, catalogPet, codexPet, codexImported, defaultPetId, defaultThumbnailSrc));
@@ -706,7 +806,7 @@ function createPetManagerItems(catalogState, codexState, state, defaultPetId, de
   }
 
   for (const codexPet of codexState.pets) {
-    if (installedById.has(codexPet.id) || catalogState.pets.some((pet) => pet.id === codexPet.id)) continue;
+    if (installedById.has(codexPet.id) || catalogById.has(codexPet.id)) continue;
     items.push(createPetManagerItem(codexPet.id, codexPet.displayName, codexPet.description || "A local Codex companion.", null, null, codexPet, false, defaultPetId, defaultThumbnailSrc));
   }
 
@@ -714,18 +814,25 @@ function createPetManagerItems(catalogState, codexState, state, defaultPetId, de
 }
 
 function createPetManagerItem(id, displayName, description, installed, catalogPet, codexPet, codexImported, defaultPetId, defaultThumbnailSrc) {
-  const preview = codexPet?.preview || (catalogPet && isAllowedCatalogPreview(catalogPet.preview) ? catalogPet.preview : "");
+  const catalogThumbnail = catalogPet && isAllowedCatalogPreview(catalogPet.preview) ? catalogPet.preview : "";
+  const catalogSpritesheet = catalogPet && isAllowedCatalogPreview(catalogPet.spritesheet) ? catalogPet.spritesheet : "";
+  const preview = codexPet?.preview || catalogThumbnail;
+  const detailPreview = codexPet?.preview || catalogSpritesheet || catalogThumbnail;
   const usesThumbnail = Boolean(installed?.builtIn && defaultThumbnailSrc);
+  const cardUsesThumbnail = usesThumbnail || Boolean(catalogSpritesheet && catalogThumbnail && preview === catalogThumbnail && !codexPet);
   return {
     id,
     displayName,
     description,
+    category: catalogPet?.category || "",
     installed,
     catalogPet,
     codexPet,
     codexImported,
     previewSrc: usesThumbnail ? defaultThumbnailSrc : preview,
-    previewIsSpriteSheet: !usesThumbnail,
+    detailPreviewSrc: usesThumbnail ? defaultThumbnailSrc : detailPreview,
+    previewIsSpriteSheet: !cardUsesThumbnail,
+    detailPreviewIsSpriteSheet: !usesThumbnail,
     isDefault: id === defaultPetId,
     protected: Boolean(installed?.protected),
     broken: Boolean(installed?.broken),
@@ -816,7 +923,7 @@ function renderPetDetail(container, pet, defaultPetId) {
 
   const stage = document.createElement("div");
   stage.className = "pm-hero-stage";
-  stage.append(createSpriteFrame("pm-preview-sprite", pet.previewSrc, pet.displayName, { animated: true, isSpriteSheet: pet.previewIsSpriteSheet, state: "idle" }));
+  stage.append(createSpriteFrame("pm-preview-sprite", pet.detailPreviewSrc || pet.previewSrc, pet.displayName, { animated: true, isSpriteSheet: pet.detailPreviewIsSpriteSheet, state: "idle" }));
   container.append(stage);
 
   const status = document.createElement("p");
@@ -841,7 +948,7 @@ function renderPetDetail(container, pet, defaultPetId) {
   for (const preview of [{ label: "Thinking", state: "thinking" }, { label: "Happy", state: "happy" }, { label: "Wave", state: "wave" }]) {
     const mini = document.createElement("div");
     mini.className = "pm-mini";
-    mini.append(createSpriteFrame("pm-mini-sprite", pet.previewSrc, pet.displayName, { animated: true, isSpriteSheet: pet.previewIsSpriteSheet, state: preview.state }));
+    mini.append(createSpriteFrame("pm-mini-sprite", pet.detailPreviewSrc || pet.previewSrc, pet.displayName, { animated: true, isSpriteSheet: pet.detailPreviewIsSpriteSheet, state: preview.state }));
     const text = document.createElement("span");
     text.textContent = preview.label;
     mini.append(text);
@@ -1248,6 +1355,12 @@ function isLaunchAtLoginState(value) {
 function isCatalogUiState(value) {
   return isRecord(value)
     && (value.source === "remote" || value.source === "fixture" || value.source === "error")
+    && Array.isArray(value.pets);
+}
+
+function isCatalogSearchUiState(value) {
+  return isRecord(value)
+    && (value.source === "remote" || value.source === "error")
     && Array.isArray(value.pets);
 }
 

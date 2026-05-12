@@ -8,8 +8,7 @@ import yauzl from "yauzl";
 import type { Entry, ZipFile } from "yauzl";
 
 import { getAppStateSnapshot, installPetState, removePetState, setDefaultPet, type OpenPetsStateV1 } from "./app-state.js";
-import { getCatalogUiState } from "./catalog.js";
-import type { CatalogPetV2 } from "./catalog-validation.js";
+import { getCatalogPet } from "./catalog.js";
 import { builtInPet } from "./built-in-pet.js";
 import { assertInsideRoot, assertSafePetId, getInstalledPetDir, getPetsRoot } from "./pet-paths.js";
 import { assertOutputPathInside, hasSupportedZipMagic, ZipEntryPathTracker } from "./zip-safety.js";
@@ -104,15 +103,6 @@ export async function withPetOperation<T>(key: string, callback: () => Promise<T
   } finally {
     operations.delete(key);
   }
-}
-
-async function getCatalogPet(petId: string): Promise<CatalogPetV2> {
-  const catalog = await getCatalogUiState();
-  const pet = catalog.pets.find((candidate) => candidate.id === petId);
-  if (!pet) {
-    throw new Error(`Pet is not available in the validated catalog: ${petId}`);
-  }
-  return pet;
 }
 
 async function downloadPetZip(zipUrl: string): Promise<Buffer> {
