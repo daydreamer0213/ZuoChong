@@ -118,11 +118,21 @@ function installPetContextMenu(window: BrowserWindow, action: { readonly label: 
 
 function installMousePassthroughAndDrag(window: BrowserWindow): void {
   let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number } | null = null;
+  const canForwardMouseEvents = process.platform === "darwin" || process.platform === "win32";
 
   const isFromWindow = (event: IpcMainEvent): boolean => event.sender === window.webContents;
   const setPassthrough = (passthrough: boolean): void => {
     if (window.isDestroyed()) return;
-    if (passthrough) window.setIgnoreMouseEvents(true, { forward: true });
+    if (process.platform === "linux") {
+      // Electron does not support forwarded mouse events on Linux, so ignored
+      // windows cannot receive the renderer events required to start dragging.
+      // Keep Linux pet windows interactive; this trades click-through for reliable drag.
+      window.setIgnoreMouseEvents(false);
+      return;
+    }
+
+    if (passthrough && canForwardMouseEvents) window.setIgnoreMouseEvents(true, { forward: true });
+    else if (passthrough) window.setIgnoreMouseEvents(true);
     else window.setIgnoreMouseEvents(false);
   };
 
@@ -192,7 +202,9 @@ function createBasePetWindow(title: string, position: Point): BrowserWindow {
   });
 
   window.setMenu(null);
-  window.setAlwaysOnTop(true, "floating");
+  applyPetAlwaysOnTop(window);
+  window.on("show", () => applyPetAlwaysOnTop(window));
+  window.on("restore", () => applyPetAlwaysOnTop(window));
 
   // Show the pet window on all macOS Spaces (desktop workspaces).
   // Without this, the window is bound to the Space where it was created
@@ -217,6 +229,16 @@ function createBasePetWindow(title: string, position: Point): BrowserWindow {
   });
 
   return window;
+}
+
+function applyPetAlwaysOnTop(window: BrowserWindow): void {
+  if (window.isDestroyed()) return;
+
+  window.setAlwaysOnTop(true, process.platform === "linux" ? "screen-saver" : "floating");
+
+  if (process.platform === "linux") {
+    window.setVisibleOnAllWorkspaces(true);
+  }
 }
 
 export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null): Promise<void> {
