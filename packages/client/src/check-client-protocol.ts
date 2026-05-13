@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { validateDiscovery } from "./discovery.js";
+import { parseIpcEndpoint, validateDiscovery } from "./discovery.js";
 import { parsePetInstallResult, parsePetListResult } from "./index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "./protocol.js";
 
@@ -15,10 +15,21 @@ const baseDiscovery = {
 };
 
 validateDiscovery(baseDiscovery);
+validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" });
+assert.deepEqual(parseIpcEndpoint("tcp://127.0.0.1:37645"), { kind: "tcp", host: "127.0.0.1", port: 37645 });
 assertRejects(() => validateDiscovery({ ...baseDiscovery, protocol: "http" }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, protocolVersion: 2 }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "127.0.0.1:1234" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://localhost:37645" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://0.0.0.0:37645" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:0" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645/path" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://user:pass@127.0.0.1:37645" }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, platform: "freebsd" }));
+if (process.platform === "linux") {
+  validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645", platform: "win32" });
+  assertRejects(() => validateDiscovery({ ...baseDiscovery, platform: "win32" }));
+}
 assertRejects(() => validateReaction("bad"));
 assert.equal(validateReaction("waving"), "waving");
 

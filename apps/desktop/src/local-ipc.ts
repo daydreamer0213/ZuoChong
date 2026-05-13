@@ -6,7 +6,7 @@ import { getAppStateSnapshot } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
-import { cleanupUnixSocket, createIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
+import { cleanupUnixSocket, createIpcEndpoint, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet } from "./pet-installation.js";
 
@@ -27,17 +27,18 @@ export async function startLocalIpcServer(): Promise<void> {
   if (ipcServer) return;
 
   const endpoint = createIpcEndpoint();
+  const parsedEndpoint = parseIpcEndpoint(endpoint, { allowPortZero: true });
   const token = randomBytes(32).toString("base64url");
   cleanupUnixSocket(endpoint);
 
-  const server = net.createServer((socket) => handleSocket(socket, token));
+  const server = net.createServer((socket) => handleSocket(socket, token, parsedEndpoint));
   server.on("error", (error) => {
     console.error("OpenPets local IPC server error.", error);
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(endpoint, () => {
+    listenOnEndpoint(server, parsedEndpoint, () => {
       server.off("error", reject);
       protectUnixSocket(endpoint);
       resolve();
@@ -45,10 +46,11 @@ export async function startLocalIpcServer(): Promise<void> {
   });
 
   ipcServer = server;
-  ipcDiscovery = writeDiscoveryFile(endpoint, token);
+  const listeningEndpoint = getListeningEndpoint(server, parsedEndpoint);
+  ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
   leaseCleanupTimer = setInterval(() => leaseManager.cleanupExpired(), 5_000);
   leaseCleanupTimer.unref?.();
-  console.log(`OpenPets local IPC listening at ${endpoint}.`);
+  console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }
 
 export function stopLocalIpcServer(): void {
@@ -69,7 +71,12 @@ export function stopLocalIpcServer(): void {
   }
 }
 
-function handleSocket(socket: net.Socket, token: string): void {
+function handleSocket(socket: net.Socket, token: string, endpoint: IpcEndpoint): void {
+  if (endpoint.kind === "tcp" && !isLoopbackRemoteAddress(socket.remoteAddress)) {
+    socket.destroy();
+    return;
+  }
+
   socket.setEncoding("utf8");
   socket.setTimeout(3_000, () => socket.destroy());
 
@@ -98,6 +105,26 @@ function handleSocket(socket: net.Socket, token: string): void {
     if (isBenignSocketCloseError(error)) return;
     console.error("OpenPets local IPC client socket error.", error);
   });
+}
+
+function listenOnEndpoint(server: net.Server, endpoint: IpcEndpoint, callback: () => void): void {
+  if (endpoint.kind === "tcp") {
+    server.listen({ host: endpoint.host, port: endpoint.port }, callback);
+    return;
+  }
+
+  server.listen(endpoint.path, callback);
+}
+
+function getListeningEndpoint(server: net.Server, endpoint: IpcEndpoint): string {
+  if (endpoint.kind !== "tcp") return endpoint.path;
+  const address = server.address();
+  if (!address || typeof address === "string") return `tcp://${endpoint.host}:${endpoint.port}`;
+  return `tcp://${endpoint.host}:${address.port}`;
+}
+
+function isLoopbackRemoteAddress(address: string | undefined): boolean {
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
 async function handleRawRequest(raw: string, token: string) {

@@ -1,10 +1,10 @@
 import net from "node:net";
 import { randomUUID } from "node:crypto";
 
-import { readDiscoveryFile, type OpenPetsDiscoveryFile } from "./discovery.js";
+import { parseIpcEndpoint, readDiscoveryFile, type OpenPetsDiscoveryFile } from "./discovery.js";
 import { connectTimeoutMs, maxIpcMessageBytes, openPetsIpcVersion, parseIpcResponse, responseTimeoutMs, validateReaction, OpenPetsClientError, type OpenPetsIpcMethod, type OpenPetsIpcRequest, type OpenPetsReaction } from "./protocol.js";
 
-export { getDiscoveryFilePath, readDiscoveryFile, validateDiscovery, validateEndpoint, type OpenPetsDiscoveryFile } from "./discovery.js";
+export { getDiscoveryFilePath, parseIpcEndpoint, readDiscoveryFile, validateDiscovery, validateEndpoint, type OpenPetsDiscoveryFile, type ParsedIpcEndpoint } from "./discovery.js";
 export { allowedReactions, OpenPetsClientError, type OpenPetsReaction } from "./protocol.js";
 
 export interface OpenPetsClientOptions {
@@ -144,7 +144,8 @@ export function sendRequest<T>(discovery: OpenPetsDiscoveryFile, method: OpenPet
   }
 
   return new Promise<T>((resolve, reject) => {
-    const socket = net.createConnection(discovery.endpoint);
+    const endpoint = parseIpcEndpoint(discovery.endpoint);
+    const socket = endpoint.kind === "tcp" ? net.createConnection({ host: endpoint.host, port: endpoint.port }) : net.createConnection(endpoint.path);
     let buffer = "";
     let settled = false;
 
