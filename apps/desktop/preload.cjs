@@ -875,10 +875,11 @@ function createPetManagerItems(catalogState, codexState, state, defaultPetId, de
 function createPetManagerItem(id, displayName, description, installed, catalogPet, codexPet, codexImported, defaultPetId, defaultThumbnailSrc) {
   const catalogThumbnail = catalogPet && isAllowedCatalogPreview(catalogPet.preview) ? catalogPet.preview : "";
   const catalogSpritesheet = catalogPet && isAllowedCatalogPreview(catalogPet.spritesheet) ? catalogPet.spritesheet : "";
+  const codexSpritesheet = codexPet && isAllowedCodexPreview(codexPet.spritesheet) ? codexPet.spritesheet : "";
   const preview = codexPet?.preview || catalogThumbnail;
-  const detailPreview = codexPet?.preview || catalogSpritesheet || catalogThumbnail;
+  const detailPreview = codexSpritesheet || codexPet?.preview || catalogSpritesheet || catalogThumbnail;
   const usesThumbnail = Boolean(installed?.builtIn && defaultThumbnailSrc);
-  const cardUsesThumbnail = usesThumbnail || Boolean(catalogSpritesheet && catalogThumbnail && preview === catalogThumbnail && !codexPet);
+  const cardUsesThumbnail = usesThumbnail || Boolean(preview && preview !== catalogSpritesheet);
   return {
     id,
     displayName,
@@ -893,7 +894,7 @@ function createPetManagerItem(id, displayName, description, installed, catalogPe
     previewSrc: usesThumbnail ? defaultThumbnailSrc : preview,
     detailPreviewSrc: usesThumbnail ? defaultThumbnailSrc : detailPreview,
     previewIsSpriteSheet: !cardUsesThumbnail,
-    detailPreviewIsSpriteSheet: !usesThumbnail,
+    detailPreviewIsSpriteSheet: !usesThumbnail && (detailPreview === catalogSpritesheet || detailPreview === codexSpritesheet),
     isDefault: id === defaultPetId,
     protected: Boolean(installed?.protected),
     broken: Boolean(installed?.broken),
@@ -1168,6 +1169,10 @@ function isAllowedCatalogPreview(value) {
   } catch {
     return false;
   }
+}
+
+function isAllowedCodexPreview(value) {
+  return typeof value === "string" && /^openpets-codex:\/\/spritesheet\/[a-z0-9][a-z0-9_-]{0,63}$/u.test(value);
 }
 
 function setCardBusy(card, busy, label) {

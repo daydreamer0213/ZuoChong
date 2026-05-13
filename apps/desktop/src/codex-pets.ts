@@ -3,12 +3,15 @@ import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm, writeFile }
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
+import sharp from "sharp";
+
 import { getAppStateSnapshot, installPetState, type OpenPetsStateV1 } from "./app-state.js";
-import { canInlineCodexPreview, maxCodexPetJsonBytes, maxCodexPets, maxCodexPreviewBytes, maxCodexSpritesheetBytes, maxCodexTotalPreviewBytes, validateCodexPetMetadata, type CodexPetMetadata } from "./codex-pets-core.js";
+import { maxCodexPetJsonBytes, maxCodexPets, maxCodexSpritesheetBytes, maxCodexThumbnailSourceBytes, validateCodexPetMetadata, type CodexPetMetadata } from "./codex-pets-core.js";
 import { withPetOperation } from "./pet-installation.js";
 import { assertInsideRoot, assertSafePetId, getInstalledPetDir, getPetsRoot } from "./pet-paths.js";
 
 const codexPetsRoot = join(homedir(), ".codex", "pets");
+const codexThumbnailCache = new Map<string, string>();
 
 export interface CodexPetUiState {
   readonly source: "codex";
@@ -21,6 +24,7 @@ export interface CodexPetUiItem {
   readonly displayName: string;
   readonly description: string;
   readonly preview: string;
+  readonly spritesheet: string;
 }
 
 export async function getCodexPetsUiState(): Promise<CodexPetUiState> {
@@ -28,17 +32,15 @@ export async function getCodexPetsUiState(): Promise<CodexPetUiState> {
     const root = await validateCodexRoot();
     const entries = (await readdir(codexPetsRoot, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
     const pets: CodexPetUiItem[] = [];
-    let remainingPreviewBytes = maxCodexTotalPreviewBytes;
     let attemptedDirectories = 0;
 
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
       attemptedDirectories += 1;
       if (attemptedDirectories > maxCodexPets) break;
-      const pet = await tryReadCodexPet(root, join(root, entry.name), entry.name, remainingPreviewBytes);
+      const pet = await tryReadCodexPet(root, join(root, entry.name), entry.name);
       if (pet) {
-        remainingPreviewBytes -= pet.previewBytes;
-        pets.push(pet.item);
+        pets.push(pet);
       }
     }
 
@@ -96,25 +98,31 @@ export async function importCodexPet(petId: string): Promise<OpenPetsStateV1> {
   });
 }
 
-async function tryReadCodexPet(root: string, dir: string, folderName: string, remainingPreviewBytes: number): Promise<{ readonly item: CodexPetUiItem; readonly previewBytes: number } | null> {
+async function tryReadCodexPet(root: string, dir: string, folderName: string): Promise<CodexPetUiItem | null> {
   try {
     const metadata = await readCodexPetMetadata(root, dir, folderName);
     const spritesheetPath = join(dir, metadata.spritesheetPath);
     await validateSpritesheet(spritesheetPath);
-    const preview = await createSpritesheetDataUrl(spritesheetPath, remainingPreviewBytes);
+    const preview = await createCodexThumbnailDataUrl(spritesheetPath);
     return {
-      item: {
-        id: metadata.id,
-        displayName: metadata.displayName,
-        description: metadata.description,
-        preview: preview.dataUrl,
-      },
-      previewBytes: preview.bytes,
+      id: metadata.id,
+      displayName: metadata.displayName,
+      description: metadata.description,
+      preview,
+      spritesheet: `openpets-codex://spritesheet/${encodeURIComponent(metadata.id)}`,
     };
   } catch (error) {
     console.error(`Skipping invalid Codex pet at ${dir}.`, error);
     return null;
   }
+}
+
+export async function readCodexPetSpritesheet(petId: string): Promise<Buffer> {
+  assertSafePetId(petId);
+  const root = await validateCodexRoot();
+  const sourceDir = resolve(root, petId);
+  const metadata = await readCodexPetMetadata(root, sourceDir, petId);
+  return readRegularFile(join(sourceDir, metadata.spritesheetPath), maxCodexSpritesheetBytes, "spritesheet.webp");
 }
 
 async function readCodexPetMetadata(root: string, dir: string, folderName: string): Promise<CodexPetMetadata> {
@@ -135,13 +143,28 @@ async function validateSpritesheet(path: string): Promise<void> {
   if (spritesheet.size > maxCodexSpritesheetBytes) throw new Error("spritesheet.webp is too large.");
 }
 
-async function createSpritesheetDataUrl(path: string, remainingPreviewBytes: number): Promise<{ readonly dataUrl: string; readonly bytes: number }> {
-  const spritesheet = await lstat(path);
-  if (spritesheet.isSymbolicLink() || !spritesheet.isFile() || !canInlineCodexPreview(spritesheet.size) || spritesheet.size > remainingPreviewBytes) {
-    return { dataUrl: "", bytes: 0 };
-  }
-  const buffer = await readRegularFile(path, Math.min(maxCodexPreviewBytes, remainingPreviewBytes), "spritesheet.webp preview");
-  return { dataUrl: `data:image/webp;base64,${buffer.toString("base64")}`, bytes: buffer.byteLength };
+async function createCodexThumbnailDataUrl(path: string): Promise<string> {
+  const stats = await lstat(path);
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.size <= 0 || stats.size > maxCodexThumbnailSourceBytes) return "";
+  const cacheKey = `${path}:${stats.size}:${stats.mtimeMs}`;
+  const cached = codexThumbnailCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const image = sharp(path, { limitInputPixels: 50_000_000 });
+  const metadata = await image.metadata();
+  if (!metadata.width || !metadata.height) return "";
+  const width = Math.min(192, metadata.width);
+  const height = Math.min(208, metadata.height);
+  const thumbnail = await sharp(path, { limitInputPixels: 50_000_000 })
+    .extract({ left: 0, top: 0, width, height })
+    .resize(54, 58, { fit: "fill" })
+    .png()
+    .toBuffer();
+  const afterStats = await lstat(path);
+  if (afterStats.isSymbolicLink() || !afterStats.isFile() || afterStats.size !== stats.size || afterStats.mtimeMs !== stats.mtimeMs) return "";
+  const dataUrl = `data:image/png;base64,${thumbnail.toString("base64")}`;
+  codexThumbnailCache.set(cacheKey, dataUrl);
+  return dataUrl;
 }
 
 async function validateCodexRoot(): Promise<string> {

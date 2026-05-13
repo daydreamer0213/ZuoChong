@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain, protocol, type IpcMainInvokeEvent } from "electron";
 
 import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { completeOnboarding, getAppStateSnapshot, normalizePetScale, petScaleOptions, updatePreferences } from "./app-state.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
-import { getCodexPetsUiState, importCodexPet } from "./codex-pets.js";
+import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
 import { refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
@@ -223,6 +223,26 @@ export function installInternalUiHandlers(): void {
   });
 }
 
+export function installInternalUiProtocol(): void {
+  protocol.handle("openpets-codex", async (request) => {
+    try {
+      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+      const url = new URL(request.url);
+      if (url.hostname !== "spritesheet" || url.search || url.hash) return new Response(null, { status: 404 });
+      const petId = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      const spritesheet = await readCodexPetSpritesheet(petId);
+      return new Response(spritesheet, {
+        headers: {
+          "Content-Type": "image/webp",
+          "Cache-Control": "private, max-age=60",
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+}
+
 export function openTaskWindow(kind: TaskWindowKind): void {
   const existingWindow = taskWindows.get(kind);
 
@@ -367,7 +387,7 @@ function createPetManagerHtml(definition: TaskWindowDefinition): string {
     <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https://openpets.dev; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https://openpets.dev openpets-codex:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
         <meta name="referrer" content="no-referrer" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(definition.title)}</title>
@@ -393,7 +413,7 @@ function createPetManagerHtml(definition: TaskWindowDefinition): string {
                 <button id="pm-filter-installed" class="pm-filter" type="button" data-pet-filter="installed" aria-pressed="false">Installed</button>
               </div>
               <div class="pm-filter-buttons secondary">
-                <button id="pm-filter-original" class="pm-filter" type="button" data-pet-filter="original" aria-pressed="false">OpenPets</button>
+                <button id="pm-filter-original" class="pm-filter" type="button" data-pet-filter="original" aria-pressed="false">Originals</button>
                 <button id="pm-filter-western" class="pm-filter" type="button" data-pet-filter="western" aria-pressed="false">Western</button>
                 <button id="pm-filter-asian" class="pm-filter" type="button" data-pet-filter="asian" aria-pressed="false">Asian</button>
               </div>

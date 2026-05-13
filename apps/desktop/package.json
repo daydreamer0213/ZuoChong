@@ -34,6 +34,7 @@
     "@open-pets/cli": "workspace:*",
     "@open-pets/mcp": "workspace:*",
     "@open-pets/opencode": "workspace:*",
+    "sharp": "^0.34.5",
     "yauzl": "3.3.0"
   }
 }

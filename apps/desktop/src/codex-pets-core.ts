@@ -1,7 +1,6 @@
 export const maxCodexPetJsonBytes = 128 * 1024;
 export const maxCodexSpritesheetBytes = 100 * 1024 * 1024;
-export const maxCodexPreviewBytes = 8 * 1024 * 1024;
-export const maxCodexTotalPreviewBytes = 24 * 1024 * 1024;
+export const maxCodexThumbnailSourceBytes = 24 * 1024 * 1024;
 export const maxCodexPets = 100;
 
 export interface CodexPetMetadata {
@@ -9,10 +8,6 @@ export interface CodexPetMetadata {
   readonly displayName: string;
   readonly description: string;
   readonly spritesheetPath: "spritesheet.webp";
-}
-
-export function canInlineCodexPreview(size: number): boolean {
-  return Number.isSafeInteger(size) && size > 0 && size <= maxCodexPreviewBytes;
 }
 
 export function validateCodexPetMetadata(value: unknown, folderName: string): CodexPetMetadata {

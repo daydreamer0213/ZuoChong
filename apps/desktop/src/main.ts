@@ -6,7 +6,7 @@ import { installAppLifecycle } from "./lifecycle.js";
 import { startLocalIpcServer } from "./local-ipc.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
-import { installInternalUiHandlers, openTaskWindow } from "./windows.js";
+import { installInternalUiHandlers, installInternalUiProtocol, openTaskWindow } from "./windows.js";
 
 // OpenPets does not store browser passwords, cookies, or encrypted app secrets.
 // Keep Chromium/Electron from prompting for macOS Keychain or Linux keyring access
@@ -29,6 +29,7 @@ if (!gotSingleInstanceLock) {
     }
 
     initializeAppState();
+    installInternalUiProtocol();
     installInternalUiHandlers();
     createAppTray();
     installDefaultPetDisplayHandlers();

@@ -3,3 +3,4 @@ packages:
   - "packages/*"
 allowBuilds:
   electron-winstaller: false
+  sharp: true
