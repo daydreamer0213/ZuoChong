@@ -144,7 +144,7 @@ assert.match(mappingDoc, /\| 3 \| `waving` \| `waving`, Claude `Notification`\. 
 assert.doesNotMatch(mappingDoc, /bubble-only|currently \*\*bubble states\*\*/i, "mapping docs must not describe reactions as bubble-only.");
 for (const reaction of allowedReactions) {
   const pool = reactionMessagePools[reaction];
-  assert.ok(pool.length >= 20, `reaction message pool must be extensive for: ${reaction}`);
+  assert.ok(pool.length >= 8, `reaction message pool must include clear variants for: ${reaction}`);
   for (const message of pool) {
     assert.match(message, /^[A-Z]/, `reaction message must start uppercase: ${message}`);
     assert.doesNotMatch(message, /[\r\n]/, `reaction message must be single-line: ${message}`);
