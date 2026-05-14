@@ -4,6 +4,7 @@ import { getAppStateSnapshot, isOnboardingCompleted } from "./app-state.js";
 import { createTrayIcon } from "./assets.js";
 import { hideDefaultPet, isDefaultPetVisible, setDefaultPetPaused, showDefaultPet } from "./default-pet-controller.js";
 import { quitOpenPets } from "./lifecycle.js";
+import { info } from "./logger.js";
 import { shellState, togglePaused } from "./state.js";
 import { getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 import { openTaskWindow } from "./windows.js";
@@ -18,6 +19,7 @@ export function createAppTray(): Tray {
   tray = new Tray(createTrayIcon());
   tray.setToolTip("OpenPets");
   refreshTrayMenu();
+  info("tray", "created");
   console.log("OpenPets tray created.");
 
   return tray;
@@ -71,6 +73,7 @@ export function refreshTrayMenu(): void {
       click: () => {
         const paused = togglePaused();
         setDefaultPetPaused(paused);
+        info("tray", "pause toggled", { paused });
         console.log(paused ? "OpenPets paused." : "OpenPets resumed.");
         refreshTrayMenu();
       },

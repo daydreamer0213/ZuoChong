@@ -3,6 +3,7 @@ import { app } from "electron";
 import { initializeAppState, isOnboardingCompleted, releaseStartupInstallLock } from "./app-state.js";
 import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
+import { error as logError, getLogFilePath, info, initializeLogger } from "./logger.js";
 import { startLocalIpcServer } from "./local-ipc.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
@@ -22,7 +23,9 @@ if (!gotSingleInstanceLock) {
   installAppLifecycle();
 
   app.whenReady().then(async () => {
+    initializeLogger();
     app.setName("OpenPets");
+    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid });
 
     if (process.platform === "darwin") {
       app.dock?.hide();
@@ -47,9 +50,11 @@ if (!gotSingleInstanceLock) {
     }
     refreshTrayMenu();
     void checkForGitHubReleaseUpdate().then(() => refreshTrayMenu());
+    info("app", "startup complete", { logFile: getLogFilePath(), openDefaultPetOnLaunch: shouldOpenDefaultPetOnLaunch(), onboardingCompleted: isOnboardingCompleted() });
     console.log("OpenPets desktop shell ready.");
   }).catch((error: unknown) => {
     releaseStartupInstallLock();
+    logError("app", "startup failed", error);
     console.error("Failed to start OpenPets desktop shell.", error);
     app.quit();
   });

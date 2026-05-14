@@ -6,7 +6,8 @@ import { getAppStateSnapshot } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
-import { cleanupUnixSocket, createIpcEndpoint, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
+import { debug, error as logError, info } from "./logger.js";
+import { cleanupUnixSocket, createIpcEndpoint, getDiscoveryFilePath, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet } from "./pet-installation.js";
 
@@ -19,12 +20,16 @@ const leaseManager = new LeaseManager({
   getPetDisplayName: (petId, targetKind) => targetKind === "default" ? getCurrentDefaultPet().displayName : getPetDisplayName(petId),
   onFirstExplicitLease: showAgentPet,
   onLastExplicitLease: handleLastExplicitLease,
+  onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
 });
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export async function startLocalIpcServer(): Promise<void> {
-  if (ipcServer) return;
+  if (ipcServer) {
+    debug("ipc", "start skipped", { reason: "already-started" });
+    return;
+  }
 
   const endpoint = createIpcEndpoint();
   const parsedEndpoint = parseIpcEndpoint(endpoint, { allowPortZero: true });
@@ -33,6 +38,7 @@ export async function startLocalIpcServer(): Promise<void> {
 
   const server = net.createServer((socket) => handleSocket(socket, token, parsedEndpoint));
   server.on("error", (error) => {
+    logError("ipc", "server error", error);
     console.error("OpenPets local IPC server error.", error);
   });
 
@@ -50,6 +56,7 @@ export async function startLocalIpcServer(): Promise<void> {
   ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
   leaseCleanupTimer = setInterval(() => leaseManager.cleanupExpired(), 5_000);
   leaseCleanupTimer.unref?.();
+  info("ipc", "server started", { endpointKind: parsedEndpoint.kind, endpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }
 
@@ -58,6 +65,7 @@ export function stopLocalIpcServer(): void {
   const discovery = ipcDiscovery;
   ipcServer = null;
   ipcDiscovery = null;
+  info("ipc", "server stopping", { hadServer: Boolean(server), discoveryPath: discovery ? getDiscoveryFilePath() : undefined, endpoint: discovery?.endpoint });
   if (leaseCleanupTimer) clearInterval(leaseCleanupTimer);
   leaseCleanupTimer = null;
   removeDiscoveryFile(discovery);
@@ -73,9 +81,12 @@ export function stopLocalIpcServer(): void {
 
 function handleSocket(socket: net.Socket, token: string, endpoint: IpcEndpoint): void {
   if (endpoint.kind === "tcp" && !isLoopbackRemoteAddress(socket.remoteAddress)) {
+    info("ipc", "socket rejected", { reason: "non-loopback", remoteAddress: socket.remoteAddress });
     socket.destroy();
     return;
   }
+
+  debug("ipc", "socket accepted", { endpointKind: endpoint.kind, remoteAddress: socket.remoteAddress });
 
   socket.setEncoding("utf8");
   socket.setTimeout(3_000, () => socket.destroy());
@@ -89,6 +100,7 @@ function handleSocket(socket: net.Socket, token: string, endpoint: IpcEndpoint):
 
     if (Buffer.byteLength(buffer, "utf8") > maxIpcMessageBytes) {
       handled = true;
+      info("ipc", "request rejected", { reason: "too-large", bytes: Buffer.byteLength(buffer, "utf8") });
       writeResponse(socket, errorResponse(null, new IpcProtocolError("invalid_request", "IPC request is too large.")));
       return;
     }
@@ -103,6 +115,7 @@ function handleSocket(socket: net.Socket, token: string, endpoint: IpcEndpoint):
 
   socket.on("error", (error) => {
     if (isBenignSocketCloseError(error)) return;
+    logError("ipc", "client socket error", error);
     console.error("OpenPets local IPC client socket error.", error);
   });
 }
@@ -132,8 +145,10 @@ async function handleRawRequest(raw: string, token: string) {
   try {
     const request = parseIpcRequest(raw, token);
     requestId = request.id;
+    debug("ipc", "request received", { requestId, method: request.method });
     return okResponse(request.id, await handleRequest(request));
   } catch (error) {
+    logError("ipc", "request failed", error instanceof Error ? error : { requestId, error });
     return errorResponse(requestId, error);
   }
 }
@@ -201,12 +216,15 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
 
   if (request.method === "lease.acquire") {
     const params = isRecord(request.params) ? request.params : {};
-    return leaseManager.acquire(validateRequestedPetId(params.requestedPetId));
+    const requestedPetId = validateRequestedPetId(params.requestedPetId);
+    debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId });
+    return leaseManager.acquire(requestedPetId);
   }
 
   if (request.method === "lease.heartbeat") {
     const params = isRecord(request.params) ? request.params : {};
     const leaseId = validateRequiredLeaseId(params.leaseId);
+    debug("ipc", "lease heartbeat requested", { requestId: request.id, leaseId });
     try {
       return leaseManager.heartbeat(leaseId);
     } catch {
@@ -216,13 +234,16 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
 
   if (request.method === "lease.release") {
     const params = isRecord(request.params) ? request.params : {};
-    return leaseManager.release(validateRequiredLeaseId(params.leaseId));
+    const leaseId = validateRequiredLeaseId(params.leaseId);
+    debug("ipc", "lease release requested", { requestId: request.id, leaseId });
+    return leaseManager.release(leaseId);
   }
 
   if (request.method === "pet.react") {
     const params = isRecord(request.params) ? request.params : {};
     const reaction = validateReaction(params.reaction);
     const lease = getLeaseTarget(params.leaseId);
+    debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
       if (getDefaultPetPaused()) return { ok: true, reaction, shown: false, reason: "paused", leaseId: lease.leaseId };
       const applied = applyAgentPetReaction(lease.actualTargetPetId, reaction);
@@ -236,6 +257,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const message = validateSayMessage(params.message);
   const reaction = params.reaction === undefined ? undefined : validateReaction(params.reaction);
   const lease = getLeaseTarget(params.leaseId);
+  debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
     if (getDefaultPetPaused()) return { ok: true, shown: false, reason: "paused", reaction, leaseId: lease.leaseId };
     const applied = applyAgentPetSay(lease.actualTargetPetId, message, reaction);
@@ -260,6 +282,7 @@ function getLeaseTarget(value: unknown) {
 }
 
 function handleLastExplicitLease(petId: string): void {
+  info("ipc", "last explicit lease ended", { petId });
   clearAgentPetLeaseState(petId);
 }
 

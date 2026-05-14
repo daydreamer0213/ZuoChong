@@ -9,6 +9,7 @@ import { builtInPet } from "./built-in-pet.js";
 import { getInstalledPetDir } from "./pet-paths.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { pickReactionMessage } from "./reaction-messages.js";
+import { debug, error as logError, info } from "./logger.js";
 
 export interface DefaultPetWindowOptions {
   readonly position: Point;
@@ -78,8 +79,12 @@ const defaultPetSprite = {
   } satisfies Record<UniversalSpriteState, { readonly row: number; readonly frames: number; readonly durationMs: number; readonly iterations?: number | "infinite" }>,
 } as const;
 
+const windowLoadChains = new WeakMap<BrowserWindow, Promise<void>>();
+const windowLoadSequences = new WeakMap<BrowserWindow, number>();
+
 export function createDefaultPetWindow(options: DefaultPetWindowOptions): BrowserWindow {
   const window = createBasePetWindow("OpenPets — Default Pet", options.position);
+  info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window);
   installMotionStatePublisher(window);
   installPetContextMenu(window, { label: "Hide pet", click: options.onHideRequested });
@@ -95,6 +100,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions): Browse
   window.on("move", savePosition);
   window.on("moved", savePosition);
   window.on("close", () => {
+    info("pet.window", "default window close", { windowId: window.id, position: readWindowPosition(window) });
     options.onPositionChanged(readWindowPosition(window));
   });
 
@@ -105,6 +111,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions): Browse
 
 export function createAgentPetWindow(options: AgentPetWindowOptions): BrowserWindow {
   const window = createBasePetWindow(`OpenPets — ${options.displayName}`, options.position);
+  info("pet.window", "agent window create", { windowId: window.id, petId: options.petId, displayName: options.displayName, position: options.position, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window);
   installMotionStatePublisher(window);
   installPetContextMenu(window, { label: "Close pet", click: options.onCloseRequested });
@@ -144,6 +151,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   const handleHitTest = (event: IpcMainEvent, interactive: unknown): void => {
     if (!isFromWindow(event)) return;
     rendererReady = true;
+    debug("pet.window", "hit test", { windowId: window.id, interactive: Boolean(interactive), dragging });
     setPassthrough(!interactive && !dragging);
   };
 
@@ -157,6 +165,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
     if (!isFromWindow(event) || !isScreenPoint(point)) return;
     const [startWindowX, startWindowY] = window.getPosition();
     dragging = { startScreenX: point.screenX, startScreenY: point.screenY, startWindowX, startWindowY };
+    debug("pet.window", "drag start", { windowId: window.id, point, startWindowX, startWindowY });
     setPassthrough(false);
   };
 
@@ -168,16 +177,19 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   const handleDragEnd = (event: IpcMainEvent): void => {
     if (!isFromWindow(event)) return;
     dragging = null;
+    debug("pet.window", "drag end", { windowId: window.id, position: readWindowPosition(window) });
   };
 
   const resetForNavigation = (): void => {
     dragging = null;
     rendererReady = false;
+    debug("pet.window", "navigation reset passthrough", { windowId: window.id });
     setPassthrough(false);
   };
 
   const rearmAfterLoad = (): void => {
     dragging = null;
+    debug("pet.window", "load rearm passthrough", { windowId: window.id });
     setPassthrough(true);
   };
 
@@ -187,6 +199,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
 
   const handleLoadFailure = (): void => {
     dragging = null;
+    debug("pet.window", "load failure rearm passthrough", { windowId: window.id });
     setPassthrough(true);
   };
 
@@ -265,9 +278,11 @@ function createBasePetWindow(title: string, position: Point): BrowserWindow {
     event.preventDefault();
   });
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    logError("pet.window", "renderer load failed", { windowId: window.id, errorCode, errorDescription });
     console.error("Failed to load default pet window.", { errorCode, errorDescription });
   });
   window.webContents.on("render-process-gone", (_event, details) => {
+    logError("pet.window", "renderer process gone", { windowId: window.id, details });
     console.error("Default pet renderer process gone.", details);
   });
 
@@ -285,22 +300,28 @@ function applyPetAlwaysOnTop(window: BrowserWindow): void {
 }
 
 export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null): Promise<void> {
+  const sequence = allocateWindowLoadSequence(window);
+  debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
   const html = await createDefaultPetHtml(paused, display, badge);
-  await loadPetHtmlFile(window, html, "default").catch((error: unknown) => {
+  await loadPetHtmlFile(window, html, "default", sequence).catch((error: unknown) => {
+    logError("pet.window", "default content load failed", error instanceof Error ? error : { error });
     console.error("Failed to load default pet URL.", error);
   });
 }
 
 export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null): Promise<void> {
+  const sequence = allocateWindowLoadSequence(window);
   try {
     const state = getAppStateSnapshot();
     const pet = state.pets.installed.find((candidate) => candidate.id === petId);
     if (!pet || pet.broken || pet.id === builtInPet.id) {
       throw new Error(`Cannot render explicit pet: ${petId}`);
     }
+    debug("pet.window", "explicit content render begin", { windowId: window.id, sequence, petId, displayName: pet.displayName, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge });
     const html = await createInstalledPetHtml(pet.id, pet.displayName, false, display, state.preferences.petScale as PetScaleValue, badge);
-    await loadPetHtmlFile(window, html, `explicit-${pet.id}`);
+    await loadPetHtmlFile(window, html, `explicit-${pet.id}`, sequence);
   } catch (error: unknown) {
+    logError("pet.window", "explicit content load failed", error instanceof Error ? error : { petId, error });
     console.error(`Failed to load explicit pet ${petId} URL.`, error);
   }
 }
@@ -633,22 +654,56 @@ function isAllowedPetDocumentUrl(url: string): boolean {
   return url.startsWith("data:text/html") || url.startsWith("file://");
 }
 
-async function loadPetHtmlFile(window: BrowserWindow, html: string, name: string): Promise<void> {
-  const dir = join(app.getPath("userData"), "rendered-pets");
-  await mkdir(dir, { recursive: true });
+function allocateWindowLoadSequence(window: BrowserWindow): number {
+  const sequence = (windowLoadSequences.get(window) ?? 0) + 1;
+  windowLoadSequences.set(window, sequence);
+  return sequence;
+}
+
+async function loadPetHtmlFile(window: BrowserWindow, html: string, name: string, sequence: number): Promise<void> {
   const safeName = name.replace(/[^a-z0-9_-]/gi, "-").slice(0, 80) || "pet";
-  const filePath = join(dir, `${safeName}.html`);
-  await writeFile(filePath, html, "utf8");
-  window.setIgnoreMouseEvents(false);
-  try {
-    await window.loadFile(filePath);
-  } catch (error) {
-    if (!window.isDestroyed()) {
-      if (process.platform === "linux") window.setIgnoreMouseEvents(false);
-      else window.setIgnoreMouseEvents(true, { forward: true });
+
+  const previous = windowLoadChains.get(window) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => {
+    if (window.isDestroyed()) {
+      debug("pet.window", "load skipped", { windowId: window.id, name: safeName, sequence, reason: "destroyed" });
+      return;
     }
-    throw error;
-  }
+
+    if (windowLoadSequences.get(window) !== sequence) {
+      debug("pet.window", "load skipped", { windowId: window.id, name: safeName, sequence, latestSequence: windowLoadSequences.get(window), reason: "superseded" });
+      return;
+    }
+
+    const dir = join(app.getPath("userData"), "rendered-pets");
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, `${safeName}.html`);
+    await writeFile(filePath, html, "utf8");
+    if (window.isDestroyed()) {
+      debug("pet.window", "load skipped", { windowId: window.id, name: safeName, sequence, reason: "destroyed-after-write" });
+      return;
+    }
+    debug("pet.window", "load file begin", { windowId: window.id, name: safeName, sequence, filePath });
+    window.setIgnoreMouseEvents(false);
+    try {
+      await window.loadFile(filePath);
+      debug("pet.window", "load file complete", { windowId: window.id, name: safeName, sequence, url: window.webContents.getURL() });
+    } catch (error) {
+      if (!window.isDestroyed()) {
+        if (process.platform === "linux") window.setIgnoreMouseEvents(false);
+        else window.setIgnoreMouseEvents(true, { forward: true });
+      }
+      logError("pet.window", "load file rejected", error instanceof Error ? error : { windowId: window.id, name: safeName, sequence, error });
+      throw error;
+    }
+  });
+
+  windowLoadChains.set(window, next);
+  void next.catch(() => {}).finally(() => {
+    if (windowLoadChains.get(window) === next) windowLoadChains.delete(window);
+  });
+
+  return next;
 }
 
 function debounce(callback: () => void, delayMs: number): () => void {

@@ -2,6 +2,7 @@ import { BrowserWindow, screen } from "electron";
 
 import { getAppStateSnapshot, getDefaultPetPosition, resetDefaultPetPosition, setDefaultPetPosition, updatePreferences } from "./app-state.js";
 import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
+import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientReactionAnimationMs, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 
@@ -17,6 +18,7 @@ const busyStatusBadgeMs = 120_000;
 export function showDefaultPet(): void {
   updatePreferences({ openDefaultPetOnLaunch: true });
   const window = getOrCreateDefaultPetWindow();
+  info("pet.default", "show requested", { windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
   if (window.isMinimized()) {
     window.restore();
@@ -29,9 +31,11 @@ export function hideDefaultPet(): void {
   updatePreferences({ openDefaultPetOnLaunch: false });
 
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
+    debug("pet.default", "hide skipped", { reason: "no-window" });
     return;
   }
 
+  info("pet.default", "hide requested", { windowId: defaultPetWindow.id, position: readWindowPosition(defaultPetWindow), petId: getAppStateSnapshot().preferences.defaultPetId });
   setDefaultPetPosition(readWindowPosition(defaultPetWindow));
   defaultPetWindow.hide();
 }
@@ -42,6 +46,7 @@ export function isDefaultPetVisible(): boolean {
 
 export function setDefaultPetPaused(nextPaused: boolean): void {
   paused = nextPaused;
+  info("pet.default", "pause changed", { paused });
 
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
     return;
@@ -56,9 +61,11 @@ export function getDefaultPetPaused(): boolean {
 
 export function refreshDefaultPetContent(): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
+    debug("pet.default", "refresh skipped", { reason: "no-window" });
     return;
   }
 
+  debug("pet.default", "refresh content", { windowId: defaultPetWindow.id, paused, hasDisplay: Boolean(transientDisplay), badge: statusBadge, petId: getAppStateSnapshot().preferences.defaultPetId });
   void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge);
 }
 
@@ -85,10 +92,12 @@ export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction
 
 export function destroyDefaultPet(): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
+    debug("pet.default", "destroy skipped", { reason: "no-window" });
     defaultPetWindow = null;
     return;
   }
 
+  info("pet.default", "destroy requested", { windowId: defaultPetWindow.id, position: readWindowPosition(defaultPetWindow), petId: getAppStateSnapshot().preferences.defaultPetId });
   setDefaultPetPosition(readWindowPosition(defaultPetWindow));
   const window = defaultPetWindow;
   defaultPetWindow = null;
@@ -116,8 +125,10 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onPositionChanged: setDefaultPetPosition,
     onHideRequested: hideDefaultPet,
   });
+  info("pet.default", "created", { windowId: defaultPetWindow.id, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
   defaultPetWindow.on("closed", () => {
+    info("pet.default", "closed", { windowId: defaultPetWindow?.id });
     defaultPetWindow = null;
   });
 
@@ -125,6 +136,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
 }
 
 function setTransientDisplay(display: PetTransientDisplay): void {
+  debug("pet.default", "transient display set", { reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
   transientDisplay = mergePetTransientDisplay(transientDisplay, display);
   if (display.reaction) setStatusBadge(display.reaction);
 
@@ -173,6 +185,7 @@ function setStatusBadge(reaction: OpenPetsReaction): void {
   }
 
   statusBadge = reaction;
+  debug("pet.default", "status badge set", { reaction, durationMs: isBusyStatusBadgeReaction(reaction) ? busyStatusBadgeMs : transientDisplayMs });
   if (statusBadgeTimeout) clearTimeout(statusBadgeTimeout);
   statusBadgeTimeout = setTimeout(() => {
     clearStatusBadge();
@@ -181,6 +194,7 @@ function setStatusBadge(reaction: OpenPetsReaction): void {
 }
 
 function clearStatusBadge(): void {
+  if (statusBadge) debug("pet.default", "status badge cleared", { reaction: statusBadge });
   statusBadge = null;
   if (statusBadgeTimeout) clearTimeout(statusBadgeTimeout);
   statusBadgeTimeout = null;
@@ -196,6 +210,7 @@ function reclampDefaultPetWindow(): void {
   }
 
   const safePosition = readWindowPosition(defaultPetWindow);
+  info("pet.default", "reclamp position", { windowId: defaultPetWindow.id, position: safePosition });
   defaultPetWindow.setPosition(safePosition.x, safePosition.y, false);
   setDefaultPetPosition(safePosition);
 }

@@ -34,6 +34,7 @@ export interface LeaseManagerOptions {
   readonly getPetDisplayName?: (petId: string, targetKind: LeaseTargetKind) => string;
   readonly onFirstExplicitLease?: (petId: string) => void;
   readonly onLastExplicitLease?: (petId: string) => void;
+  readonly onLog?: (level: "debug" | "info", message: string, fields?: Record<string, unknown>) => void;
 }
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -47,6 +48,7 @@ export class LeaseManager {
   readonly #getPetDisplayName: (petId: string, targetKind: LeaseTargetKind) => string;
   readonly #onFirstExplicitLease: (petId: string) => void;
   readonly #onLastExplicitLease: (petId: string) => void;
+  readonly #onLog: (level: "debug" | "info", message: string, fields?: Record<string, unknown>) => void;
 
   constructor(options: LeaseManagerOptions = {}) {
     this.#ttlMs = options.ttlMs ?? 15_000;
@@ -56,6 +58,7 @@ export class LeaseManager {
     this.#getPetDisplayName = options.getPetDisplayName ?? ((petId) => petId);
     this.#onFirstExplicitLease = options.onFirstExplicitLease ?? (() => {});
     this.#onLastExplicitLease = options.onLastExplicitLease ?? (() => {});
+    this.#onLog = options.onLog ?? (() => {});
   }
 
   acquire(requestedPetId?: string): LeaseSnapshot {
@@ -74,6 +77,7 @@ export class LeaseManager {
 
     const hadExplicitLease = lease.targetKind === "explicit" && this.countExplicitLeases(lease.actualPetId) > 0;
     this.#leases.set(lease.leaseId, lease);
+    this.#onLog("info", "acquired", { leaseId: lease.leaseId, requestedPetId, targetKind: lease.targetKind, actualPetId: lease.actualPetId, fallbackReason: lease.fallbackReason, explicitLeaseCount: lease.targetKind === "explicit" ? this.countExplicitLeases(lease.actualPetId) : undefined, expiresAt: lease.expiresAt });
     if (lease.targetKind === "explicit" && !hadExplicitLease) this.#onFirstExplicitLease(lease.actualPetId);
     return this.snapshot(lease);
   }
@@ -83,18 +87,24 @@ export class LeaseManager {
     if (!lease) throw new Error("unknown_lease");
     const now = this.#now();
     if (lease.expiresAt <= now) {
+      this.#onLog("info", "heartbeat expired", { leaseId, actualPetId: lease.actualPetId, targetKind: lease.targetKind, expiresAt: lease.expiresAt, now });
       this.release(leaseId);
       throw new Error("unknown_lease");
     }
     const next: PetLease = { ...lease, lastHeartbeatAt: now, expiresAt: now + this.#ttlMs };
     this.#leases.set(leaseId, next);
+    this.#onLog("debug", "heartbeat", { leaseId, targetKind: next.targetKind, actualPetId: next.actualPetId, expiresAt: next.expiresAt });
     return { leaseId, expiresAt: next.expiresAt };
   }
 
   release(leaseId: string): { readonly released: boolean } {
     const lease = this.#leases.get(leaseId);
-    if (!lease) return { released: false };
+    if (!lease) {
+      this.#onLog("debug", "release skipped", { leaseId, reason: "unknown" });
+      return { released: false };
+    }
     this.#leases.delete(leaseId);
+    this.#onLog("info", "released", { leaseId, targetKind: lease.targetKind, actualPetId: lease.actualPetId, remainingExplicitLeases: lease.targetKind === "explicit" ? this.countExplicitLeases(lease.actualPetId) : undefined });
     if (lease.targetKind === "explicit" && this.countExplicitLeases(lease.actualPetId) === 0) {
       this.#onLastExplicitLease(lease.actualPetId);
     }
@@ -116,6 +126,7 @@ export class LeaseManager {
     for (const lease of [...this.#leases.values()]) {
       if (lease.expiresAt <= now) {
         expired.push(this.snapshot(lease));
+        this.#onLog("info", "cleanup expired", { leaseId: lease.leaseId, targetKind: lease.targetKind, actualPetId: lease.actualPetId, expiresAt: lease.expiresAt, now });
         this.release(lease.leaseId);
       }
     }

@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 
 import { getAppStateSnapshot } from "./app-state.js";
 import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
+import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { clearTransientReaction, createAgentPetWindow, getTransientReactionAnimationMs, loadExplicitPetContent, mergePetTransientDisplay, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 
@@ -15,8 +16,12 @@ const dismissedAgentPets = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 
 export function showAgentPet(petId: string): boolean {
-  if (dismissedAgentPets.has(petId)) return false;
+  if (dismissedAgentPets.has(petId)) {
+    info("pet.agent", "show skipped", { petId, reason: "dismissed", activeWindows: agentPetWindows.size });
+    return false;
+  }
   const window = getOrCreateAgentPetWindow(petId);
+  info("pet.agent", "show requested", { petId, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), activeWindows: agentPetWindows.size });
   if (window.isMinimized()) window.restore();
   window.showInactive();
   return true;
@@ -24,34 +29,43 @@ export function showAgentPet(petId: string): boolean {
 
 export function closeAgentPetIfOpen(petId: string): void {
   const window = agentPetWindows.get(petId);
-  if (!window || window.isDestroyed()) return;
+  if (!window || window.isDestroyed()) {
+    debug("pet.agent", "close skipped", { petId, reason: "no-window", activeWindows: agentPetWindows.size });
+    return;
+  }
+  info("pet.agent", "close requested", { petId, windowId: window.id, activeWindows: agentPetWindows.size });
   agentPetWindows.delete(petId);
   clearAgentDisplay(petId);
   window.destroy();
 }
 
 export function dismissAgentPetForActiveLease(petId: string): void {
+  info("pet.agent", "dismiss requested", { petId });
   dismissedAgentPets.add(petId);
   closeAgentPetIfOpen(petId);
 }
 
 export function clearAgentPetDismissal(petId: string): void {
+  debug("pet.agent", "dismissal cleared", { petId, wasDismissed: dismissedAgentPets.has(petId) });
   dismissedAgentPets.delete(petId);
 }
 
 export function clearAgentPetLeaseState(petId: string): void {
+  info("pet.agent", "lease state cleared", { petId, hadWindow: agentPetWindows.has(petId), wasDismissed: dismissedAgentPets.has(petId) });
   dismissedAgentPets.delete(petId);
   closeAgentPetIfOpen(petId);
   clearAgentDisplay(petId);
 }
 
 export function applyAgentPetReaction(petId: string, reaction: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
+  debug("pet.agent", "reaction apply", { petId, reaction });
   setAgentDisplay(petId, { reaction });
   const shown = showAgentPet(petId);
   return shown ? { shown } : { shown, reason: "dismissed" };
 }
 
 export function applyAgentPetSay(petId: string, message: string, reaction?: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
+  debug("pet.agent", "say apply", { petId, reaction, messageLength: message.length });
   if (!reaction) clearStatusBadge(petId);
   setAgentDisplay(petId, { message, reaction });
   const shown = showAgentPet(petId);
@@ -59,12 +73,14 @@ export function applyAgentPetSay(petId: string, message: string, reaction?: Open
 }
 
 export function closeAllAgentPets(): void {
+  info("pet.agent", "close all requested", { activeWindows: agentPetWindows.size });
   for (const petId of [...agentPetWindows.keys()]) {
     closeAgentPetIfOpen(petId);
   }
 }
 
 export function refreshAgentPetContent(): void {
+  debug("pet.agent", "refresh all content", { activeWindows: agentPetWindows.size, petIds: [...agentPetWindows.keys()] });
   for (const [petId, window] of agentPetWindows.entries()) {
     if (!window.isDestroyed()) {
       void loadExplicitPetContent(window, petId, transientDisplays.get(petId) ?? null, statusBadges.get(petId) ?? null);
@@ -74,7 +90,10 @@ export function refreshAgentPetContent(): void {
 
 function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   const existing = agentPetWindows.get(petId);
-  if (existing && !existing.isDestroyed()) return existing;
+  if (existing && !existing.isDestroyed()) {
+    debug("pet.agent", "reuse existing window", { petId, windowId: existing.id, activeWindows: agentPetWindows.size });
+    return existing;
+  }
 
   const pet = getAppStateSnapshot().pets.installed.find((candidate) => candidate.id === petId);
   if (!pet) throw new Error(`Installed pet is unavailable: ${petId}`);
@@ -90,14 +109,17 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   });
 
   window.on("closed", () => {
+    info("pet.agent", "closed", { petId, windowId: window.id, activeWindowsBeforeDelete: agentPetWindows.size });
     agentPetWindows.delete(petId);
     clearAgentDisplay(petId);
   });
   agentPetWindows.set(petId, window);
+  info("pet.agent", "created", { petId, windowId: window.id, offset, activeWindows: agentPetWindows.size, position: { x: initial.x - offset * 36, y: initial.y - offset * 24 } });
   return window;
 }
 
 function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
+  debug("pet.agent", "display set", { petId, reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
   const preparedDisplay = mergePetTransientDisplay(transientDisplays.get(petId) ?? null, display);
   transientDisplays.set(petId, preparedDisplay);
   if (display.reaction) setStatusBadge(petId, display.reaction);
@@ -135,6 +157,7 @@ function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
 }
 
 function clearAgentDisplay(petId: string): void {
+  debug("pet.agent", "display cleared", { petId, hadDisplay: transientDisplays.has(petId), hadBadge: statusBadges.has(petId) });
   const timer = transientTimers.get(petId);
   if (timer) clearTimeout(timer);
   const animationTimer = transientAnimationTimers.get(petId);
@@ -155,6 +178,7 @@ function setStatusBadge(petId: string, reaction: OpenPetsReaction): void {
   }
 
   statusBadges.set(petId, reaction);
+  debug("pet.agent", "status badge set", { petId, reaction, durationMs: isBusyStatusBadgeReaction(reaction) ? busyStatusBadgeMs : transientDisplayMs });
   const existingTimer = statusBadgeTimers.get(petId);
   if (existingTimer) clearTimeout(existingTimer);
   const timer = setTimeout(() => {
@@ -166,6 +190,7 @@ function setStatusBadge(petId: string, reaction: OpenPetsReaction): void {
 }
 
 function clearStatusBadge(petId: string): void {
+  if (statusBadges.has(petId)) debug("pet.agent", "status badge cleared", { petId, reaction: statusBadges.get(petId) });
   statusBadges.delete(petId);
   const timer = statusBadgeTimers.get(petId);
   if (timer) clearTimeout(timer);
