@@ -15,6 +15,7 @@ const publishOrder = [
   "packages/claude",
   "packages/opencode",
   "packages/cursor",
+  "packages/pi",
   "packages/cli",
   "packages/install-pet",
 ];
@@ -176,8 +177,9 @@ Packages:
   4. @open-pets/claude
   5. @open-pets/opencode
   6. @open-pets/cursor
-  7. @open-pets/cli
-  8. install-pet
+  7. @open-pets/pi
+  8. @open-pets/cli
+  9. install-pet
 
 Options:
   --yes            publish to npm; without this, runs pnpm publish --dry-run

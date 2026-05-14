@@ -100,10 +100,12 @@ packages/agent-events/package.json
 packages/claude/package.json
 packages/cli/package.json
 packages/client/package.json
+packages/cursor/package.json
 packages/install-pet/package.json
 packages/mcp/package.json
 packages/opencode/package.json
 packages/pet-format/package.json
+packages/pi/package.json
 ```
 
 Set each top-level `version` field to the chosen version, for example:
@@ -292,7 +294,10 @@ OpenPets publishes these public npm packages, in dependency order:
 @open-pets/mcp
 @open-pets/claude
 @open-pets/opencode
+@open-pets/cursor
+@open-pets/pi
 @open-pets/cli
+install-pet
 ```
 
 Do not publish the private workspace root, `@open-pets/desktop`, or `@open-pets/pet-format`.
@@ -327,7 +332,10 @@ npm view @open-pets/agent-events@<version> version
 npm view @open-pets/mcp@<version> version
 npm view @open-pets/claude@<version> version
 npm view @open-pets/opencode@<version> version
+npm view @open-pets/cursor@<version> version
+npm view @open-pets/pi@<version> version
 npm view @open-pets/cli@<version> version
+npm view install-pet@<version> version
 npx -y @open-pets/cli@<version> --help
 ```
 
