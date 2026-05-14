@@ -148,6 +148,21 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
     else window.setIgnoreMouseEvents(false);
   };
 
+  const rearmPassthroughAfterLoad = (): void => {
+    if (window.isDestroyed()) return;
+    if (process.platform !== "win32") {
+      setPassthrough(true);
+      return;
+    }
+
+    // On Windows, rapid pet HTML reloads can leave Chromium's forwarded mouse
+    // tracking stale while the cursor is already over the transparent window.
+    // Toggle passthrough after each completed reload so hover/drag mousemove
+    // forwarding is re-registered without requiring the cursor to leave/re-enter.
+    window.setIgnoreMouseEvents(false);
+    window.setIgnoreMouseEvents(true, { forward: true });
+  };
+
   const handleHitTest = (event: IpcMainEvent, interactive: unknown): void => {
     if (!isFromWindow(event)) return;
     rendererReady = true;
@@ -190,7 +205,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   const rearmAfterLoad = (): void => {
     dragging = null;
     debug("pet.window", "load rearm passthrough", { windowId: window.id });
-    setPassthrough(true);
+    rearmPassthroughAfterLoad();
   };
 
   const handleDomReady = (): void => {
