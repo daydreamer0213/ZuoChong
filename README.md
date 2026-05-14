@@ -12,6 +12,34 @@
 
 ---
 
+## 2-minute Quick Start
+
+Install the OpenPets Agent Skill with [skills.sh](https://skills.sh/):
+
+```bash
+npx skills add alvinunreal/openpets --skill openpets
+```
+
+Then open Claude Code, OpenCode, Codex, or another skill-aware agent and say:
+
+```text
+Use the OpenPets skill. Install OpenPets for me, connect this agent, and verify the integration works.
+```
+
+For project setup, open your agent inside the repo and say:
+
+```text
+Use the OpenPets skill. Install pet <petId>, configure this project to use it, and verify the project integration.
+```
+
+Useful prompts:
+
+```text
+Use the OpenPets skill. Configure this project for Claude Code with pet <petId>.
+Use the OpenPets skill. Configure this project for OpenCode with pet <petId>.
+Use the OpenPets skill. Debug why openpets_status is unavailable.
+```
+
 ## Star OpenPets
 
 Here is an extra GIF of me starring my own repo to encourage you to do the same. If OpenPets makes your coding setup a little more fun, please give the repo a star.
@@ -76,9 +104,11 @@ Use the desktop **Integrations** screen for global setup when available:
 For project-local setup, run the CLI from the project you want to configure:
 
 ```bash
-npx -y @open-pets/cli configure --agent claude --pet <petId>
-npx -y @open-pets/cli configure --agent opencode --pet <petId>
+npx -y @open-pets/cli@latest configure --agent claude --pet <petId>
+npx -y @open-pets/cli@latest configure --agent opencode --pet <petId>
 ```
+
+If you prefer a permanent `openpets` shell command, install the CLI once with `npm install -g @open-pets/cli` and replace `npx -y @open-pets/cli@latest` with `openpets`.
 
 Project-local setup can create project files such as `.claude/settings.local.json` or `.opencode/opencode.jsonc`. Review them before committing because they may include the selected pet id.
 
@@ -97,18 +127,18 @@ Claude Code integration supports:
 - `openpets` MCP setup via Claude Code.
 - Managed Claude memory instructions in `~/.claude/CLAUDE.md` and `~/.claude/openpets.md`.
 - Managed Claude hooks in `~/.claude/settings.json`.
-- Project-local setup through `openpets configure --agent claude --pet <petId>`.
+- Project-local setup through `npx -y @open-pets/cli@latest configure --agent claude --pet <petId>` or the optional global `openpets` CLI.
 
 Typical global MCP command shape:
 
 ```bash
-claude mcp add --scope user openpets -- npx -y @open-pets/mcp
+claude mcp add --scope user openpets -- npx -y @open-pets/mcp@latest
 ```
 
 With a selected pet:
 
 ```bash
-claude mcp add --scope user openpets -- npx -y @open-pets/mcp --pet <petId>
+claude mcp add --scope user openpets -- npx -y @open-pets/mcp@latest --pet <petId>
 ```
 
 <p align="center">
@@ -129,7 +159,7 @@ OpenCode integration supports:
 Project-local setup:
 
 ```bash
-npx -y @open-pets/cli configure --agent opencode --pet <petId>
+npx -y @open-pets/cli@latest configure --agent opencode --pet <petId>
 ```
 
 See [`docs/opencode.md`](docs/opencode.md) for global config selection, plugin behavior, project-local setup, and safety rules.
@@ -144,7 +174,7 @@ Any MCP-capable editor or coding agent can talk to OpenPets through the MCP serv
     "openpets": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@open-pets/mcp"]
+      "args": ["-y", "@open-pets/mcp@latest"]
     }
   }
 }
@@ -158,7 +188,7 @@ To target a specific installed non-default pet:
     "openpets": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@open-pets/mcp", "--pet", "<petId>"]
+      "args": ["-y", "@open-pets/mcp@latest", "--pet", "<petId>"]
     }
   }
 }
