@@ -1,18 +1,15 @@
 {
-  "name": "@open-pets/cli",
+  "name": "@open-pets/cursor",
   "version": "2.0.6",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alvinunreal/openpets.git",
-    "directory": "packages/cli"
+    "directory": "packages/cursor"
   },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "openpets": "dist/index.js"
-  },
   "files": [
     "dist"
   ],
@@ -26,7 +23,7 @@
     }
   },
   "scripts": {
-    "test": "node dist/check-cli-contract.js",
+    "test": "node dist/check-cursor.js",
     "check": "pnpm typecheck && pnpm build && pnpm test",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
@@ -34,12 +31,5 @@
   "devDependencies": {
     "@types/node": "^25.6.2",
     "typescript": "^6.0.3"
-  },
-  "dependencies": {
-    "@open-pets/client": "workspace:*",
-    "@open-pets/claude": "workspace:*",
-    "@open-pets/cursor": "workspace:*",
-    "@open-pets/mcp": "workspace:*",
-    "@open-pets/opencode": "workspace:*"
   }
 }

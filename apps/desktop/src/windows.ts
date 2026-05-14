@@ -210,7 +210,7 @@ export function installInternalUiHandlers(): void {
 
   ipcMain.handle("openpets:agent-setup-action", async (event, action: unknown, selectedPetId: unknown, commandMode: unknown) => {
     assertAllowedSender(event, ["agent-setup"]);
-    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "opencode-install" && action !== "opencode-remove") {
+    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove") {
       throw new Error("Invalid agent setup action.");
     }
 
@@ -579,9 +579,13 @@ function createAgentSetupHtml(definition: TaskWindowDefinition): string {
                   <button id="integration-pi-configure" class="agent-action secondary">View setup</button>
                 </div>
               </article>
-              <article class="integration-card disabled">
-                <div class="integration-card-top"><span class="integration-icon"><img src="${escapeHtml(integrationIcons.cursor)}" alt="" draggable="false" /></span><span class="agent-status-pill muted">Soon</span></div>
-                <h2>Cursor</h2><p>Coming soon.</p><button class="agent-action secondary" disabled>Coming soon</button>
+              <article class="integration-card" data-integration-card="cursor" tabindex="-1">
+                <div class="integration-card-top"><span class="integration-icon"><img src="${escapeHtml(integrationIcons.cursor)}" alt="" draggable="false" /></span><span id="integration-cursor-status" class="agent-status-pill">Checking</span></div>
+                <h2>Cursor</h2><p>Connect Cursor to your OpenPets companion via global MCP config.</p>
+                <div class="integration-actions stacked">
+                  <button id="integration-cursor-install" class="agent-action primary" disabled data-loading="true">Checking…</button>
+                  <button id="integration-cursor-configure" class="agent-action secondary" disabled data-loading="true">Checking…</button>
+                </div>
               </article>
               <article class="integration-card disabled">
                 <div class="integration-card-top"><span class="integration-icon"><img src="${escapeHtml(integrationIcons.vscode)}" alt="" draggable="false" /></span><span class="agent-status-pill muted">Soon</span></div>
@@ -750,6 +754,23 @@ pi install -l npm:@open-pets/pi
 pi remove npm:@open-pets/pi</pre></details>
               </article>
               <p id="pi-action-result" class="agent-result" aria-live="polite">Pi setup is manual until real Pi CLI install validation is complete.</p>
+            </section>
+          </section>
+
+          <section id="cursor-detail-view" class="claude-detail-view" aria-labelledby="cursor-detail-title" hidden>
+            <div class="claude-detail-toolbar"><button id="cursor-integration-back" class="agent-action secondary compact">Back to integrations</button></div>
+            <section class="agent-setup-pane" aria-labelledby="cursor-detail-title">
+              <header class="agent-title-block compact-title"><p class="eyebrow">Integration</p><h1 id="cursor-detail-title" tabindex="-1">Cursor</h1><p class="lede">Connect Cursor to OpenPets. Desktop setup writes global Cursor MCP config at ~/.cursor/mcp.json. Use the CLI for project-local setup.</p></header>
+              <article class="agent-status-card connection-card">
+                <div class="agent-section-header"><span><small>Global connection</small><strong id="cursor-status-title">Checking setup…</strong></span><span id="cursor-status" class="agent-status-pill">Checking</span></div>
+                <p id="cursor-details" class="agent-note">Checking Cursor MCP config…</p>
+                <div class="agent-control-group"><label class="agent-field-label" for="cursor-pet-select">Pet routing</label><select id="cursor-pet-select" class="agent-select"></select></div>
+                <section class="agent-command-paths" aria-labelledby="cursor-command-paths-title"><div class="agent-command-paths-title"><small>Configuration</small><strong id="cursor-command-paths-title">Command paths</strong></div><p class="agent-note">If Node.js is not detected from the app, paste the full executable path. Leave blank for automatic PATH detection.</p><label class="agent-subfield" for="cursor-node-command-path"><span>Node.js command</span><div class="agent-path-row"><input id="cursor-node-command-path" class="agent-text-input" type="text" spellcheck="false" placeholder="/Users/name/.nvm/versions/node/v22/bin/node" /><button id="cursor-node-command-path-save" class="agent-action secondary compact">Save path</button></div></label></section>
+                <p class="agent-hook-warning warning">Desktop Cursor setup is global and can affect every Cursor project. For project-local setup, run <code>openpets configure --agent cursor --pet &lt;id&gt;</code>. Cursor may need to be restarted or reloaded after MCP config changes. Published mode uses npx and may require npm/network/cache access. OpenPets only edits its own <code>mcpServers.openpets</code> entry.</p>
+                <div class="agent-actions agent-main-actions"><button id="cursor-install" class="agent-action primary">Install global setup</button><button id="cursor-replace" class="agent-action primary">Replace configuration</button><button id="cursor-remove" class="agent-action danger">Remove global setup</button><button id="cursor-refresh" class="agent-action secondary">Refresh</button></div>
+                <details class="agent-inline-details" open><summary><span><small>Preview</small><strong>OpenPets-only MCP config</strong></span></summary><p id="cursor-paths" class="agent-note"></p><div class="agent-actions advanced-actions"><button id="cursor-copy-preview" class="agent-action secondary compact">Copy preview</button></div><pre id="cursor-json-preview" class="agent-preview-code json-preview" aria-label="Cursor MCP config preview" aria-live="polite"></pre></details>
+              </article>
+              <p id="cursor-action-result" class="agent-result" aria-live="polite">Cursor may need to be restarted or reloaded after MCP config changes.</p>
             </section>
           </section>
 

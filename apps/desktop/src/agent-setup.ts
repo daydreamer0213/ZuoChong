@@ -5,12 +5,14 @@ import { createRequire } from "node:module";
 
 import { app } from "electron";
 import { buildClaudeMcpGetCommand, buildClaudeMcpPreview, classifyClaudeMcpStatus, createOpenPetsHookSettingsPreview, doctorClaudeHooks, installClaudeHooks, mapAsarPathToUnpacked, uninstallClaudeHooks, type ClaudeCommandSpec, type ClaudeHookDoctorResult, type ClaudeMcpPreview, type OpenPetsCommandMode, type ParsedClaudeMcpEntry } from "@open-pets/claude";
+import { classifyCursorMcpStatus, executeCursorMcpWrite, getCursorGlobalMcpPath, planCursorMcpInstall, planCursorMcpRemove, planCursorMcpReplace, readCursorMcpConfig, type CursorMcpStatusResult } from "@open-pets/cursor";
+import { buildOpenPetsOnlyPreview, type RedactedPreview } from "@open-pets/cursor";
 import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeConfig, prepareOpenCodeGlobalRemove, prepareOpenCodeGlobalSetup, writePreparedOpenCodeGlobalRemove, writePreparedOpenCodeGlobalSetup } from "@open-pets/opencode";
 
 import { getAppStateSnapshot, updatePreferences, type InstalledPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, uninstallClaudeOpenPetsMemory, type ClaudeOpenPetsMemoryStatus } from "./claude-memory.js";
 
-export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove";
+export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
 export type JournalAction = "configure" | "update" | "replace" | "remove";
 
 export interface AgentSetupPetOption {
@@ -43,6 +45,8 @@ export interface AgentSetupSnapshot {
   readonly memoryStatus: ClaudeOpenPetsMemoryStatus;
   readonly opencodeStatus: OpenCodeSetupStatus;
   readonly opencodePreview: OpenCodeSetupPreview;
+  readonly cursorStatus: CursorSetupStatus;
+  readonly cursorPreview: CursorSetupPreview;
   readonly commandPaths: AgentSetupCommandPaths;
   readonly busy: boolean;
   readonly lastAction?: AgentSetupActionResult;
@@ -72,6 +76,23 @@ export interface OpenCodeSetupPreview {
   readonly plugin: readonly unknown[] | string;
   readonly instructionPath: string;
   readonly configPreview: Record<string, unknown>;
+}
+
+export interface CursorSetupStatus {
+  readonly state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update";
+  readonly label: string;
+  readonly details: string;
+  readonly configPath: string;
+  readonly canInstall: boolean;
+  readonly canReplace: boolean;
+  readonly canRemove: boolean;
+}
+
+export interface CursorSetupPreview {
+  readonly global: true;
+  readonly configPath: string;
+  readonly mcpEntry: RedactedPreview;
+  readonly commandMode: "published" | "local" | "bundled";
 }
 
 export interface AgentSetupActionResult {
@@ -116,6 +137,7 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
   const rawMemoryStatus = doctorClaudeOpenPetsMemory(app.getPath("home"));
   const memoryStatus = { ...rawMemoryStatus, claudeMdPath: formatUserPath(rawMemoryStatus.claudeMdPath) ?? rawMemoryStatus.claudeMdPath, openPetsMemoryPath: formatUserPath(rawMemoryStatus.openPetsMemoryPath) ?? rawMemoryStatus.openPetsMemoryPath };
   const opencode = await getOpenCodeSetup(commandMode, petId);
+  const cursor = await getCursorSetup(commandMode, petId);
 
   return {
     selectedPetId: petId,
@@ -128,6 +150,8 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
     memoryStatus,
     opencodeStatus: opencode.status,
     opencodePreview: opencode.preview,
+    cursorStatus: cursor.status,
+    cursorPreview: cursor.preview,
     commandPaths: getAgentSetupCommandPaths(),
     busy: operationRunning,
     lastAction,
@@ -225,6 +249,9 @@ function createHookErrorStatus(message: string): ClaudeHookDoctorResult {
 async function runAction(action: AgentSetupAction, selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
   if (action === "opencode-install") return installOpenCodeGlobal(selectedPetId, commandMode);
   if (action === "opencode-remove") return removeOpenCodeGlobal();
+  if (action === "cursor-install") return installCursorGlobal(selectedPetId, commandMode);
+  if (action === "cursor-replace") return replaceCursorGlobal(selectedPetId, commandMode);
+  if (action === "cursor-remove") return removeCursorGlobal();
   if (action === "doctor-hooks") {
     const doctor = safeDoctorClaudeHooks(commandMode, selectedPetId);
     writeActionJournal({ action: "update", selectedPetId, command: createHookJournalCommand("doctor-hooks", selectedPetId), previousStatus: doctor.status, success: doctor.status !== "error", message: doctor.message });
@@ -338,6 +365,74 @@ async function getOpenCodeSetup(commandMode: OpenPetsCommandMode, selectedPetId:
   };
 }
 
+async function getCursorSetup(commandMode: OpenPetsCommandMode, selectedPetId: string | undefined): Promise<{ readonly status: CursorSetupStatus; readonly preview: CursorSetupPreview }> {
+  const homeDir = app.getPath("home");
+  const configPath = getCursorGlobalMcpPath(homeDir);
+  const petId = selectedPetId || undefined;
+  const mcpVersion = getMcpPackageVersion();
+
+  const configResult = readCursorMcpConfig(configPath);
+  const statusResult = classifyCursorMcpStatus(configResult, configPath, { mcpVersion, petId, commandMode: "published" });
+
+  const state = mapCursorStatusToState(statusResult.status);
+  const label = mapCursorStatusToLabel(statusResult.status);
+  const details = statusResult.message;
+
+  return {
+    status: {
+      state,
+      label,
+      details,
+      configPath: formatUserPath(configPath) ?? configPath,
+      canInstall: statusResult.canInstall,
+      canReplace: statusResult.canReplace,
+      canRemove: statusResult.canRemove,
+    },
+    preview: {
+      global: true,
+      configPath: formatUserPath(configPath) ?? configPath,
+      mcpEntry: buildOpenPetsOnlyPreview({ mcpVersion, petId, commandMode: "published" }),
+      commandMode: "published",
+    },
+  };
+}
+
+function mapCursorStatusToState(status: CursorMcpStatusResult["status"]): CursorSetupStatus["state"] {
+  switch (status) {
+    case "installed":
+      return "configured";
+    case "missing":
+      return "needs_setup";
+    case "needs-update":
+      return "needs_update";
+    case "conflict":
+      return "conflict";
+    case "invalid":
+    case "error":
+      return "error";
+    default:
+      return "error";
+  }
+}
+
+function mapCursorStatusToLabel(status: CursorMcpStatusResult["status"]): string {
+  switch (status) {
+    case "installed":
+      return "Configured";
+    case "missing":
+      return "Not configured";
+    case "needs-update":
+      return "Needs update";
+    case "conflict":
+      return "Conflict";
+    case "invalid":
+    case "error":
+      return "Config error";
+    default:
+      return "Checking";
+  }
+}
+
 function getAgentSetupCommandPaths(): AgentSetupCommandPaths {
   const preferences = getAppStateSnapshot().preferences;
   return {
@@ -420,6 +515,66 @@ async function removeOpenCodeGlobal(): Promise<AgentSetupActionResult> {
   }
 }
 
+async function installCursorGlobal(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
+  void commandMode;
+  try {
+    const homeDir = app.getPath("home");
+    const configPath = getCursorGlobalMcpPath(homeDir);
+    const mcpVersion = getMcpPackageVersion();
+    const plan = planCursorMcpInstall(configPath, { mcpVersion, petId: selectedPetId || undefined, commandMode: "published" });
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "cursor-install", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeCursorMcpWrite(plan);
+      const backupMsg = plan.backupPath ? ` Backup: ${formatUserPath(plan.backupPath) ?? plan.backupPath}.` : "";
+      return { ok: true, action: "cursor-install", message: `Installed Cursor OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}.${backupMsg} Cursor may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "cursor-install", message: "Failed to plan Cursor MCP install.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "cursor-install", message: error instanceof Error ? error.message : "Cursor MCP install failed.", changed: false };
+  }
+}
+
+async function replaceCursorGlobal(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
+  void commandMode;
+  try {
+    const homeDir = app.getPath("home");
+    const configPath = getCursorGlobalMcpPath(homeDir);
+    const mcpVersion = getMcpPackageVersion();
+    const plan = planCursorMcpReplace(configPath, { mcpVersion, petId: selectedPetId || undefined, commandMode: "published" });
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "cursor-replace", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeCursorMcpWrite(plan);
+      const backupMsg = plan.backupPath ? ` Backup: ${formatUserPath(plan.backupPath) ?? plan.backupPath}.` : "";
+      return { ok: true, action: "cursor-replace", message: `Replaced Cursor OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}.${backupMsg} Cursor may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "cursor-replace", message: "Failed to plan Cursor MCP replace.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "cursor-replace", message: error instanceof Error ? error.message : "Cursor MCP replace failed.", changed: false };
+  }
+}
+
+async function removeCursorGlobal(): Promise<AgentSetupActionResult> {
+  try {
+    const homeDir = app.getPath("home");
+    const configPath = getCursorGlobalMcpPath(homeDir);
+    const plan = planCursorMcpRemove(configPath);
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "cursor-remove", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeCursorMcpWrite(plan);
+      return { ok: true, action: "cursor-remove", message: `Removed Cursor OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}. Cursor may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "cursor-remove", message: "Failed to plan Cursor MCP remove.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "cursor-remove", message: error instanceof Error ? error.message : "Cursor MCP remove failed.", changed: false };
+  }
+}
+
 function getDesktopCliEntryPath(commandMode: OpenPetsCommandMode): string {
   const path = require.resolve("@open-pets/cli");
   return commandMode === "bundled" ? mapAsarPathToUnpacked(path) : path;
@@ -442,6 +597,10 @@ function getWorkspacePackageVersion(packageName: string): string {
   } catch {
     return "0.0.0";
   }
+}
+
+function getMcpPackageVersion(): string {
+  return getWorkspacePackageVersion("@open-pets/mcp");
 }
 
 function summarizeMemoryMessages(...messages: readonly string[]): string {

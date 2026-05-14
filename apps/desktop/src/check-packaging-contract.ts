@@ -23,6 +23,7 @@ assert.match(packageJson.scripts?.["package:dir"] ?? "", /node scripts\/clean-pa
 assert.equal(rootPackageJson.scripts?.["package:desktop:dir"], "pnpm build && pnpm --filter @open-pets/desktop package:dir");
 assert.equal(packageJson.dependencies?.["@open-pets/claude"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/cli"], "workspace:*");
+assert.equal(packageJson.dependencies?.["@open-pets/cursor"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/mcp"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/opencode"], "workspace:*");
 assert.equal(packageJson.dependencies?.["@open-pets/agent-events"], "workspace:*");
@@ -206,6 +207,15 @@ assert.match(preloadSource, /integration-pi-configure/, "Agent Setup preload mus
 assert.match(preloadSource, /pi-copy-global-install/, "Agent Setup preload must bind Pi copy commands.");
 assert.match(preloadSource, /cleanupConfigPaths/, "OpenCode preview must disclose stale overlay cleanup config paths.");
 assert.match(preloadSource, /configPreview/, "OpenCode preview copy must use the prepared config preview shape.");
+assert.match(agentSetupHtmlSource, /integration-cursor-status/, "Agent Setup must show an enabled Cursor integration card.");
+assert.match(agentSetupHtmlSource, /cursor-detail-view/, "Agent Setup must include a Cursor detail pane.");
+assert.match(preloadSource, /cursor-install/, "Agent Setup preload must bind Cursor install actions.");
+assert.match(preloadSource, /cursor-replace/, "Agent Setup preload must bind Cursor replace actions.");
+assert.match(preloadSource, /cursor-remove/, "Agent Setup preload must bind Cursor remove actions.");
+assert.match(preloadSource, /cursor-copy-preview/, "Agent Setup preload must bind Cursor copy-preview actions.");
+assert.match(preloadSource, /updateCursorIntegration/, "Agent Setup preload must render Cursor integration.");
+assert.match(preloadSource, /cursorStatus/, "Agent Setup preload must check Cursor status.");
+assert.match(preloadSource, /cursorPreview/, "Agent Setup preload must render Cursor preview.");
 assert.doesNotMatch(agentSetupSource, /JSON\.parse\(prepared\.configWrite\.content\)/, "OpenCode desktop preview must parse JSONC planned config safely, not JSON.parse.");
 assert.doesNotMatch(agentSetupHtmlSource, /https?:\/\//, "Agent Setup must not allow or reference remote integration assets.");
 assert.match(windowsSource, /agentSetupWindowWidth\s*=\s*1160/, "Agent Setup should use the approved wider 1160px default window width.");
@@ -249,6 +259,8 @@ function checkPackageOutput(): void {
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "cli", "dist", "index.js")), "packaged @open-pets/cli runtime is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "opencode", "dist", "plugin.js")), "packaged @open-pets/opencode plugin runtime is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "opencode", "package.json")), "packaged @open-pets/opencode package metadata is missing.");
+  assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "cursor", "dist", "index.js")), "packaged @open-pets/cursor runtime is missing.");
+  assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "cursor", "package.json")), "packaged @open-pets/cursor package metadata is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "agent-events", "dist", "index.js")), "packaged @open-pets/agent-events runtime is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@modelcontextprotocol", "sdk")), "packaged MCP SDK runtime dependency is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "zod", "index.cjs")), "packaged zod runtime dependency is missing.");

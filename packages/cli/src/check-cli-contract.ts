@@ -19,7 +19,8 @@ assert.equal(parseConfigureArgs(["--pet", "fixer", "--replace"]).force, true);
 assert.equal(parseConfigureArgs(["--pet", "fixer", "--local-dev"]).localDev, true);
 assert.equal(parseConfigureArgs(["--pet=fixer"]).petId, "fixer");
 assert.equal(parseConfigureArgs(["--agent", "opencode", "--pet", "fixer"]).agent, "opencode");
-assert.throws(() => parseConfigureArgs(["--agent", "cursor"]));
+assert.equal(parseConfigureArgs(["--agent", "cursor", "--pet", "fixer"]).agent, "cursor");
+assert.equal(parseConfigureArgs(["--agent", "cursor", "--pet", "fixer"]).cwd, process.cwd());
 assert.throws(() => parseConfigureArgs(["--pet", "bad/pet"]));
 assert.deepEqual(parseInstallArgs(["review-owl"]), { petId: "review-owl" });
 assert.throws(() => parseInstallArgs([]));
@@ -184,6 +185,42 @@ try {
   writeFileSync(join(outsideOpenCode, "openpets.md"), "outside\n", "utf8");
   symlinkSync(outsideOpenCode, join(symlinkOpenCodeProject, ".opencode"));
   await assert.rejects(() => configureProject({ agent: "opencode", petId: "fixer", cwd: symlinkOpenCodeProject, yes: true, force: false, localDev: false }));
+
+  const cursorProject = join(dir, "cursor-project");
+  mkdirSync(cursorProject);
+  await configureProject({ agent: "cursor", petId: "fixer", cwd: cursorProject, yes: true, force: false, localDev: false });
+  const cursorConfigPath = join(cursorProject, ".cursor", "mcp.json");
+  const cursorConfig = JSON.parse(readFileSync(cursorConfigPath, "utf8")) as { readonly mcpServers?: Record<string, { readonly command?: string; readonly args?: readonly string[] }> };
+  assert.equal(cursorConfig.mcpServers?.openpets?.command, "npx");
+  assert.deepEqual(cursorConfig.mcpServers?.openpets?.args, ["-y", `@open-pets/mcp@${packageVersion}`, "--pet", "fixer"]);
+  assert.equal(readFileSync(cursorConfigPath, "utf8").includes("@open-pets/cli"), false);
+
+  const cursorExistingProject = join(dir, "cursor-existing");
+  mkdirSync(join(cursorExistingProject, ".cursor"), { recursive: true });
+  writeFileSync(join(cursorExistingProject, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { other: { type: "stdio", command: "other", args: ["--token=hidden"], env: { SECRET: "hidden" } } }, topLevel: "keep" }, null, 2), "utf8");
+  const originalStdoutWrite = process.stdout.write;
+  let cursorOutput = "";
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => { cursorOutput += String(chunk); return true; }) as typeof process.stdout.write;
+  try {
+    await configureProject({ agent: "cursor", petId: "helper", cwd: cursorExistingProject, yes: true, force: false, localDev: false });
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
+  assert.equal(cursorOutput.includes("hidden"), false);
+  const cursorExistingConfig = JSON.parse(readFileSync(join(cursorExistingProject, ".cursor", "mcp.json"), "utf8")) as { readonly mcpServers?: Record<string, { readonly command?: string; readonly args?: readonly string[]; readonly env?: unknown }>; readonly topLevel?: string };
+  assert.deepEqual(cursorExistingConfig.mcpServers?.other?.args, ["--token=hidden"]);
+  assert.deepEqual(cursorExistingConfig.mcpServers?.other?.env, { SECRET: "hidden" });
+  assert.equal(cursorExistingConfig.topLevel, "keep");
+  assert.deepEqual(cursorExistingConfig.mcpServers?.openpets?.args, ["-y", `@open-pets/mcp@${packageVersion}`, "--pet", "helper"]);
+
+  const cursorConflictProject = join(dir, "cursor-conflict");
+  mkdirSync(join(cursorConflictProject, ".cursor"), { recursive: true });
+  writeFileSync(join(cursorConflictProject, ".cursor", "mcp.json"), JSON.stringify({ mcpServers: { openpets: { type: "stdio", command: "custom", args: [] }, other: { type: "stdio", command: "other", args: [] } } }, null, 2), "utf8");
+  await assert.rejects(() => configureProject({ agent: "cursor", petId: "fixer", cwd: cursorConflictProject, yes: true, force: false, localDev: false }));
+  await configureProject({ agent: "cursor", petId: "fixer", cwd: cursorConflictProject, yes: true, force: true, localDev: false });
+  const cursorReplaced = JSON.parse(readFileSync(join(cursorConflictProject, ".cursor", "mcp.json"), "utf8")) as { readonly mcpServers?: Record<string, { readonly command?: string; readonly args?: readonly string[] }> };
+  assert.equal(cursorReplaced.mcpServers?.other?.command, "other");
+  assert.deepEqual(cursorReplaced.mcpServers?.openpets?.args, ["-y", `@open-pets/mcp@${packageVersion}`, "--pet", "fixer"]);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

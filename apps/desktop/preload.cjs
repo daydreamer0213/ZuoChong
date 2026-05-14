@@ -215,6 +215,7 @@ async function renderAgentSetup(selectedPetId, commandMode) {
   decorateAgentSetupButtons();
   updateClaudeDetailActions(snapshot);
   bindIntegrationHubButtons(snapshot, select);
+  updateCursorIntegration(snapshot, selected);
   bindAgentSetupButton("claude-refresh", () => renderAgentSetup(select.value, getCommandMode()), snapshot.busy, "Refreshing…");
   bindAgentSetupButton("claude-command-path-save", () => saveAgentCommandPath("claude", claudeCommandPath.value, select.value, getCommandMode()), snapshot.busy, "Saving…");
   bindAgentSetupButton("node-command-path-save", () => saveAgentCommandPath("node", nodeCommandPath.value, select.value, getCommandMode()), snapshot.busy, "Saving…");
@@ -275,9 +276,66 @@ function updateOpenCodeIntegration(snapshot, selected) {
   bindAgentSetupButton("opencode-remove", () => runAgentAction("opencode-remove", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy || !opencode.canRemove, "Removing…");
   bindAgentSetupButton("opencode-refresh", () => renderAgentSetup(select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Refreshing…");
   bindAgentSetupButton("opencode-command-path-save", () => saveAgentCommandPath("opencode", opencodeCommandPath instanceof HTMLInputElement ? opencodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Saving…");
-  bindAgentSetupButton("opencode-node-command-path-save", () => saveAgentCommandPath("node", opencodeNodeCommandPath instanceof HTMLInputElement ? opencodeNodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Saving…");
+  bindAgentSetupButton("opencode-node-command-path-save", () => saveAgentCommandPath("node", opencodeNodeCommandPath instanceof HTMLInputElement ? opencodeNodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode(), "opencode-action-result"), snapshot.busy, "Saving…");
   bindAgentSetupButton("opencode-copy-config", async () => copyText(requireElement("opencode-json-preview").textContent || "", "opencode-action-result", "Copied OpenCode config preview."), false);
   if (select instanceof HTMLSelectElement) select.onchange = () => { void renderAgentSetup(select.value, getCommandMode()); };
+}
+
+function updateCursorIntegration(snapshot, selected) {
+  const cursor = snapshot.cursorStatus;
+  const preview = snapshot.cursorPreview;
+  if (!cursor || !preview) return;
+  const cardStatus = document.getElementById("integration-cursor-status");
+  if (cardStatus) {
+    cardStatus.textContent = cursor.label;
+    cardStatus.className = `agent-status-pill ${cardStatusClassFor(cursor.state)}`;
+  }
+  const installCard = document.getElementById("integration-cursor-install");
+  if (installCard instanceof HTMLButtonElement) {
+    delete installCard.dataset.loading;
+    setIconButtonContent(installCard, cursor.state === "configured" ? "check" : "download", cursor.state === "configured" ? "Installed" : "Install");
+    installCard.disabled = snapshot.busy || !cursor.canInstall || cursor.state === "configured";
+  }
+  const configureCard = document.getElementById("integration-cursor-configure");
+  if (configureCard instanceof HTMLButtonElement) {
+    delete configureCard.dataset.loading;
+    setIconButtonContent(configureCard, "settings", "Configure");
+    configureCard.disabled = false;
+  }
+  const status = document.getElementById("cursor-status");
+  if (status) { status.textContent = cursor.label; status.className = `agent-status-pill ${statusClassFor(cursor.state)}`; }
+  const title = document.getElementById("cursor-status-title");
+  if (title) title.textContent = cursor.state === "configured" ? "Cursor global setup installed" : "Global setup available";
+  const details = document.getElementById("cursor-details");
+  if (details) details.textContent = cursor.details;
+  updateCursorCommandPathHelp(cursor);
+  const select = document.getElementById("cursor-pet-select");
+  if (select instanceof HTMLSelectElement) renderPetSelect(select, snapshot, selected);
+  const cursorNodeCommandPath = document.getElementById("cursor-node-command-path");
+  if (cursorNodeCommandPath instanceof HTMLInputElement) cursorNodeCommandPath.value = snapshot.commandPaths.node || "";
+  const paths = document.getElementById("cursor-paths");
+  if (paths) {
+    paths.textContent = `Config file: ${cursor.configPath}`;
+  }
+  const json = document.getElementById("cursor-json-preview");
+  if (json) json.textContent = JSON.stringify(preview.mcpEntry && preview.mcpEntry.openpets ? { mcpServers: preview.mcpEntry } : { mcpServers: {} }, null, 2);
+  const result = document.getElementById("cursor-action-result");
+  if (result) result.textContent = snapshot.lastAction && String(snapshot.lastAction.action).startsWith("cursor-") ? snapshot.lastAction.message : "Cursor may need to be restarted or reloaded after MCP config changes.";
+  bindAgentSetupButton("cursor-install", () => runAgentAction("cursor-install", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy || !cursor.canInstall, "Installing…");
+  bindAgentSetupButton("cursor-replace", () => runAgentAction("cursor-replace", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy || !cursor.canReplace, "Replacing…");
+  bindAgentSetupButton("cursor-remove", () => runAgentAction("cursor-remove", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy || !cursor.canRemove, "Removing…");
+  bindAgentSetupButton("cursor-refresh", () => renderAgentSetup(select instanceof HTMLSelectElement ? select.value : selected, getCommandMode()), snapshot.busy, "Refreshing…");
+  bindAgentSetupButton("cursor-node-command-path-save", () => saveAgentCommandPath("node", cursorNodeCommandPath instanceof HTMLInputElement ? cursorNodeCommandPath.value : "", select instanceof HTMLSelectElement ? select.value : selected, getCommandMode(), "cursor-action-result"), snapshot.busy, "Saving…");
+  bindAgentSetupButton("cursor-copy-preview", async () => copyText(requireElement("cursor-json-preview").textContent || "", "cursor-action-result", "Copied Cursor MCP preview."), false);
+  if (select instanceof HTMLSelectElement) select.onchange = () => { void renderAgentSetup(select.value, getCommandMode()); };
+}
+
+function updateCursorCommandPathHelp(cursor) {
+  const needsNode = /Node\.js is required|set the Node\.js command path/i.test(cursor.details || "");
+  const paths = document.querySelector("#cursor-detail-view .agent-command-paths");
+  const card = document.querySelector("#cursor-detail-view .connection-card");
+  if (paths instanceof HTMLElement) paths.classList.toggle("needs-command-path", needsNode);
+  if (card instanceof HTMLElement) card.classList.toggle("needs-command-path", needsNode);
 }
 
 function updateClaudeIntegrationCard(snapshot) {
@@ -344,6 +402,8 @@ function bindIntegrationHubButtons(snapshot, select) {
   const opencodeInstall = document.getElementById("integration-opencode-install");
   const opencodeConfigure = document.getElementById("integration-opencode-configure");
   const piConfigure = document.getElementById("integration-pi-configure");
+  const cursorInstall = document.getElementById("integration-cursor-install");
+  const cursorConfigure = document.getElementById("integration-cursor-configure");
   if (install instanceof HTMLButtonElement) {
     install.onclick = async () => {
       if (install.disabled || snapshot.busy) return;
@@ -385,12 +445,33 @@ function bindIntegrationHubButtons(snapshot, select) {
   }
   if (opencodeConfigure instanceof HTMLButtonElement) opencodeConfigure.onclick = () => showOpenCodeDetailView();
   if (piConfigure instanceof HTMLButtonElement) piConfigure.onclick = () => showPiDetailView();
+  if (cursorInstall instanceof HTMLButtonElement) {
+    cursorInstall.onclick = async () => {
+      if (cursorInstall.disabled || snapshot.busy) return;
+      cursorInstall.dataset.loading = "true";
+      cursorInstall.disabled = true;
+      if (cursorConfigure instanceof HTMLButtonElement) cursorConfigure.disabled = true;
+      setIconButtonContent(cursorInstall, "spinner", "Installing…");
+      try {
+        await runAgentAction("cursor-install", select.value, getCommandMode());
+      } catch (error) {
+        delete cursorInstall.dataset.loading;
+        cursorInstall.disabled = false;
+        if (cursorConfigure instanceof HTMLButtonElement) cursorConfigure.disabled = false;
+        setIconButtonContent(cursorInstall, "download", "Install");
+        renderCaughtError(error);
+      }
+    };
+  }
+  if (cursorConfigure instanceof HTMLButtonElement) cursorConfigure.onclick = () => showCursorDetailView();
   const back = document.getElementById("integration-back");
   if (back instanceof HTMLButtonElement) back.onclick = () => showIntegrationsView("claude");
   const openCodeBack = document.getElementById("opencode-integration-back");
   if (openCodeBack instanceof HTMLButtonElement) openCodeBack.onclick = () => showIntegrationsView("opencode");
   const piBack = document.getElementById("pi-integration-back");
   if (piBack instanceof HTMLButtonElement) piBack.onclick = () => showIntegrationsView("pi");
+  const cursorBack = document.getElementById("cursor-integration-back");
+  if (cursorBack instanceof HTMLButtonElement) cursorBack.onclick = () => showIntegrationsView("cursor");
   bindAgentSetupButton("pi-copy-global-install", async () => copyText("pi install npm:@open-pets/pi", "pi-action-result", "Copied Pi global install command."), false);
   bindAgentSetupButton("pi-copy-project-install", async () => copyText("pi install -l npm:@open-pets/pi", "pi-action-result", "Copied Pi project install command."), false);
 }
@@ -408,9 +489,11 @@ function showIntegrationsView(focusCard = "claude") {
   const detail = document.getElementById("claude-detail-view");
   const opencodeDetail = document.getElementById("opencode-detail-view");
   const piDetail = document.getElementById("pi-detail-view");
+  const cursorDetail = document.getElementById("cursor-detail-view");
   if (detail) detail.hidden = true;
   if (opencodeDetail) opencodeDetail.hidden = true;
   if (piDetail) piDetail.hidden = true;
+  if (cursorDetail) cursorDetail.hidden = true;
   if (grid) grid.hidden = false;
   document.querySelector(`[data-integration-card="${focusCard}"]`)?.focus();
 }
@@ -432,11 +515,27 @@ function showPiDetailView() {
   const detail = document.getElementById("pi-detail-view");
   const claude = document.getElementById("claude-detail-view");
   const opencode = document.getElementById("opencode-detail-view");
+  const cursor = document.getElementById("cursor-detail-view");
   if (grid) grid.hidden = true;
   if (claude) claude.hidden = true;
   if (opencode) opencode.hidden = true;
+  if (cursor) cursor.hidden = true;
   if (detail) detail.hidden = false;
   document.getElementById("pi-detail-title")?.focus();
+}
+
+function showCursorDetailView() {
+  const grid = document.getElementById("integrations-view");
+  const detail = document.getElementById("cursor-detail-view");
+  const claude = document.getElementById("claude-detail-view");
+  const opencode = document.getElementById("opencode-detail-view");
+  const pi = document.getElementById("pi-detail-view");
+  if (grid) grid.hidden = true;
+  if (claude) claude.hidden = true;
+  if (opencode) opencode.hidden = true;
+  if (pi) pi.hidden = true;
+  if (detail) detail.hidden = false;
+  document.getElementById("cursor-detail-title")?.focus();
 }
 
 function displayClaudeStatusLabel(snapshot) {
@@ -482,8 +581,9 @@ function memoryStatusClassFor(status) {
 }
 
 function decorateAgentSetupButtons() {
-  for (const id of ["claude-configure", "claude-refresh", "claude-command-path-save", "node-command-path-save", "claude-copy-command", "claude-replace", "claude-remove", "claude-memory-install", "claude-hooks-doctor", "claude-hooks-install", "claude-hooks-uninstall", "opencode-install", "opencode-remove", "opencode-refresh", "opencode-command-path-save", "opencode-node-command-path-save", "opencode-copy-config", "pi-copy-global-install", "pi-copy-project-install"]) {
-    delete requireButton(id).dataset.loading;
+  for (const id of ["claude-configure", "claude-refresh", "claude-command-path-save", "node-command-path-save", "claude-copy-command", "claude-replace", "claude-remove", "claude-memory-install", "claude-hooks-doctor", "claude-hooks-install", "claude-hooks-uninstall", "opencode-install", "opencode-remove", "opencode-refresh", "opencode-command-path-save", "opencode-node-command-path-save", "opencode-copy-config", "pi-copy-global-install", "pi-copy-project-install", "cursor-install", "cursor-replace", "cursor-remove", "cursor-refresh", "cursor-node-command-path-save", "cursor-copy-preview"]) {
+    const button = document.getElementById(id);
+    if (button instanceof HTMLButtonElement) delete button.dataset.loading;
   }
   setIconButtonContent(requireButton("claude-configure"), "plug", "Install integration");
   setIconButtonContent(requireButton("claude-refresh"), "refresh", "Refresh");
@@ -503,6 +603,12 @@ function decorateAgentSetupButtons() {
   setIconButtonContent(requireButton("opencode-command-path-save"), "check", "Save path");
   setIconButtonContent(requireButton("opencode-node-command-path-save"), "check", "Save path");
   setIconButtonContent(requireButton("opencode-copy-config"), "copy", "Copy config preview");
+  setIconButtonContent(requireButton("cursor-install"), "download", "Install global setup");
+  setIconButtonContent(requireButton("cursor-replace"), "repeat", "Replace configuration");
+  setIconButtonContent(requireButton("cursor-remove"), "trash", "Remove global setup");
+  setIconButtonContent(requireButton("cursor-refresh"), "refresh", "Refresh");
+  setIconButtonContent(requireButton("cursor-node-command-path-save"), "check", "Save path");
+  setIconButtonContent(requireButton("cursor-copy-preview"), "copy", "Copy preview");
 }
 
 function updateClaudeDetailActions(snapshot) {
@@ -578,7 +684,7 @@ async function runAgentSetupButtonAction(id, handler, loadingText) {
   if (loadingText) {
     button.dataset.loading = "true";
     setIconButtonContent(button, "spinner", loadingText);
-    const result = document.getElementById(id.startsWith("opencode-") ? "opencode-action-result" : "claude-action-result");
+    const result = document.getElementById(id.startsWith("opencode-") ? "opencode-action-result" : id.startsWith("cursor-") ? "cursor-action-result" : "claude-action-result");
     if (result) result.textContent = loadingText;
   }
   try {
@@ -610,6 +716,12 @@ function setAgentSetupControlsBusy(busy) {
     "opencode-command-path-save",
     "opencode-node-command-path-save",
     "opencode-copy-config",
+    "cursor-install",
+    "cursor-replace",
+    "cursor-remove",
+    "cursor-refresh",
+    "cursor-node-command-path-save",
+    "cursor-copy-preview",
   ];
   if (busy) {
     agentSetupControlStates = new Map();
@@ -619,6 +731,10 @@ function setAgentSetupControlsBusy(busy) {
     }
     const select = document.getElementById("claude-pet-select");
     if (select instanceof HTMLSelectElement) agentSetupControlStates.set("claude-pet-select", select.disabled);
+    const opencodeSelect = document.getElementById("opencode-pet-select");
+    if (opencodeSelect instanceof HTMLSelectElement) agentSetupControlStates.set("opencode-pet-select", opencodeSelect.disabled);
+    const cursorSelect = document.getElementById("cursor-pet-select");
+    if (cursorSelect instanceof HTMLSelectElement) agentSetupControlStates.set("cursor-pet-select", cursorSelect.disabled);
     const devMode = document.getElementById("claude-dev-mode");
     if (devMode instanceof HTMLInputElement) agentSetupControlStates.set("claude-dev-mode", devMode.disabled);
   }
@@ -628,6 +744,10 @@ function setAgentSetupControlsBusy(busy) {
   }
   const select = document.getElementById("claude-pet-select");
   if (select instanceof HTMLSelectElement) select.disabled = busy;
+  const opencodeSelect = document.getElementById("opencode-pet-select");
+  if (opencodeSelect instanceof HTMLSelectElement) opencodeSelect.disabled = busy;
+  const cursorSelect = document.getElementById("cursor-pet-select");
+  if (cursorSelect instanceof HTMLSelectElement) cursorSelect.disabled = busy;
   const devMode = document.getElementById("claude-dev-mode");
   if (devMode instanceof HTMLInputElement) devMode.disabled = busy || activeAgentCommandMode === "bundled";
 }
@@ -649,11 +769,11 @@ async function runAgentAction(action, selectedPetId, commandMode) {
   await renderAgentSetup(snapshot.selectedPetId || "", snapshot.commandMode);
 }
 
-async function saveAgentCommandPath(kind, path, selectedPetId, commandMode) {
+async function saveAgentCommandPath(kind, path, selectedPetId, commandMode, resultId) {
   const patch = kind === "claude" ? { claude: path } : kind === "node" ? { node: path } : { opencode: path };
   await agentSetupApi.updateCommandPaths(patch);
   await renderAgentSetup(selectedPetId || "", commandMode);
-  const result = document.getElementById(kind === "opencode" ? "opencode-action-result" : "claude-action-result");
+  const result = document.getElementById(resultId || (kind === "opencode" ? "opencode-action-result" : "claude-action-result"));
   if (result) result.textContent = path.trim() ? "Saved command path. Refreshed detection using the saved path." : "Cleared command path. Refreshed automatic detection.";
 }
 
@@ -1475,6 +1595,8 @@ function isAgentSetupSnapshot(value) {
     && isRecord(value.memoryStatus)
     && isRecord(value.opencodeStatus)
     && isRecord(value.opencodePreview)
+    && isRecord(value.cursorStatus)
+    && isRecord(value.cursorPreview)
     && isRecord(value.commandPaths)
     && isRecord(value.preview)
     && Array.isArray(value.petOptions)
@@ -1495,7 +1617,14 @@ function isAgentSetupSnapshot(value) {
     && typeof value.memoryStatus.openPetsMemoryPath === "string"
     && typeof value.commandPaths.claude === "string"
     && typeof value.commandPaths.node === "string"
-    && typeof value.commandPaths.opencode === "string";
+    && typeof value.commandPaths.opencode === "string"
+    && typeof value.cursorStatus.state === "string"
+    && typeof value.cursorStatus.label === "string"
+    && typeof value.cursorStatus.details === "string"
+    && typeof value.cursorStatus.configPath === "string"
+    && typeof value.cursorStatus.canInstall === "boolean"
+    && typeof value.cursorStatus.canReplace === "boolean"
+    && typeof value.cursorStatus.canRemove === "boolean";
 }
 
 function isRecord(value) {

@@ -9,12 +9,13 @@ import { fileURLToPath } from "node:url";
 
 import { allowedReactions, createOpenPetsClient, OpenPetsClientError, type OpenPetsPetListItem, type OpenPetsReaction } from "@open-pets/client";
 import { claudeHookEvents, openPetsHookMarker, removeOpenPetsHooks, runClaudeHookFromStdin, validateOpenPetsPetArg } from "@open-pets/claude";
+import { buildOpenPetsOnlyPreview, classifyCursorMcpStatus, executeCursorMcpWrite, getCursorProjectMcpPath, planCursorMcpInstall, planCursorMcpReplace, readCursorMcpConfig } from "@open-pets/cursor";
 import { prepareOpenCodeProjectSetup, writePreparedOpenCodeProjectSetup } from "@open-pets/opencode";
 
 export const cliPackageName = "@open-pets/cli";
 
 interface ConfigureOptions {
-  readonly agent: "claude" | "opencode";
+  readonly agent: "claude" | "opencode" | "cursor";
   readonly petId?: string;
   readonly cwd: string;
   readonly yes: boolean;
@@ -160,6 +161,10 @@ async function sendMessage(options: SayOptions): Promise<void> {
 
 export async function configureProject(options: ConfigureOptions): Promise<void> {
   const projectDir = resolveProjectDir(options.cwd);
+  if (options.agent === "cursor") {
+    await configureCursorProject(options, projectDir);
+    return;
+  }
   if (options.agent === "opencode") {
     await configureOpenCodeProject(options, projectDir);
     return;
@@ -177,6 +182,33 @@ export async function configureProject(options: ConfigureOptions): Promise<void>
   runClaudeMcpAddJson(projectDir, mcpConfig, options.force);
   writePreparedHooks(preparedHooks);
   process.stdout.write(`OpenPets configured for Claude in ${projectDir}.\nPet: ${sanitizeTerminalText(selectedPet.displayName)} (${selectedPet.id})\n`);
+}
+
+async function configureCursorProject(options: ConfigureOptions, projectDir: string): Promise<void> {
+  const client = createOpenPetsClient();
+  const selectedPet = await resolveConfiguredPet(client, options.petId);
+  const packageVersion = getPackageVersion();
+  const configPath = getCursorProjectMcpPath(projectDir);
+  const previewOptions = { mcpVersion: packageVersion, petId: selectedPet.id, commandMode: options.localDev ? "local" as const : "published" as const, mcpEntryPath: options.localDev ? require.resolve("@open-pets/mcp") : undefined };
+  const readResult = readCursorMcpConfig(configPath);
+  const status = classifyCursorMcpStatus(readResult, configPath, previewOptions);
+  process.stdout.write(`Cursor config: ${configPath}\nStatus: ${status.status} - ${status.message}\nOpenPets MCP preview:\n${JSON.stringify(buildOpenPetsOnlyPreview(previewOptions), null, 2)}\n`);
+
+  if (status.status === "installed") {
+    process.stdout.write(`OpenPets is already configured for Cursor in ${projectDir}.\nRestart or reload Cursor in this project to load OpenPets.\n`);
+    return;
+  }
+  if (status.status === "invalid" || status.status === "error") {
+    throw new CliError(`${status.message} Fix ${configPath}, then rerun setup.`);
+  }
+  if (status.status === "conflict" && !options.force) {
+    throw new CliError(`Cursor already has a non-OpenPets openpets MCP entry. Rerun with --force to replace only mcpServers.openpets.`);
+  }
+
+  const plan = status.status === "conflict" ? planCursorMcpReplace(configPath, previewOptions) : planCursorMcpInstall(configPath, previewOptions, options.force);
+  if ("ok" in plan) throw new CliError(plan.message);
+  executeCursorMcpWrite(plan);
+  process.stdout.write(`OpenPets configured for Cursor in ${projectDir}.\nPet: ${sanitizeTerminalText(selectedPet.displayName)} (${selectedPet.id})\n${plan.backupPath ? `Backup: ${plan.backupPath}\n` : ""}Restart or reload Cursor in this project to load OpenPets.\nTo remove, delete mcpServers.openpets from ${configPath}.\n`);
 }
 
 async function configureOpenCodeProject(options: ConfigureOptions, projectDir: string): Promise<void> {
@@ -221,7 +253,7 @@ export function parseConfigureArgs(args: readonly string[]): ConfigureOptions {
     else if (arg.startsWith("--cwd=")) cwd = arg.slice("--cwd=".length);
     else throw new CliError(`Unknown configure option: ${arg}`);
   }
-  if (agent !== "claude" && agent !== "opencode") throw new CliError(`Unsupported agent: ${agent}. Supported agents: claude, opencode.`);
+  if (agent !== "claude" && agent !== "opencode" && agent !== "cursor") throw new CliError(`Unsupported agent: ${agent}. Supported agents: claude, opencode, cursor.`);
   return { agent, petId, cwd, yes, force, localDev };
 }
 
@@ -457,7 +489,7 @@ function getPackageVersion(): string {
 }
 
 function printUsage(): void {
-  process.stdout.write("Usage:\n  openpets status\n  openpets pets\n  openpets react <reaction>\n  openpets say <message> [--reaction <reaction>]\n  openpets install <pet-id>\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
+  process.stdout.write("Usage:\n  openpets status\n  openpets pets\n  openpets react <reaction>\n  openpets say <message> [--reaction <reaction>]\n  openpets install <pet-id>\n  openpets configure [--agent claude|opencode|cursor] [--pet <id>] [--cwd <path>] [--yes] [--force]\n  openpets mcp [--pet <id>]\n  openpets hook --openpets-managed [--pet <id>]\n\nRun `openpets <command> --help` for command options.\n");
 }
 
 function printInstallUsage(): void {
@@ -481,7 +513,7 @@ function printSayUsage(): void {
 }
 
 function printConfigureUsage(): void {
-  process.stdout.write("Usage:\n  openpets configure [--agent claude|opencode] [--pet <id>] [--cwd <path>] [--yes] [--force]\n\nOptions:\n  --pet <id>           Pet id to use for this project. If omitted, prompts with installed pets.\n  --agent <agent>      Agent to configure: claude or opencode. Defaults to claude.\n  --cwd <path>         Project directory to configure. Defaults to current directory.\n  --yes, -y            Accepted for scripts; no confirmation prompt is shown.\n  --force              Replace supported managed entries where applicable.\n  --replace            Alias for --force.\n  --local-dev          Use local development command paths where supported.\n  -h, --help           Show this help.\n");
+  process.stdout.write("Usage:\n  openpets configure [--agent claude|opencode|cursor] [--pet <id>] [--cwd <path>] [--yes] [--force]\n\nOptions:\n  --pet <id>           Pet id to use for this project. If omitted, prompts with installed pets.\n  --agent <agent>      Agent to configure: claude, opencode, or cursor. Defaults to claude.\n  --cwd <path>         Project directory to configure. Defaults to current directory. Cursor uses <cwd>/.cursor/mcp.json; global Cursor setup is not enabled here.\n  --yes, -y            Accepted for scripts; no confirmation prompt is shown.\n  --force              Replace supported managed entries where applicable.\n  --replace            Alias for --force.\n  --local-dev          Use local development command paths where supported.\n  -h, --help           Show this help.\n");
 }
 
 function printMcpUsage(): void {
