@@ -125,10 +125,11 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onPositionChanged: setDefaultPetPosition,
     onHideRequested: hideDefaultPet,
   });
-  info("pet.default", "created", { windowId: defaultPetWindow.id, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
+  const windowId = defaultPetWindow.id;
+  info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
   defaultPetWindow.on("closed", () => {
-    info("pet.default", "closed", { windowId: defaultPetWindow?.id });
+    info("pet.default", "closed", { windowId });
     defaultPetWindow = null;
   });
 

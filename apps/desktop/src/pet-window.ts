@@ -120,19 +120,27 @@ export function createAgentPetWindow(options: AgentPetWindowOptions): BrowserWin
 }
 
 function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void }): void {
-  window.webContents.on("context-menu", (event) => {
+  const webContents = window.webContents;
+  const handleContextMenu = (event: Electron.Event): void => {
     event.preventDefault();
     if (window.isDestroyed()) return;
     Menu.buildFromTemplate([{ label: action.label, click: action.click }]).popup({ window });
+  };
+  webContents.on("context-menu", handleContextMenu);
+  window.once("closed", () => {
+    if (!webContents.isDestroyed()) webContents.off("context-menu", handleContextMenu);
   });
 }
 
 function installMousePassthroughAndDrag(window: BrowserWindow): void {
   let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number } | null = null;
   let rendererReady = false;
+  let listenersRemoved = false;
+  const windowId = window.id;
+  const webContents = window.webContents;
   const canForwardMouseEvents = process.platform === "darwin" || process.platform === "win32";
 
-  const isFromWindow = (event: IpcMainEvent): boolean => event.sender === window.webContents;
+  const isFromWindow = (event: IpcMainEvent): boolean => event.sender === webContents;
   const setPassthrough = (passthrough: boolean): void => {
     if (window.isDestroyed()) return;
     if (process.platform === "linux") {
@@ -166,7 +174,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   const handleHitTest = (event: IpcMainEvent, interactive: unknown): void => {
     if (!isFromWindow(event)) return;
     rendererReady = true;
-    debug("pet.window", "hit test", { windowId: window.id, interactive: Boolean(interactive), dragging });
+    debug("pet.window", "hit test", { windowId, interactive: Boolean(interactive), dragging });
     setPassthrough(!interactive && !dragging);
   };
 
@@ -177,34 +185,34 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   };
 
   const handleDragStart = (event: IpcMainEvent, point: unknown): void => {
-    if (!isFromWindow(event) || !isScreenPoint(point)) return;
+    if (!isFromWindow(event) || !isScreenPoint(point) || window.isDestroyed()) return;
     const [startWindowX, startWindowY] = window.getPosition();
     dragging = { startScreenX: point.screenX, startScreenY: point.screenY, startWindowX, startWindowY };
-    debug("pet.window", "drag start", { windowId: window.id, point, startWindowX, startWindowY });
+    debug("pet.window", "drag start", { windowId, point, startWindowX, startWindowY });
     setPassthrough(false);
   };
 
   const handleDragMove = (event: IpcMainEvent, point: unknown): void => {
-    if (!isFromWindow(event) || !dragging || !isScreenPoint(point)) return;
+    if (!isFromWindow(event) || !dragging || !isScreenPoint(point) || window.isDestroyed()) return;
     window.setPosition(dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX), dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY), false);
   };
 
   const handleDragEnd = (event: IpcMainEvent): void => {
     if (!isFromWindow(event)) return;
     dragging = null;
-    debug("pet.window", "drag end", { windowId: window.id, position: readWindowPosition(window) });
+    debug("pet.window", "drag end", { windowId, position: window.isDestroyed() ? null : readWindowPosition(window) });
   };
 
   const resetForNavigation = (): void => {
     dragging = null;
     rendererReady = false;
-    debug("pet.window", "navigation reset passthrough", { windowId: window.id });
+    debug("pet.window", "navigation reset passthrough", { windowId });
     setPassthrough(false);
   };
 
   const rearmAfterLoad = (): void => {
     dragging = null;
-    debug("pet.window", "load rearm passthrough", { windowId: window.id });
+    debug("pet.window", "load rearm passthrough", { windowId });
     rearmPassthroughAfterLoad();
   };
 
@@ -214,8 +222,25 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
 
   const handleLoadFailure = (): void => {
     dragging = null;
-    debug("pet.window", "load failure rearm passthrough", { windowId: window.id });
+    debug("pet.window", "load failure rearm passthrough", { windowId });
     setPassthrough(true);
+  };
+
+  const removeListeners = (): void => {
+    if (listenersRemoved) return;
+    listenersRemoved = true;
+    ipcMain.off("openpets:pet-ready", handleReady);
+    ipcMain.off("openpets:pet-hit-test", handleHitTest);
+    ipcMain.off("openpets:pet-drag-start", handleDragStart);
+    ipcMain.off("openpets:pet-drag-move", handleDragMove);
+    ipcMain.off("openpets:pet-drag-end", handleDragEnd);
+    if (!webContents.isDestroyed()) {
+      webContents.off("did-start-navigation", resetForNavigation);
+      webContents.off("did-start-loading", resetForNavigation);
+      webContents.off("did-finish-load", rearmAfterLoad);
+      webContents.off("dom-ready", handleDomReady);
+      webContents.off("did-fail-load", handleLoadFailure);
+    }
   };
 
   ipcMain.on("openpets:pet-ready", handleReady);
@@ -223,23 +248,13 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   ipcMain.on("openpets:pet-drag-start", handleDragStart);
   ipcMain.on("openpets:pet-drag-move", handleDragMove);
   ipcMain.on("openpets:pet-drag-end", handleDragEnd);
-  window.webContents.on("did-start-navigation", resetForNavigation);
-  window.webContents.on("did-start-loading", resetForNavigation);
-  window.webContents.on("did-finish-load", rearmAfterLoad);
-  window.webContents.on("dom-ready", handleDomReady);
-  window.webContents.on("did-fail-load", handleLoadFailure);
-  window.on("closed", () => {
-    ipcMain.off("openpets:pet-ready", handleReady);
-    ipcMain.off("openpets:pet-hit-test", handleHitTest);
-    ipcMain.off("openpets:pet-drag-start", handleDragStart);
-    ipcMain.off("openpets:pet-drag-move", handleDragMove);
-    ipcMain.off("openpets:pet-drag-end", handleDragEnd);
-    window.webContents.off("did-start-navigation", resetForNavigation);
-    window.webContents.off("did-start-loading", resetForNavigation);
-    window.webContents.off("did-finish-load", rearmAfterLoad);
-    window.webContents.off("dom-ready", handleDomReady);
-    window.webContents.off("did-fail-load", handleLoadFailure);
-  });
+  webContents.on("did-start-navigation", resetForNavigation);
+  webContents.on("did-start-loading", resetForNavigation);
+  webContents.on("did-finish-load", rearmAfterLoad);
+  webContents.on("dom-ready", handleDomReady);
+  webContents.on("did-fail-load", handleLoadFailure);
+  window.on("close", removeListeners);
+  window.once("closed", removeListeners);
 }
 
 function isScreenPoint(value: unknown): value is { readonly screenX: number; readonly screenY: number } {

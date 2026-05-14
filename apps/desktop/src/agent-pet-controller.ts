@@ -107,9 +107,10 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     badge: statusBadges.get(petId) ?? null,
     onCloseRequested: () => dismissAgentPetForActiveLease(petId),
   });
+  const windowId = window.id;
 
   window.on("closed", () => {
-    info("pet.agent", "closed", { petId, windowId: window.id, activeWindowsBeforeDelete: agentPetWindows.size });
+    info("pet.agent", "closed", { petId, windowId, activeWindowsBeforeDelete: agentPetWindows.size });
     agentPetWindows.delete(petId);
     clearAgentDisplay(petId);
   });

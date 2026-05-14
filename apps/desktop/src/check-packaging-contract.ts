@@ -114,6 +114,8 @@ assert.match(petWindowSource, /function getTransientReactionAnimationMs/, "finit
 assert.match(petWindowSource, /function clearTransientReaction/, "finite reaction animations must be clearable while the bubble remains visible.");
 assert.match(petWindowSource, /webContents\.send\("openpets:pet-reaction-state"/, "finite reaction animations must clear sprite state without reloading the bubble.");
 assert.match(petPreloadSource, /openpets:pet-reaction-state/, "pet preload must accept in-place reaction state updates.");
+assert.match(petWindowSource, /const webContents = window\.webContents[\s\S]*?const removeListeners = \(\): void => \{[\s\S]*?if \(!webContents\.isDestroyed\(\)\)/, "pet window cleanup must capture webContents and avoid touching destroyed BrowserWindow objects.");
+assert.match(petWindowSource, /window\.on\("close", removeListeners\);\s*window\.once\("closed", removeListeners\);/, "pet window cleanup must run before and after close so agent lease release and Cmd/Ctrl+W are idempotent.");
 assert.match(displaySource, /width:\s*220/, "pet windows must stay tightly bounded around pet and bubble.");
 assert.match(displaySource, /height:\s*320/, "pet windows must be tall enough for adaptive long message bubbles at large pet scale without becoming a huge click shield.");
 assert.match(petWindowSource, /function getBubbleClassName/, "pet bubbles must classify explicit messages by length.");
