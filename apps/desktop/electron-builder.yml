@@ -1,5 +1,6 @@
 appId: dev.openpets.app
 productName: OpenPets
+executableName: openpets
 copyright: Copyright © 2026 OpenPets
 
 directories:
@@ -19,6 +20,9 @@ asarUnpack:
   - node_modules/**
 npmRebuild: false
 publish: null
+
+toolsets:
+  appimage: 1.0.3
 
 mac:
   icon: assets/app-icon.icns

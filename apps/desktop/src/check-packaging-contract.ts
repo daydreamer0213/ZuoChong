@@ -35,9 +35,11 @@ assert.match(workspaceConfig, /supportedArchitectures:[\s\S]*?libc:[\s\S]*?- gli
 assert.match(packageJson.devDependencies?.["electron-builder"] ?? "", /^\^26\.(?:9|[1-9]\d)\./, "desktop AppImage packaging must use electron-builder 26.9+ for conditional Linux sandbox handling.");
 assert.match(builderConfig, /appId:\s*dev\.openpets\.app/);
 assert.match(builderConfig, /productName:\s*OpenPets/);
+assert.match(builderConfig, /executableName:\s*openpets/, "desktop packages must use a safe executable name for the stricter AppImage toolset.");
 assert.match(builderConfig, /output:\s*dist-electron/);
 assert.match(builderConfig, /publish:\s*null/);
 assert.doesNotMatch(builderConfig, /no-sandbox/, "desktop packaging must not force --no-sandbox for every Linux AppImage launch.");
+assert.match(builderConfig, /toolsets:\s*\n\s*appimage:\s*1\.0\.3/, "desktop AppImage packaging must use the AppImage 1.0.3 toolset so the launcher can conditionally fall back when Linux sandboxing is unavailable.");
 assert.match(builderConfig, /asar:\s*true/);
 assert.match(builderConfig, /asarUnpack:/);
 assert.match(builderConfig, /node_modules\/\*\*/);

@@ -6,3 +6,4 @@ dist-electron
 apps/desktop/dist-electron
 *.tsbuildinfo
 .DS_Store
+local/
