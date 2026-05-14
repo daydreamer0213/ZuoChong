@@ -29,7 +29,7 @@ Use the OpenPets skill. Install OpenPets for me, connect this agent, and verify 
 For project setup, open your agent inside the repo and say:
 
 ```text
-Use the OpenPets skill. Install pet <petId>, configure this project to use it, and verify the project integration.
+Use the OpenPets skill. Make sure pet <petId> is installed, configure this project to use it, and verify the project integration.
 ```
 
 Useful prompts:

@@ -75,7 +75,7 @@ OpenPets requires the desktop app to be installed and running for live pet contr
 - Prefer official OpenPets CLI/UI flows over hand-editing integration config.
 - Ask before using `--force` or replacing existing user-managed MCP/plugin/hook config.
 - Confirm the project path before project-local configuration.
-- Confirm the pet id before installing or selecting a pet.
+- Confirm the pet id before installing or selecting a pet, and make sure it is installed before configuring a project to use it.
 - Do not put secrets, private logs, private paths, source code, URLs, credentials, or sensitive text into pet speech.
 - Restart Claude Code, OpenCode, or other MCP clients after config changes.
 - Do not promise the desktop app is installed or running; verify it.
