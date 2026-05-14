@@ -4,7 +4,7 @@ import { getAppStateSnapshot, isOnboardingCompleted } from "./app-state.js";
 import { createTrayIcon } from "./assets.js";
 import { hideDefaultPet, isDefaultPetVisible, setDefaultPetPaused, showDefaultPet } from "./default-pet-controller.js";
 import { quitOpenPets } from "./lifecycle.js";
-import { info } from "./logger.js";
+import { info, openLogsFolder } from "./logger.js";
 import { shellState, togglePaused } from "./state.js";
 import { getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 import { openTaskWindow } from "./windows.js";
@@ -90,6 +90,10 @@ export function refreshTrayMenu(): void {
     {
       label: "Settings...",
       click: () => openTaskWindow("settings"),
+    },
+    {
+      label: "Open Logs Folder...",
+      click: () => { void openLogsFolder(); },
     },
     { type: "separator" },
     {

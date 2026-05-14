@@ -75,6 +75,7 @@ assert.match(loggerSource, /OPENPETS_LOG_LEVEL/, "desktop logger must support ve
 assert.match(loggerSource, /normalizeLogLevel\(process\.env\.OPENPETS_LOG_LEVEL\) \?\? "debug"/, "desktop production logger must default to debug for user-sendable diagnostics.");
 assert.match(loggerSource, /redacted-token/, "desktop logger must redact token-looking values.");
 assert.match(mainSource, /initializeLogger\(\)/, "desktop startup must initialize logging before subsystem startup.");
+assert.match(traySource, /Open Logs Folder/, "desktop tray must expose user-sendable logs for bug reports.");
 assert.match(localIpcSourceForLogging, /request received/, "desktop IPC must log request methods for diagnostics.");
 assert.match(leaseManagerSource, /acquired/, "lease manager must log lease acquisition details.");
 assert.match(defaultPetControllerSource, /show requested/, "default pet controller must log show lifecycle events.");
