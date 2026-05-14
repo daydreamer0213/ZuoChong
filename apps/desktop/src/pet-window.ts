@@ -122,6 +122,7 @@ function installPetContextMenu(window: BrowserWindow, action: { readonly label: 
 
 function installMousePassthroughAndDrag(window: BrowserWindow): void {
   let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number } | null = null;
+  let rendererReady = false;
   const canForwardMouseEvents = process.platform === "darwin" || process.platform === "win32";
 
   const isFromWindow = (event: IpcMainEvent): boolean => event.sender === window.webContents;
@@ -142,7 +143,14 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
 
   const handleHitTest = (event: IpcMainEvent, interactive: unknown): void => {
     if (!isFromWindow(event)) return;
+    rendererReady = true;
     setPassthrough(!interactive && !dragging);
+  };
+
+  const handleReady = (event: IpcMainEvent): void => {
+    if (!isFromWindow(event)) return;
+    rendererReady = true;
+    setPassthrough(true);
   };
 
   const handleDragStart = (event: IpcMainEvent, point: unknown): void => {
@@ -162,16 +170,47 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
     dragging = null;
   };
 
+  const resetForNavigation = (): void => {
+    dragging = null;
+    rendererReady = false;
+    setPassthrough(false);
+  };
+
+  const rearmAfterLoad = (): void => {
+    dragging = null;
+    setPassthrough(true);
+  };
+
+  const handleDomReady = (): void => {
+    if (!rendererReady) setPassthrough(true);
+  };
+
+  const handleLoadFailure = (): void => {
+    dragging = null;
+    setPassthrough(true);
+  };
+
+  ipcMain.on("openpets:pet-ready", handleReady);
   ipcMain.on("openpets:pet-hit-test", handleHitTest);
   ipcMain.on("openpets:pet-drag-start", handleDragStart);
   ipcMain.on("openpets:pet-drag-move", handleDragMove);
   ipcMain.on("openpets:pet-drag-end", handleDragEnd);
-  window.webContents.once("did-finish-load", () => setPassthrough(true));
+  window.webContents.on("did-start-navigation", resetForNavigation);
+  window.webContents.on("did-start-loading", resetForNavigation);
+  window.webContents.on("did-finish-load", rearmAfterLoad);
+  window.webContents.on("dom-ready", handleDomReady);
+  window.webContents.on("did-fail-load", handleLoadFailure);
   window.on("closed", () => {
+    ipcMain.off("openpets:pet-ready", handleReady);
     ipcMain.off("openpets:pet-hit-test", handleHitTest);
     ipcMain.off("openpets:pet-drag-start", handleDragStart);
     ipcMain.off("openpets:pet-drag-move", handleDragMove);
     ipcMain.off("openpets:pet-drag-end", handleDragEnd);
+    window.webContents.off("did-start-navigation", resetForNavigation);
+    window.webContents.off("did-start-loading", resetForNavigation);
+    window.webContents.off("did-finish-load", rearmAfterLoad);
+    window.webContents.off("dom-ready", handleDomReady);
+    window.webContents.off("did-fail-load", handleLoadFailure);
   });
 }
 
@@ -445,14 +484,16 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
   const scaledHeight = Math.ceil(defaultPetSprite.frameHeight * scale);
   const petBottom = 22;
   const bubbleBottom = Math.ceil(petBottom + scaledHeight + 8);
+  const petShellFilter = process.platform === "win32" ? "none" : "drop-shadow(0 10px 12px rgba(15, 23, 42, 0.24)) drop-shadow(0 2px 3px rgba(15, 23, 42, 0.18))";
+  const bubbleBackdropFilter = process.platform === "win32" ? "none" : "blur(10px)";
   return `
     :root { color-scheme: dark; --pet-opacity: ${opacity}; --play-state: ${playState}; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; user-select: none; -webkit-font-smoothing: antialiased; }
     html { color: #172033; }
     body { -webkit-app-region: no-drag; pointer-events: none; }
     .stage { width: 100%; height: 100%; position: relative; box-sizing: border-box; overflow: visible; }
-    .pet-shell { position: absolute; left: 50%; bottom: ${petBottom}px; z-index: 1; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: drop-shadow(0 10px 12px rgba(15, 23, 42, 0.24)) drop-shadow(0 2px 3px rgba(15, 23, 42, 0.18)); transform: translateX(-50%); transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: no-drag; cursor: grab; }
-    .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: blur(10px); transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
+    .pet-shell { position: absolute; left: 50%; bottom: ${petBottom}px; z-index: 1; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transform: translateX(-50%); transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: no-drag; cursor: grab; }
+    .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     .bubble::after { content: ""; position: absolute; left: 64%; bottom: -7px; width: 12px; height: 12px; background: inherit; border-right: 1px solid rgba(255, 255, 255, 0.56); border-bottom: 1px solid rgba(255, 255, 255, 0.56); border-bottom-right-radius: 3px; transform: translateX(-50%) rotate(45deg); box-shadow: 3px 3px 7px rgba(15, 23, 42, 0.08); }
     .bubble-header { display: inline-flex; align-items: center; min-width: 0; gap: 7px; color: currentColor; font: 780 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
     .bubble-status-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 16px; height: 16px; border-radius: 999px; background: #3b82f6; color: #fff; font-size: 10px; line-height: 1; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.3); }
@@ -598,7 +639,16 @@ async function loadPetHtmlFile(window: BrowserWindow, html: string, name: string
   const safeName = name.replace(/[^a-z0-9_-]/gi, "-").slice(0, 80) || "pet";
   const filePath = join(dir, `${safeName}.html`);
   await writeFile(filePath, html, "utf8");
-  await window.loadFile(filePath);
+  window.setIgnoreMouseEvents(false);
+  try {
+    await window.loadFile(filePath);
+  } catch (error) {
+    if (!window.isDestroyed()) {
+      if (process.platform === "linux") window.setIgnoreMouseEvents(false);
+      else window.setIgnoreMouseEvents(true, { forward: true });
+    }
+    throw error;
+  }
 }
 
 function debounce(callback: () => void, delayMs: number): () => void {

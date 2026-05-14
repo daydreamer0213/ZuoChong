@@ -53,6 +53,9 @@ const updateInteractiveHit = (event) => {
 };
 
 const installMouseInterop = () => {
+  lastInteractiveHit = null;
+  dragging = false;
+
   document.addEventListener("mousemove", (event) => {
     updateInteractiveHit(event);
     if (dragging) ipcRenderer.send("openpets:pet-drag-move", { screenX: event.screenX, screenY: event.screenY });
@@ -79,6 +82,7 @@ const installMouseInterop = () => {
   }, { passive: true });
 
   setInteractiveHit(false);
+  ipcRenderer.send("openpets:pet-ready");
 };
 
 if (document.readyState === "loading") {
