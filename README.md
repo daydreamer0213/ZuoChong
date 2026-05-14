@@ -10,6 +10,10 @@
   See agent progress, tool use, test runs, and coding state as a playful desktop companion.
 </p>
 
+<p align="center">
+  <img src="assets/hello.png" alt="OpenPets reacting across multiple coding agent sessions" width="100%" />
+</p>
+
 ---
 
 ## 2-minute Quick Start
