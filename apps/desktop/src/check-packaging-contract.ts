@@ -85,6 +85,8 @@ assert.match(loggerSource, /OPENPETS_LOG_LEVEL/, "desktop logger must support ve
 assert.match(loggerSource, /normalizeLogLevel\(process\.env\.OPENPETS_LOG_LEVEL\) \?\? "debug"/, "desktop production logger must default to debug for user-sendable diagnostics.");
 assert.match(loggerSource, /redacted-token/, "desktop logger must redact token-looking values.");
 assert.match(mainSource, /initializeLogger\(\)/, "desktop startup must initialize logging before subsystem startup.");
+assert.match(mainSource, /process\.platform === "linux"[\s\S]*?appendSwitch\("ozone-platform", "x11"\)/, "Linux desktop pets must prefer X11/Xwayland because GNOME Wayland blocks always-on-top and programmatic window dragging.");
+assert.match(mainSource, /hasSwitch\("ozone-platform"\)/, "Linux X11 preference must let users override Electron's Ozone backend explicitly.");
 assert.match(traySource, /Open Logs Folder/, "desktop tray must expose user-sendable logs for bug reports.");
 assert.match(localIpcSourceForLogging, /request received/, "desktop IPC must log request methods for diagnostics.");
 assert.match(localIpcPathsSource, /OPENPETS_IPC_BIND[\s\S]*?OPENPETS_IPC_ENDPOINT[\s\S]*?validateBindHost[\s\S]*?validateAdvertisedHost/, "WSL NAT IPC must separate bind and advertised endpoints with validation.");

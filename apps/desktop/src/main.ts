@@ -15,6 +15,15 @@ import { installInternalUiHandlers, installInternalUiProtocol, openTaskWindow } 
 app.commandLine.appendSwitch("use-mock-keychain");
 app.commandLine.appendSwitch("password-store", "basic");
 
+// GNOME Wayland does not allow Electron apps to reliably control window
+// z-order or absolute position, which breaks the desktop-pet contract: staying
+// above normal windows and dragging to a user-chosen screen position. Prefer
+// X11/Xwayland on Linux unless the user explicitly chooses another Ozone
+// backend at launch.
+if (process.platform === "linux" && !app.commandLine.hasSwitch("ozone-platform")) {
+  app.commandLine.appendSwitch("ozone-platform", "x11");
+}
+
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!gotSingleInstanceLock) {
@@ -25,7 +34,7 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     initializeLogger();
     app.setName("OpenPets");
-    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid });
+    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null });
 
     if (process.platform === "darwin") {
       app.dock?.hide();
