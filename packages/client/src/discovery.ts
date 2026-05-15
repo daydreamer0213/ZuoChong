@@ -15,7 +15,7 @@ export interface OpenPetsDiscoveryFile {
 }
 
 export type ParsedIpcEndpoint =
-  | { readonly kind: "tcp"; readonly host: "127.0.0.1"; readonly port: number }
+  | { readonly kind: "tcp"; readonly host: string; readonly port: number }
   | { readonly kind: "path"; readonly path: string };
 
 export function getDiscoveryFilePath(): string {
@@ -136,11 +136,29 @@ function parseTcpEndpoint(endpoint: string): ParsedIpcEndpoint {
   }
 
   if (url.protocol !== "tcp:" || url.username || url.password || (url.pathname !== "" && url.pathname !== "/") || url.search || url.hash) {
-    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint must be tcp://127.0.0.1:<port>.");
+    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint must be tcp://<host>:<port> with no credentials, path, query, or fragment.");
   }
 
-  if (url.hostname !== "127.0.0.1") {
-    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint must use loopback host 127.0.0.1.");
+  const host = url.hostname;
+
+  // Reject 0.0.0.0 - not a valid target address
+  if (host === "0.0.0.0") {
+    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint cannot use 0.0.0.0 as target host.");
+  }
+
+  // Validate IPv4 format
+  if (!isValidIpv4(host)) {
+    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint host must be a valid IPv4 address.");
+  }
+
+  // Reject hostnames (contain letters)
+  if (/[a-zA-Z]/.test(host)) {
+    throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint host must be an IPv4 address, not a hostname.");
+  }
+
+  // Validate that it's a private/local address (loopback, private, or link-local)
+  if (!isPrivateOrLocalIpv4(host)) {
+    throw new OpenPetsClientError("invalid_discovery", `Discovery TCP endpoint host ${host} is not a private/local IPv4 address. Only loopback (127.0.0.1), private (10.x.x.x, 172.16-31.x.x, 192.168.x.x), or link-local (169.254.x.x) addresses are allowed.`);
   }
 
   const port = Number(url.port);
@@ -148,11 +166,49 @@ function parseTcpEndpoint(endpoint: string): ParsedIpcEndpoint {
     throw new OpenPetsClientError("invalid_discovery", "Discovery TCP endpoint port is invalid.");
   }
 
-  return { kind: "tcp", host: "127.0.0.1", port };
+  return { kind: "tcp", host, port };
+}
+
+function isValidIpv4(host: string): boolean {
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    const num = Number(part);
+    return String(num) === part && num >= 0 && num <= 255;
+  });
+}
+
+function isPrivateOrLocalIpv4(host: string): boolean {
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4) return false;
+
+  // Loopback: 127.0.0.0/8
+  if (parts[0] === 127) return true;
+
+  // Private: 10.0.0.0/8
+  if (parts[0] === 10) return true;
+
+  // Private: 172.16.0.0/12
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+
+  // Private: 192.168.0.0/16
+  if (parts[0] === 192 && parts[1] === 168) return true;
+
+  // Link-local: 169.254.0.0/16
+  if (parts[0] === 169 && parts[1] === 254) return true;
+
+  return false;
 }
 
 function allowsCrossPlatformDiscovery(platform: NodeJS.Platform, endpoint: ParsedIpcEndpoint): boolean {
-  return endpoint.kind === "tcp" && platform === "win32" && process.platform === "linux";
+  // Allow cross-platform discovery for TCP endpoints when:
+  // - Desktop is Windows (win32) and client is Linux (WSL)
+  // - The endpoint is a private/local IPv4 address (not just loopback)
+  if (endpoint.kind !== "tcp" || platform !== "win32" || process.platform !== "linux") {
+    return false;
+  }
+  // Additional validation: ensure the host is a valid private/local IPv4
+  return isPrivateOrLocalIpv4(endpoint.host);
 }
 
 function getSecureXdgRuntimeDir(): string | null {

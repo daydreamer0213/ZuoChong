@@ -219,7 +219,7 @@ Claude Code / OpenCode / Pi / MCP client
 
 The desktop app writes a local discovery file containing an IPC endpoint and a per-run token. Clients must send that token with every request.
 
-For Windows desktop + WSL agent setups, see [`docs/wsl-ipc.md`](docs/wsl-ipc.md) for the opt-in loopback TCP transport.
+For Windows desktop + WSL agent setups, see [`docs/wsl-ipc.md`](docs/wsl-ipc.md) for the opt-in TCP transport.
 
 When an integration is configured with `--pet <petId>`, OpenPets asks the desktop app for a short-lived lease. Valid installed non-default pets open as explicit agent pet windows. Missing, invalid, broken, built-in, or default pet requests fall back to the desktop default pet.
 

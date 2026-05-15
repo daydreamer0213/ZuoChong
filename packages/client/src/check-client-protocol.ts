@@ -17,6 +17,20 @@ const baseDiscovery = {
 validateDiscovery(baseDiscovery);
 validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645" });
 assert.deepEqual(parseIpcEndpoint("tcp://127.0.0.1:37645"), { kind: "tcp", host: "127.0.0.1", port: 37645 });
+
+// Test private/local IPv4 addresses for WSL NAT mode
+assert.deepEqual(parseIpcEndpoint("tcp://10.0.0.1:37645"), { kind: "tcp", host: "10.0.0.1", port: 37645 });
+assert.deepEqual(parseIpcEndpoint("tcp://172.16.0.1:37645"), { kind: "tcp", host: "172.16.0.1", port: 37645 });
+assert.deepEqual(parseIpcEndpoint("tcp://172.31.255.255:37645"), { kind: "tcp", host: "172.31.255.255", port: 37645 });
+assert.deepEqual(parseIpcEndpoint("tcp://192.168.1.1:37645"), { kind: "tcp", host: "192.168.1.1", port: 37645 });
+assert.deepEqual(parseIpcEndpoint("tcp://169.254.1.1:37645"), { kind: "tcp", host: "169.254.1.1", port: 37645 });
+
+// Test cross-platform discovery with private IPs (Windows desktop -> WSL client)
+if (process.platform === "linux") {
+  validateDiscovery({ ...baseDiscovery, endpoint: "tcp://192.168.1.100:37645", platform: "win32" });
+  validateDiscovery({ ...baseDiscovery, endpoint: "tcp://172.25.32.1:37645", platform: "win32" });
+}
+
 assertRejects(() => validateDiscovery({ ...baseDiscovery, protocol: "http" }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, protocolVersion: 2 }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "127.0.0.1:1234" }));
@@ -26,6 +40,14 @@ assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0
 assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645/path" }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://user:pass@127.0.0.1:37645" }));
 assertRejects(() => validateDiscovery({ ...baseDiscovery, platform: "freebsd" }));
+
+// Reject public IPs
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://8.8.8.8:37645" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://1.2.3.4:37645" }));
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://172.15.0.1:37645" })); // Just outside private range
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://172.32.0.1:37645" })); // Just outside private range
+assertRejects(() => validateDiscovery({ ...baseDiscovery, endpoint: "tcp://11.0.0.1:37645" })); // Not in 10.0.0.0/8
+
 if (process.platform === "linux") {
   validateDiscovery({ ...baseDiscovery, endpoint: "tcp://127.0.0.1:37645", platform: "win32" });
   assertRejects(() => validateDiscovery({ ...baseDiscovery, platform: "win32" }));

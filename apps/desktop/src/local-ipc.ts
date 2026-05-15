@@ -7,7 +7,7 @@ import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
-import { cleanupUnixSocket, createIpcEndpoint, getDiscoveryFilePath, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
+import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet } from "./pet-installation.js";
 
@@ -31,12 +31,11 @@ export async function startLocalIpcServer(): Promise<void> {
     return;
   }
 
-  const endpoint = createIpcEndpoint();
-  const parsedEndpoint = parseIpcEndpoint(endpoint, { allowPortZero: true });
+  const endpointConfig = getIpcEndpointConfig();
   const token = randomBytes(32).toString("base64url");
-  cleanupUnixSocket(endpoint);
+  cleanupUnixSocket(endpointConfig.advertisedEndpoint);
 
-  const server = net.createServer((socket) => handleSocket(socket, token, parsedEndpoint));
+  const server = net.createServer((socket) => handleSocket(socket, token, endpointConfig));
   server.on("error", (error) => {
     logError("ipc", "server error", error);
     console.error("OpenPets local IPC server error.", error);
@@ -44,19 +43,19 @@ export async function startLocalIpcServer(): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    listenOnEndpoint(server, parsedEndpoint, () => {
+    listenOnEndpoint(server, endpointConfig.bindEndpoint, () => {
       server.off("error", reject);
-      protectUnixSocket(endpoint);
+      protectUnixSocket(endpointConfig.advertisedEndpoint);
       resolve();
     });
   });
 
   ipcServer = server;
-  const listeningEndpoint = getListeningEndpoint(server, parsedEndpoint);
+  const listeningEndpoint = getListeningEndpoint(server, endpointConfig);
   ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
   leaseCleanupTimer = setInterval(() => leaseManager.cleanupExpired(), 5_000);
   leaseCleanupTimer.unref?.();
-  info("ipc", "server started", { endpointKind: parsedEndpoint.kind, endpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
+  info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }
 
@@ -79,14 +78,15 @@ export function stopLocalIpcServer(): void {
   }
 }
 
-function handleSocket(socket: net.Socket, token: string, endpoint: IpcEndpoint): void {
-  if (endpoint.kind === "tcp" && !isLoopbackRemoteAddress(socket.remoteAddress)) {
-    info("ipc", "socket rejected", { reason: "non-loopback", remoteAddress: socket.remoteAddress });
+function handleSocket(socket: net.Socket, token: string, endpointConfig: IpcEndpointConfig): void {
+  const bindEndpoint = endpointConfig.bindEndpoint;
+  if (bindEndpoint.kind === "tcp" && !isAllowedRemoteAddress(socket.remoteAddress, bindEndpoint.host)) {
+    info("ipc", "socket rejected", { reason: "unauthorized-remote", remoteAddress: socket.remoteAddress, bindHost: bindEndpoint.host });
     socket.destroy();
     return;
   }
 
-  debug("ipc", "socket accepted", { endpointKind: endpoint.kind, remoteAddress: socket.remoteAddress });
+  debug("ipc", "socket accepted", { endpointKind: bindEndpoint.kind, remoteAddress: socket.remoteAddress });
 
   socket.setEncoding("utf8");
   socket.setTimeout(3_000, () => socket.destroy());
@@ -129,15 +129,78 @@ function listenOnEndpoint(server: net.Server, endpoint: IpcEndpoint, callback: (
   server.listen(endpoint.path, callback);
 }
 
-function getListeningEndpoint(server: net.Server, endpoint: IpcEndpoint): string {
-  if (endpoint.kind !== "tcp") return endpoint.path;
+function getListeningEndpoint(server: net.Server, endpointConfig: IpcEndpointConfig): string {
+  const bindEndpoint = endpointConfig.bindEndpoint;
+  if (bindEndpoint.kind !== "tcp") return bindEndpoint.path;
+
   const address = server.address();
-  if (!address || typeof address === "string") return `tcp://${endpoint.host}:${endpoint.port}`;
-  return `tcp://${endpoint.host}:${address.port}`;
+  const actualPort = (!address || typeof address === "string") ? bindEndpoint.port : address.port;
+
+  // Use the advertised endpoint if it's different from bind endpoint
+  const advertisedParsed = parseIpcEndpoint(endpointConfig.advertisedEndpoint, { allowPortZero: true, allowNonLoopback: true });
+  if (advertisedParsed.kind === "tcp" && advertisedParsed.host !== bindEndpoint.host) {
+    // Use advertised host with actual port (in case bind used port 0)
+    return `tcp://${advertisedParsed.host}:${actualPort}`;
+  }
+
+  return `tcp://${bindEndpoint.host}:${actualPort}`;
 }
 
-function isLoopbackRemoteAddress(address: string | undefined): boolean {
-  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+function formatEndpoint(endpoint: IpcEndpoint): string {
+  if (endpoint.kind === "tcp") return `tcp://${endpoint.host}:${endpoint.port}`;
+  return endpoint.path;
+}
+
+function isAllowedRemoteAddress(address: string | undefined, bindHost: string): boolean {
+  if (!address) return false;
+
+  // Always allow loopback
+  if (address === "::1" || isLoopbackAddress(address)) {
+    return true;
+  }
+
+  // If binding to 0.0.0.0 or non-loopback, allow private/local addresses
+  if (bindHost === "0.0.0.0" || bindHost !== "127.0.0.1") {
+    return isPrivateOrLocalAddress(address);
+  }
+
+  return false;
+}
+
+function isLoopbackAddress(address: string): boolean {
+  if (address.startsWith("::ffff:")) {
+    address = address.slice(7);
+  }
+
+  const parts = address.split(".").map(Number);
+  return parts.length === 4 && parts[0] === 127 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255);
+}
+
+function isPrivateOrLocalAddress(address: string): boolean {
+  // Handle IPv4-mapped IPv6 addresses
+  if (address.startsWith("::ffff:")) {
+    address = address.slice(7);
+  }
+
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4) return false;
+
+  // Loopback: 127.0.0.0/8
+  if (parts[0] === 127) return true;
+
+  // Private: 10.0.0.0/8
+  if (parts[0] === 10) return true;
+
+  // Private: 172.16.0.0/12
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+
+  // Private: 192.168.0.0/16
+  if (parts[0] === 192 && parts[1] === 168) return true;
+
+  // Link-local: 169.254.0.0/16
+  if (parts[0] === 169 && parts[1] === 254) return true;
+
+  return false;
 }
 
 async function handleRawRequest(raw: string, token: string) {

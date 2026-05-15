@@ -74,6 +74,7 @@ const preloadSource = readFileSync(join(appDir, "preload.cjs"), "utf8");
 const loggerSource = readFileSync(join(appDir, "src", "logger.ts"), "utf8");
 const mainSource = readFileSync(join(appDir, "src", "main.ts"), "utf8");
 const localIpcSourceForLogging = readFileSync(join(appDir, "src", "local-ipc.ts"), "utf8");
+const localIpcPathsSource = readFileSync(join(appDir, "src", "local-ipc-paths.ts"), "utf8");
 const leaseManagerSource = readFileSync(join(appDir, "src", "lease-manager.ts"), "utf8");
 const defaultPetControllerSource = readFileSync(join(appDir, "src", "default-pet-controller.ts"), "utf8");
 const agentPetControllerSourceForLogging = readFileSync(join(appDir, "src", "agent-pet-controller.ts"), "utf8");
@@ -86,6 +87,9 @@ assert.match(loggerSource, /redacted-token/, "desktop logger must redact token-l
 assert.match(mainSource, /initializeLogger\(\)/, "desktop startup must initialize logging before subsystem startup.");
 assert.match(traySource, /Open Logs Folder/, "desktop tray must expose user-sendable logs for bug reports.");
 assert.match(localIpcSourceForLogging, /request received/, "desktop IPC must log request methods for diagnostics.");
+assert.match(localIpcPathsSource, /OPENPETS_IPC_BIND[\s\S]*?OPENPETS_IPC_ENDPOINT[\s\S]*?validateBindHost[\s\S]*?validateAdvertisedHost/, "WSL NAT IPC must separate bind and advertised endpoints with validation.");
+assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT only controls the advertised discovery endpoint[\s\S]*?OPENPETS_IPC_BIND to opt into TCP IPC listening/, "OPENPETS_IPC_ENDPOINT-only mode must not start TCP listening; OPENPETS_IPC_BIND is the explicit TCP opt-in.");
+assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT must use the same port as OPENPETS_IPC_BIND unless OPENPETS_IPC_BIND uses port 0/, "WSL NAT advertised endpoint must not silently override mismatched ports.");
 assert.match(leaseManagerSource, /acquired/, "lease manager must log lease acquisition details.");
 assert.match(defaultPetControllerSource, /show requested/, "default pet controller must log show lifecycle events.");
 assert.match(agentPetControllerSourceForLogging, /show requested/, "agent pet controller must log show lifecycle events.");
