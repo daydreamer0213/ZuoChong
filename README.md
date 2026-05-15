@@ -14,6 +14,17 @@
   <img src="assets/intro.png" alt="OpenPets reacting across multiple coding agent sessions" width="100%" />
 </p>
 
+<div align="center">
+  <p><sub>by <b>Boring Dystopia Development</b></sub></p>
+  <p>
+    <a href="https://boringdystopia.ai/"><img src="https://img.shields.io/badge/boringdystopia.ai-111111?style=for-the-badge&logo=vercel&logoColor=white" alt="boringdystopia.ai"></a>&nbsp;
+    <a href="https://x.com/alvinunreal"><img src="https://img.shields.io/badge/X-@alvinunreal-000000?style=for-the-badge&logo=x&logoColor=white" alt="X @alvinunreal"></a>&nbsp;
+    <a href="https://t.me/boringdystopiadevelopment"><img src="https://img.shields.io/badge/Telegram-Join%20channel-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Join channel"></a>&nbsp;
+  </p>
+</div>
+
+
+
 ---
 
 ## 2-minute Quick Start
@@ -144,10 +155,6 @@ With a selected pet:
 ```bash
 claude mcp add --scope user openpets -- npx -y @open-pets/mcp@latest --pet <petId>
 ```
-
-<p align="center">
-  <img src="assets/claude.png" alt="OpenPets reacting to Claude Code" width="100%" />
-</p>
 
 See [`docs/claude-integration.md`](docs/claude-integration.md) for the full file layout, hook mapping, project-local behavior, and safety rules.
 
