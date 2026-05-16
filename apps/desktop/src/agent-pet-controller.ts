@@ -1,6 +1,6 @@
 import { BrowserWindow } from "electron";
 
-import { getAppStateSnapshot } from "./app-state.js";
+import { getAppStateSnapshot, type PetScaleValue } from "./app-state.js";
 import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
@@ -84,11 +84,12 @@ export function closeAllAgentPets(): void {
 
 export function refreshAgentPetContent(): void {
   debug("pet.agent", "refresh all content", { activeWindows: agentPetWindows.size, petIds: [...agentPetWindows.keys()] });
+  const scale = getPreferredPetScale();
   for (const [petId, window] of agentPetWindows.entries()) {
     if (!window.isDestroyed()) {
       const display = transientDisplays.get(petId) ?? null;
       const badge = statusBadges.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge));
+      void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge), scale);
     }
   }
 }
@@ -103,7 +104,7 @@ function handleBubbleDismissed(petId: string, dismissToken: string): void {
   clearAgentDisplay(petId);
   const window = agentPetWindows.get(petId);
   if (window && !window.isDestroyed()) {
-    void loadExplicitPetContent(window, petId, null, null);
+    void loadExplicitPetContent(window, petId, null, null, undefined, getPreferredPetScale());
   }
 }
 
@@ -114,7 +115,9 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     return existing;
   }
 
-  const pet = getAppStateSnapshot().pets.installed.find((candidate) => candidate.id === petId);
+  const state = getAppStateSnapshot();
+  const scale = state.preferences.petScale as PetScaleValue;
+  const pet = state.pets.installed.find((candidate) => candidate.id === petId);
   if (!pet) throw new Error(`Installed pet is unavailable: ${petId}`);
   const offset = agentPetWindows.size + 1;
   const initial = getDefaultPetInitialPosition(defaultPetWindowSize);
@@ -123,6 +126,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   const window = createAgentPetWindow({
     petId,
     displayName: pet.displayName,
+    scale,
     position: { x: initial.x - offset * 36, y: initial.y - offset * 24 },
     display,
     badge,
@@ -177,12 +181,12 @@ function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
     const window = agentPetWindows.get(petId);
     if (window && !window.isDestroyed()) {
       const badge = statusBadges.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, null, badge, getCurrentDismissToken(petId, null, badge));
+      void loadExplicitPetContent(window, petId, null, badge, getCurrentDismissToken(petId, null, badge), getPreferredPetScale());
     }
   }, displayDurationMs);
   transientTimers.set(petId, timer);
   const window = agentPetWindows.get(petId);
-  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null, preparedDisplay.dismissToken);
+  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null, preparedDisplay.dismissToken, getPreferredPetScale());
 }
 
 function clearAgentDisplay(petId: string): void {
@@ -226,7 +230,7 @@ function setStatusBadge(petId: string, reaction: OpenPetsReaction): void {
     const window = agentPetWindows.get(petId);
     if (window && !window.isDestroyed()) {
       const display = transientDisplays.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, display, null, getCurrentDismissToken(petId, display, null));
+      void loadExplicitPetContent(window, petId, display, null, getCurrentDismissToken(petId, display, null), getPreferredPetScale());
     }
   }, isBusyStatusBadgeReaction(reaction) ? busyStatusBadgeMs : transientDisplayMs);
   statusBadgeTimers.set(petId, timer);
@@ -246,4 +250,8 @@ function isBusyStatusBadgeReaction(reaction: OpenPetsReaction): boolean {
 
 function getCurrentDismissToken(petId: string, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null): string | undefined {
   return display?.dismissToken ?? (badge ? String(displayGenerations.get(petId) ?? 0) : undefined);
+}
+
+function getPreferredPetScale(): PetScaleValue {
+  return getAppStateSnapshot().preferences.petScale as PetScaleValue;
 }

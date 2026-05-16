@@ -213,6 +213,11 @@ assert.match(petWindowSource, /html\[data-motion-state=\"\$\{motion\}\"\] \$\{se
 assert.match(petWindowSource, /\.sprite, \.installed-sprite, \.bubble/, "reduced-motion CSS must include built-in and installed sprites.");
 assert.match(petWindowSource, /function createAgentPetWindow[\s\S]*?installMotionStatePublisher\(window\)/, "agent pet windows must publish motion state so dragged non-default pets run.");
 assert.match(petWindowSource, /loadExplicitPetContent[\s\S]*?state\.preferences\.petScale/, "explicit agent pet windows must use the saved pet scale preference.");
+assert.match(petWindowSource, /interface AgentPetWindowOptions[\s\S]*?readonly scale: PetScaleValue/, "new agent pet windows must receive the current pet scale explicitly for their first render.");
+assert.match(petWindowSource, /loadExplicitPetContent\(window, options\.petId, options\.display, options\.badge, dismissToken, options\.scale\)/, "agent pet first render must not fall back to the medium default scale.");
+assert.match(agentPetControllerSourceForLogging, /function getPreferredPetScale\(\): PetScaleValue/, "agent pet reloads must share one explicit saved scale helper.");
+assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, display, badge, getCurrentDismissToken\(petId, display, badge\), scale\)/, "agent pet refreshes must pass the saved pet scale explicitly.");
+assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, preparedDisplay, statusBadges\.get\(petId\) \?\? null, preparedDisplay\.dismissToken, getPreferredPetScale\(\)\)/, "agent pet transient updates must pass the saved pet scale explicitly.");
 assert.match(mappingDoc, /\| 3 \| `waving` \| `waving`, Claude `Notification`\. \|/, "mapping docs must describe waving animation row and notification mapping.");
 assert.match(mappingDoc, /reaction-animation-mapping\.ts/, "mapping docs must reference the shared reaction animation mapping source of truth.");
 assert.match(mappingDoc, /overrid/i, "mapping docs must mention that reaction animation defaults can be overridden in Settings.");

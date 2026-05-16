@@ -25,6 +25,7 @@ export interface DefaultPetWindowOptions {
 export interface AgentPetWindowOptions {
   readonly petId: string;
   readonly displayName: string;
+  readonly scale: PetScaleValue;
   readonly position: Point;
   readonly display: PetTransientDisplay | null;
   readonly badge: PetStatusBadgeReaction | null;
@@ -86,7 +87,7 @@ export function createAgentPetWindow(options: AgentPetWindowOptions, dismissToke
   installMousePassthroughAndDrag(window, options.onBubbleDismissed);
   installMotionStatePublisher(window);
   installPetContextMenu(window, { label: "Close pet", click: options.onCloseRequested });
-  void loadExplicitPetContent(window, options.petId, options.display, options.badge, dismissToken);
+  void loadExplicitPetContent(window, options.petId, options.display, options.badge, dismissToken, options.scale);
   return window;
 }
 
@@ -378,7 +379,7 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
   });
 }
 
-export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string): Promise<void> {
+export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, scaleOverride?: PetScaleValue): Promise<void> {
   const sequence = allocateWindowLoadSequence(window);
   try {
     const state = getAppStateSnapshot();
@@ -387,7 +388,8 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
       throw new Error(`Cannot render explicit pet: ${petId}`);
     }
     debug("pet.window", "explicit content render begin", { windowId: window.id, sequence, petId, displayName: pet.displayName, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge });
-    const render = await createInstalledPetRender(pet.id, pet.displayName, false, display, state.preferences.petScale as PetScaleValue, badge, `explicit:${pet.id}`, dismissToken);
+    const scale = scaleOverride ?? state.preferences.petScale as PetScaleValue;
+    const render = await createInstalledPetRender(pet.id, pet.displayName, false, display, scale, badge, `explicit:${pet.id}`, dismissToken);
     if (tryUpdateLoadedPetContent(window, render, `explicit-${pet.id}`, sequence)) return;
     await loadPetHtmlFile(window, render.html, `explicit-${pet.id}`, sequence);
     petWindowRenderCache.set(window, render.cacheKey);
