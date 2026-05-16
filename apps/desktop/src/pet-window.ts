@@ -10,6 +10,7 @@ import { getInstalledPetDir } from "./pet-paths.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { pickReactionMessage } from "./reaction-messages.js";
 import { debug, error as logError, info } from "./logger.js";
+import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 
 export interface DefaultPetWindowOptions {
   readonly position: Point;
@@ -37,9 +38,6 @@ export interface PetTransientDisplay {
 
 export type PetStatusBadgeReaction = Exclude<OpenPetsReaction, "idle">;
 
-type PetMotionState = "idle" | "run-left" | "run-right";
-type UniversalSpriteState = "idle" | "running-right" | "running-left" | "waving" | "jumping" | "failed" | "waiting" | "running" | "review";
-
 interface PetContentRender {
   readonly html: string;
   readonly bodyHtml: string;
@@ -47,46 +45,7 @@ interface PetContentRender {
   readonly cacheKey: string;
 }
 
-const motionToSpriteState = {
-  idle: "idle",
-  "run-right": "running-right",
-  "run-left": "running-left",
-} as const satisfies Record<PetMotionState, UniversalSpriteState>;
-
-const reactionToSpriteState = {
-  idle: "idle",
-  thinking: "review",
-  working: "running",
-  editing: "running",
-  running: "running",
-  testing: "waiting",
-  waiting: "waiting",
-  waving: "waving",
-  success: "jumping",
-  error: "failed",
-  celebrating: "jumping",
-} as const satisfies Record<OpenPetsReaction, UniversalSpriteState>;
-
 const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
-
-const defaultPetSprite = {
-  fileName: "default-pet-spritesheet.webp",
-  frameWidth: 192,
-  frameHeight: 208,
-  columns: 8,
-  rows: 9,
-  states: {
-    idle: { row: 0, frames: 6, durationMs: 5500, iterations: "infinite" },
-    "running-right": { row: 1, frames: 8, durationMs: 1060 },
-    "running-left": { row: 2, frames: 8, durationMs: 1060 },
-    waving: { row: 3, frames: 4, durationMs: 700, iterations: 2 },
-    jumping: { row: 4, frames: 5, durationMs: 840, iterations: 2 },
-    failed: { row: 5, frames: 8, durationMs: 1220, iterations: 2 },
-    waiting: { row: 6, frames: 6, durationMs: 1010 },
-    running: { row: 7, frames: 6, durationMs: 820 },
-    review: { row: 8, frames: 6, durationMs: 1030 },
-  } satisfies Record<UniversalSpriteState, { readonly row: number; readonly frames: number; readonly durationMs: number; readonly iterations?: number | "infinite" }>,
-} as const;
 
 const windowLoadChains = new WeakMap<BrowserWindow, Promise<void>>();
 const windowLoadSequences = new WeakMap<BrowserWindow, number>();
@@ -439,7 +398,7 @@ export function mergePetTransientDisplay(current: PetTransientDisplay | null, ne
 
 export function getTransientReactionAnimationMs(display: PetTransientDisplay): number | null {
   if (!display.reaction) return null;
-  const state = reactionToSpriteState[display.reaction];
+  const state = getReactionSpriteState(display.reaction);
   const row = defaultPetSprite.states[state];
   const iterations = "iterations" in row ? row.iterations : "infinite";
   return typeof iterations === "number" ? row.durationMs * iterations : null;
@@ -685,7 +644,7 @@ function createSpriteRule(selector: string, state: UniversalSpriteState): string
 }
 
 function getReactionSpriteState(reaction: OpenPetsReaction | undefined): UniversalSpriteState {
-  return reaction ? reactionToSpriteState[reaction] : "idle";
+  return resolveReactionSpriteState(reaction, getAppStateSnapshot().preferences.reactionAnimationOverrides);
 }
 
 function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null): string {

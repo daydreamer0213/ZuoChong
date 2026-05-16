@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { allowedReactions } from "./local-ipc-protocol.js";
 import { pickReactionMessage, reactionMessagePools } from "./reaction-messages.js";
+import { defaultReactionToSpriteState, normalizeReactionAnimationOverrides, reactionAnimationMetadata, resolveReactionSpriteState, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 
 const distDir = dirname(fileURLToPath(import.meta.url));
 const appDir = dirname(distDir);
@@ -63,6 +64,7 @@ for (const icon of ["claude.svg", "cursor.svg", "opencode.svg", "pi.svg", "vscod
 }
 assert.match(readFileSync(join(appDir, "src", "assets.ts"), "utf8"), /assets["']?,\s*["']tray-icon\.png|join\("assets", "tray-icon\.png"\)/, "tray icon code must keep using assets/tray-icon.png.");
 const petWindowSource = readFileSync(join(appDir, "src", "pet-window.ts"), "utf8");
+const reactionAnimationMappingSource = readFileSync(join(appDir, "src", "reaction-animation-mapping.ts"), "utf8");
 const petPreloadSource = readFileSync(join(appDir, "pet-preload.cjs"), "utf8");
 const reactionMessagesSource = readFileSync(join(appDir, "src", "reaction-messages.ts"), "utf8");
 const displaySource = readFileSync(join(appDir, "src", "display.ts"), "utf8");
@@ -95,20 +97,29 @@ assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT must use the same port 
 assert.match(leaseManagerSource, /acquired/, "lease manager must log lease acquisition details.");
 assert.match(defaultPetControllerSource, /show requested/, "default pet controller must log show lifecycle events.");
 assert.match(agentPetControllerSourceForLogging, /show requested/, "agent pet controller must log show lifecycle events.");
-assert.match(petWindowSource, /default-pet-spritesheet\.webp/, "default pet renderer must reference the bundled WebP spritesheet asset.");
-assert.match(petWindowSource, /columns:\s*8/, "default pet renderer must keep the real catalog sprite sheet column count.");
-assert.match(petWindowSource, /rows:\s*9/, "default pet renderer must keep the real catalog sprite sheet row count.");
-assert.match(petWindowSource, /frameWidth:\s*192/, "default pet renderer must keep the universal Codex frame width.");
-assert.match(petWindowSource, /frameHeight:\s*208/, "default pet renderer must keep the universal Codex frame height.");
+assert.match(reactionAnimationMappingSource, /default-pet-spritesheet\.webp/, "default pet renderer must reference the bundled WebP spritesheet asset.");
+assert.match(reactionAnimationMappingSource, /columns:\s*8/, "default pet renderer must keep the real catalog sprite sheet column count.");
+assert.match(reactionAnimationMappingSource, /rows:\s*9/, "default pet renderer must keep the real catalog sprite sheet row count.");
+assert.match(reactionAnimationMappingSource, /frameWidth:\s*192/, "default pet renderer must keep the universal Codex frame width.");
+assert.match(reactionAnimationMappingSource, /frameHeight:\s*208/, "default pet renderer must keep the universal Codex frame height.");
 assert.ok(petWindowSource.includes("defaultPetSprite.frameWidth * defaultPetSprite.columns") && petWindowSource.includes("defaultPetSprite.frameHeight * defaultPetSprite.rows"), "pet renderer must derive universal spritesheet dimensions from frame size and row/column counts.");
 for (const state of ["idle", "running-right", "running-left", "waving", "jumping", "failed", "waiting", "running", "review"]) {
-  assert.match(petWindowSource, new RegExp(`["']?${state}["']?:\\s*\\{\\s*row:`), `pet renderer must define universal sprite state: ${state}`);
+  assert.match(reactionAnimationMappingSource, new RegExp(`["']?${state}["']?:\\s*\\{\\s*row:`), `pet renderer must define universal sprite state: ${state}`);
 }
 for (const reaction of ["idle", "thinking", "working", "editing", "running", "testing", "waiting", "waving", "success", "error", "celebrating"]) {
-  assert.match(petWindowSource, new RegExp(`${reaction}:\\s*["']`), `pet renderer must map reaction to sprite state: ${reaction}`);
+  assert.match(reactionAnimationMappingSource, new RegExp(`${reaction}:\\s*["']`), `pet renderer must map reaction to sprite state: ${reaction}`);
+  assert.match(reactionAnimationMappingSource, new RegExp(`id:\\s*["']${reaction}["']`), `reaction animation settings must expose table metadata for: ${reaction}`);
   assert.match(reactionMessagesSource, new RegExp(`${reaction}:\\s*\\[`), `reaction messages must define a pool for: ${reaction}`);
 }
-assert.match(petWindowSource, /satisfies Record<OpenPetsReaction, UniversalSpriteState>/, "reaction-to-sprite-state mapping must be exhaustive over OpenPetsReaction.");
+assert.match(reactionAnimationMappingSource, /satisfies Record<OpenPetsReaction, UserSelectableAnimationState>/, "reaction-to-sprite-state mapping must be exhaustive over OpenPetsReaction.");
+assert.match(reactionAnimationMappingSource, /validateReactionAnimationOverrides/, "settings must validate reaction animation overrides before persisting.");
+assert.match(reactionAnimationMappingSource, /running-left[\s\S]*running-right|running-right[\s\S]*running-left/, "reaction animation settings must know drag-only sprite states and exclude them from user-selectable overrides.");
+assert.deepEqual(reactionAnimationMetadata.map((reaction) => reaction.id), allowedReactions, "reaction animation settings metadata must exactly match public reactions.");
+assert.deepEqual(selectableAnimationMetadata.map((animation) => animation.id), ["idle", "review", "running", "waiting", "waving", "jumping", "failed"], "reaction animation settings must expose only selectable non-drag animation states.");
+assert.throws(() => validateReactionAnimationOverrides({ thinking: "running-left" }), /Invalid reaction animation state/, "settings validation must reject drag-only sprite states.");
+assert.equal(normalizeReactionAnimationOverrides({ thinking: defaultReactionToSpriteState.thinking }), undefined, "default-equivalent reaction animation overrides must normalize away.");
+assert.deepEqual(normalizeReactionAnimationOverrides({ thinking: "running", nope: "waiting", success: "running-right" }), { thinking: "running" }, "invalid saved reaction animation overrides must be dropped on read.");
+assert.equal(resolveReactionSpriteState(undefined, { idle: "waving" }), "idle", "no-active-reaction baseline must stay canonical idle even if explicit idle is overridden.");
 assert.match(reactionMessagesSource, /satisfies Record<OpenPetsReaction, readonly string\[\]>/, "reaction-only bubble message pools must be exhaustive over OpenPetsReaction.");
 assert.match(petWindowSource, /pickReactionMessage\(display\.reaction\)/, "reaction-only bubbles must render randomized messages instead of raw lowercase reaction ids.");
 assert.match(petWindowSource, /function preparePetTransientDisplay/, "reaction-only bubbles must prepare a stable random message before rerenders.");
@@ -169,10 +180,15 @@ assert.match(updateCheckerSource, /api\.github\.com\/repos\/\$\{githubRepository
 assert.match(updateCheckerSource, /shell\.openExternal\(url\)/, "update action must open the GitHub release page externally.");
 assert.match(traySource, /Update available:/, "tray menu must surface available updates.");
 assert.match(windowsSource, /openpets:check-for-updates/, "settings window must be able to trigger update checks.");
+assert.match(windowsSource, /openpets:get-reaction-animation-settings/, "settings window must be able to load reaction animation metadata.");
+assert.match(windowsSource, /reactionAnimationOverrides/, "settings window must be able to persist reaction animation overrides.");
+assert.match(windowsSource, /openpets-pet-preview/, "settings reaction preview must use a scoped internal pet preview protocol.");
 assert.match(windowsSource, /openpets:open-update-release-page/, "settings window must be able to open the release page.");
 assert.match(windowsSource, /id="check-for-updates"/, "settings UI must include a Check for updates button.");
 assert.match(windowsSource, /id="open-update-release"/, "settings UI must include an Open release button.");
 assert.match(preloadSource, /checkForUpdates/, "settings preload must expose update checks.");
+assert.match(preloadSource, /getReactionAnimationSettings/, "settings preload must expose reaction animation settings metadata.");
+assert.match(preloadSource, /reaction-animation-table/, "settings preload must render the reaction animation mapping table.");
 assert.match(preloadSource, /\{ label: "Thinking", state: "thinking" \}/, "Pet Manager mini previews must use a non-idle thinking/review state because the hero already shows idle.");
 assert.match(preloadSource, /\{ label: "Happy", state: "happy" \}/, "Pet Manager mini previews must request the happy/jumping row.");
 assert.match(preloadSource, /\{ label: "Wave", state: "wave" \}/, "Pet Manager mini previews must request the waving row.");
@@ -197,6 +213,8 @@ assert.match(petWindowSource, /\.sprite, \.installed-sprite, \.bubble/, "reduced
 assert.match(petWindowSource, /function createAgentPetWindow[\s\S]*?installMotionStatePublisher\(window\)/, "agent pet windows must publish motion state so dragged non-default pets run.");
 assert.match(petWindowSource, /loadExplicitPetContent[\s\S]*?state\.preferences\.petScale/, "explicit agent pet windows must use the saved pet scale preference.");
 assert.match(mappingDoc, /\| 3 \| `waving` \| `waving`, Claude `Notification`\. \|/, "mapping docs must describe waving animation row and notification mapping.");
+assert.match(mappingDoc, /reaction-animation-mapping\.ts/, "mapping docs must reference the shared reaction animation mapping source of truth.");
+assert.match(mappingDoc, /overrid/i, "mapping docs must mention that reaction animation defaults can be overridden in Settings.");
 assert.doesNotMatch(mappingDoc, /bubble-only|currently \*\*bubble states\*\*/i, "mapping docs must not describe reactions as bubble-only.");
 for (const reaction of allowedReactions) {
   const pool = reactionMessagePools[reaction];

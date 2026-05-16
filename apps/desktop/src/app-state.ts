@@ -7,6 +7,7 @@ import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted,
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
+import { normalizeReactionAnimationOverrides, type ReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 
 export interface InstalledPetState {
   readonly id: string;
@@ -35,6 +36,7 @@ export interface OpenPetsStateV1 {
     readonly openDefaultPetOnLaunch: boolean;
     readonly speechBubblesEnabled: boolean;
     readonly petScale: number;
+    readonly reactionAnimationOverrides?: ReactionAnimationOverrides;
     readonly onboardingCompleted: boolean;
     readonly claudeCommandPath?: string;
     readonly nodeCommandPath?: string;
@@ -291,6 +293,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
       : defaultState.preferences.openDefaultPetOnLaunch,
     speechBubblesEnabled: true,
     petScale: normalizePetScale(value.petScale),
+    reactionAnimationOverrides: normalizeReactionAnimationOverrides(value.reactionAnimationOverrides),
     onboardingCompleted: normalizeOnboardingCompleted(value),
     claudeCommandPath: normalizeCommandPath(value.claudeCommandPath),
     nodeCommandPath: normalizeCommandPath(value.nodeCommandPath),
@@ -357,6 +360,7 @@ function createDefaultState(): OpenPetsStateV1 {
       openDefaultPetOnLaunch: true,
       speechBubblesEnabled: true,
       petScale: defaultPetScale,
+      reactionAnimationOverrides: undefined,
       onboardingCompleted: false,
       claudeCommandPath: undefined,
       nodeCommandPath: undefined,

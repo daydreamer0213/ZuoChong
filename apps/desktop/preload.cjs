@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 const api = {
   getState: () => ipcRenderer.invoke("openpets:get-state"),
+  getReactionAnimationSettings: () => ipcRenderer.invoke("openpets:get-reaction-animation-settings"),
   getCatalog: () => ipcRenderer.invoke("openpets:get-catalog"),
   getCatalogPage: (page) => ipcRenderer.invoke("openpets:get-catalog-page", page),
   getCatalogSearch: () => ipcRenderer.invoke("openpets:get-catalog-search"),
@@ -39,6 +40,8 @@ let activePetManagerFilter = "all";
 let activePetManagerItems = [];
 let activePetManagerDefaultId = "";
 let petGalleryInstance = 0;
+let reactionAnimationRenderSequence = 0;
+let reactionAnimationSaveChain = Promise.resolve();
 const remoteCatalogFilters = new Set(["original", "western", "asian"]);
 
 contextBridge.exposeInMainWorld("openPets", api);
@@ -1358,6 +1361,7 @@ function renderSettings(state) {
   bindScaleSelect(scaleSelect, String(state.preferences.petScale));
   bindLaunchAtLogin(launchAtLogin, launchAtLoginDetail);
   bindUpdateControls();
+  void renderReactionAnimationSettings().catch(renderCaughtError);
 
   const resetButton = requireButton("reset-default-pet-position");
   resetButton.disabled = false;
@@ -1373,6 +1377,142 @@ function renderSettings(state) {
       renderCaughtError(error);
     });
   };
+}
+
+async function renderReactionAnimationSettings() {
+  const sequence = ++reactionAnimationRenderSequence;
+  const snapshot = await api.getReactionAnimationSettings();
+  if (sequence !== reactionAnimationRenderSequence) return;
+  if (!isReactionAnimationSettingsSnapshot(snapshot)) {
+    throw new Error("Reaction animation settings are unavailable.");
+  }
+
+  const table = requireElement("reaction-animation-table");
+  const resetButton = requireButton("reset-reaction-animations");
+  const overrides = { ...snapshot.overrides };
+  const animationById = new Map(snapshot.animations.map((animation) => [animation.id, animation]));
+  table.textContent = "";
+
+  const saveOverrides = async (nextOverrides, message) => {
+    requireElement("settings-status").textContent = "Saving reaction animations…";
+    setReactionAnimationControlsDisabled(true);
+    await api.updatePreferences({ reactionAnimationOverrides: nextOverrides });
+    await renderReactionAnimationSettings();
+    requireElement("settings-status").textContent = message;
+  };
+
+  for (const reaction of snapshot.reactions) {
+    const selectedAnimation = resolvedAnimationFor(reaction, overrides);
+    const row = document.createElement("div");
+    row.className = "reaction-animation-row";
+    row.setAttribute("role", "row");
+
+    const name = document.createElement("div");
+    name.className = "reaction-animation-name";
+    const title = document.createElement("strong");
+    title.textContent = reaction.label;
+    const description = document.createElement("small");
+    description.textContent = reaction.description;
+    name.append(title, description);
+
+    const select = document.createElement("select");
+    select.className = "settings-select";
+    select.setAttribute("aria-label", `${reaction.label} animation`);
+    for (const animation of snapshot.animations) {
+      const option = document.createElement("option");
+      option.value = animation.id;
+      option.textContent = animation.label;
+      select.append(option);
+    }
+    select.value = selectedAnimation;
+    select.onchange = () => {
+      const nextValue = select.value;
+      if (!animationById.has(nextValue)) return;
+      updateReactionPreviewSprite(miniSprite, snapshot, nextValue, true);
+      setReactionAnimationControlsDisabled(true);
+      reactionAnimationSaveChain = reactionAnimationSaveChain.catch(() => {}).then(async () => {
+        const latest = await api.getReactionAnimationSettings();
+        if (!isReactionAnimationSettingsSnapshot(latest)) throw new Error("Reaction animation settings are unavailable.");
+        const latestReaction = latest.reactions.find((candidate) => candidate.id === reaction.id) || reaction;
+        const nextOverrides = { ...latest.overrides };
+        if (nextValue === latestReaction.defaultAnimation) delete nextOverrides[reaction.id];
+        else nextOverrides[reaction.id] = nextValue;
+        await saveOverrides(nextOverrides, `${reaction.label} animation saved.`);
+      });
+      void reactionAnimationSaveChain.catch((error) => {
+        select.disabled = false;
+        select.value = selectedAnimation;
+        updateReactionPreviewSprite(miniSprite, snapshot, selectedAnimation, true);
+        setReactionAnimationControlsDisabled(false);
+        requireElement("settings-status").textContent = "Couldn’t save reaction animation. Try again.";
+        renderCaughtError(error);
+      });
+    };
+
+    const miniStage = document.createElement("div");
+    miniStage.className = "reaction-row-mini-stage";
+    miniStage.setAttribute("aria-hidden", "true");
+    const miniFrame = document.createElement("div");
+    miniFrame.className = "reaction-row-mini-frame";
+    const miniSprite = document.createElement("div");
+    miniSprite.className = "reaction-row-mini-sprite";
+    miniFrame.append(miniSprite);
+    miniStage.append(miniFrame);
+    updateReactionPreviewSprite(miniSprite, snapshot, selectedAnimation, false);
+
+    const actions = document.createElement("div");
+    actions.className = "reaction-row-actions";
+    const state = document.createElement("span");
+    const changed = selectedAnimation !== reaction.defaultAnimation;
+    state.className = `reaction-row-state${changed ? " changed" : ""}`;
+    state.textContent = changed ? "Changed" : "Default";
+    actions.append(state);
+
+    row.append(name, select, miniStage, actions);
+    table.append(row);
+  }
+
+  resetButton.disabled = Object.keys(overrides).length === 0;
+  resetButton.onclick = () => {
+    setReactionAnimationControlsDisabled(true);
+    reactionAnimationSaveChain = reactionAnimationSaveChain.catch(() => {}).then(() => saveOverrides({}, "Reaction animations reset to defaults."));
+    void reactionAnimationSaveChain.catch((error) => {
+      resetButton.disabled = false;
+      setReactionAnimationControlsDisabled(false);
+      requireElement("settings-status").textContent = "Couldn’t reset reaction animations. Try again.";
+      renderCaughtError(error);
+    });
+  };
+}
+
+function setReactionAnimationControlsDisabled(disabled) {
+  const table = document.getElementById("reaction-animation-table");
+  if (table) {
+    for (const control of table.querySelectorAll("select, button")) {
+      control.disabled = disabled;
+    }
+  }
+  const resetButton = document.getElementById("reset-reaction-animations");
+  if (resetButton instanceof HTMLButtonElement) resetButton.disabled = disabled || !document.querySelector(".reaction-row-state.changed");
+}
+
+function resolvedAnimationFor(reaction, overrides) {
+  return overrides[reaction.id] || reaction.defaultAnimation;
+}
+
+function updateReactionPreviewSprite(sprite, snapshot, animationId, restart) {
+  const row = snapshot.sprite.states[animationId] || snapshot.sprite.states.idle;
+  sprite.style.backgroundImage = `url("${snapshot.previewSpriteUrl}")`;
+  sprite.style.backgroundSize = `${snapshot.sprite.frameWidth * snapshot.sprite.columns}px ${snapshot.sprite.frameHeight * snapshot.sprite.rows}px`;
+  sprite.style.setProperty("--preview-row-y", `-${row.row * snapshot.sprite.frameHeight}px`);
+  sprite.style.setProperty("--preview-frames", String(row.frames));
+  sprite.style.setProperty("--preview-duration", `${row.durationMs}ms`);
+  sprite.style.setProperty("--preview-iterations", String(row.iterations || "infinite"));
+  if (restart) {
+    sprite.style.animation = "none";
+    void sprite.offsetWidth;
+    sprite.style.animation = "";
+  }
 }
 
 function bindUpdateControls() {
@@ -1575,6 +1715,20 @@ function isLaunchAtLoginState(value) {
   return isRecord(value)
     && typeof value.supported === "boolean"
     && typeof value.enabled === "boolean";
+}
+
+function isReactionAnimationSettingsSnapshot(value) {
+  return isRecord(value)
+    && Array.isArray(value.reactions)
+    && Array.isArray(value.animations)
+    && isRecord(value.sprite)
+    && isRecord(value.sprite.states)
+    && isRecord(value.overrides)
+    && typeof value.previewSpriteUrl === "string"
+    && typeof value.sprite.frameWidth === "number"
+    && typeof value.sprite.frameHeight === "number"
+    && typeof value.sprite.columns === "number"
+    && typeof value.sprite.rows === "number";
 }
 
 function isCatalogUiState(value) {

@@ -33,6 +33,8 @@ Source of truth: `packages/client/src/protocol.ts` and `apps/desktop/src/local-i
 
 Reactions drive the pet spritesheet animation and can also show temporary bubble text above the pet. For example, `thinking` uses the review/thinking animation row and, when sent as a reaction-only event, displays a short randomized status line such as `Thinking it through` or `Checking the clues`.
 
+The defaults below are defined in `apps/desktop/src/reaction-animation-mapping.ts`. Users can override reaction-to-animation defaults in Settings → Reaction animations. Overrides apply globally to the default pet and explicit/agent pet windows. Drag-only rows (`running-left`, `running-right`) are never user-selectable because they are controlled by pet movement.
+
 The universal Codex/OpenPets spritesheet has these animation rows:
 
 | Row | Spritesheet state | Trigger/reaction mapping |
@@ -57,7 +59,7 @@ One-shot feedback animations do not loop for the full 4-second bubble lifetime:
 | `jumping` | 2 loops |
 | `failed` | 2 loops |
 
-Long-running states (`idle`, `waiting`, `running`, `review`, and drag run states) continue looping while active.
+Long-running states (`idle`, `waiting`, `running`, `review`, and drag run states) continue looping while active. If a user override maps a reaction to a different animation state, the selected state's one-shot or looping behavior applies.
 
 ## Bubble priority
 
@@ -75,13 +77,15 @@ Source of truth: `apps/desktop/src/pet-window.ts` (`createBubbleMarkup`).
 
 ## How long bubbles stay visible
 
-Reaction/message bubbles are transient and clear after:
+Reaction/message bubbles are transient and clear after a length-aware duration:
 
-```text
-4 seconds
-```
+| Bubble type | Duration |
+| --- | --- |
+| Most reactions/messages | At least 4 seconds. |
+| `success` / `error` reactions | At least 5 seconds. |
+| Longer explicit messages | Extended by message length, capped at 12 seconds. |
 
-Source of truth: `apps/desktop/src/local-ipc-protocol.ts` (`transientDisplayMs = 4_000`).
+Source of truth: `apps/desktop/src/pet-window.ts` (`getTransientDisplayDurationMs`).
 
 ## Claude hook event mapping
 

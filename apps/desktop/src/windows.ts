@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { app, BrowserWindow, ipcMain, protocol, type IpcMainInvokeEvent } from "electron";
@@ -10,6 +11,8 @@ import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } fro
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
 import { refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
+import { getInstalledPetDir } from "./pet-paths.js";
+import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
 type TaskWindowKind = "pet-manager" | "agent-setup" | "settings" | "onboarding";
@@ -65,6 +68,11 @@ export function installInternalUiHandlers(): void {
     return getAppStateSnapshot();
   });
 
+  ipcMain.handle("openpets:get-reaction-animation-settings", async (event) => {
+    assertAllowedSender(event, ["settings"]);
+    return getReactionAnimationSettingsSnapshot();
+  });
+
   ipcMain.handle("openpets:onboarding-snapshot", (event) => {
     assertAllowedSender(event, ["onboarding"]);
     const state = getAppStateSnapshot();
@@ -118,8 +126,10 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:update-preferences", (event, patch: unknown) => {
     assertAllowedSender(event, ["settings"]);
     const previousScale = getAppStateSnapshot().preferences.petScale;
+    const previousOverrides = JSON.stringify(getAppStateSnapshot().preferences.reactionAnimationOverrides ?? {});
     const state = updatePreferences(validatePreferencePatch(patch));
-    if (state.preferences.petScale !== previousScale) {
+    const nextOverrides = JSON.stringify(state.preferences.reactionAnimationOverrides ?? {});
+    if (state.preferences.petScale !== previousScale || nextOverrides !== previousOverrides) {
       refreshDefaultPetContent();
       refreshAgentPetContent();
     }
@@ -235,6 +245,27 @@ export function installInternalUiProtocol(): void {
         headers: {
           "Content-Type": "image/webp",
           "Cache-Control": "private, max-age=60",
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+
+  protocol.handle("openpets-pet-preview", async (request) => {
+    try {
+      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+      const url = new URL(request.url);
+      if (url.hostname !== "spritesheet" || url.pathname !== "/default" || url.hash) return new Response(null, { status: 404 });
+      const version = url.searchParams.get("v");
+      if ([...url.searchParams.keys()].some((key) => key !== "v") || (version !== null && !/^[a-z0-9_-]{1,64}-\d+-\d+$/.test(version))) return new Response(null, { status: 404 });
+      const { path } = await getDefaultPetPreviewSpriteInfo();
+      const spritesheet = await stat(path);
+      if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) return new Response(null, { status: 404 });
+      return new Response(await readFile(path), {
+        headers: {
+          "Content-Type": "image/webp",
+          "Cache-Control": "no-store",
         },
       });
     } catch {
@@ -786,7 +817,7 @@ function createSettingsHtml(definition: TaskWindowDefinition): string {
     <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src openpets-pet-preview:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(definition.title)}</title>
         ${createTaskWindowStyles()}
@@ -841,6 +872,17 @@ function createSettingsHtml(definition: TaskWindowDefinition): string {
               </span>
               <button id="reset-default-pet-position">Reset</button>
             </div>
+          </section>
+          <section class="settings-panel reaction-settings-panel" aria-labelledby="settings-reaction-animations-title">
+            <div class="settings-section-heading">
+              <span>
+                <small>Animations</small>
+                <h2 id="settings-reaction-animations-title">Reaction animations</h2>
+              </span>
+              <button id="reset-reaction-animations" class="secondary">Reset defaults</button>
+            </div>
+            <p class="settings-helper">Choose which animation your pet plays for each agent reaction. Preview uses your default pet without affecting the live desktop pet.</p>
+            <div id="reaction-animation-table" class="reaction-animation-table" role="table" aria-label="Reaction animation mappings"></div>
           </section>
           <section class="settings-panel" aria-labelledby="settings-updates-title">
             <div class="settings-section-heading">
@@ -929,16 +971,30 @@ function createTaskWindowStyles(): string {
     body[data-openpets-view="settings"] .setting-row strong { display: block; margin-bottom: 4px; color: #102149; font-size: 14px; }
     body[data-openpets-view="settings"] .setting-row small { color: #63708f; line-height: 1.35; }
     body[data-openpets-view="settings"] .setting-row.disabled { opacity: 0.76; }
+    body[data-openpets-view="settings"] .settings-helper { margin: -2px 0 4px; color: #63708f; line-height: 1.45; text-wrap: pretty; }
+    body[data-openpets-view="settings"] .reaction-animation-table { display: grid; gap: 8px; min-width: 0; }
+    body[data-openpets-view="settings"] .reaction-animation-row { min-height: 62px; display: grid; grid-template-columns: minmax(132px, 1fr) minmax(130px, 0.78fr) 66px auto; gap: 10px; align-items: center; padding: 10px 11px; border: 1px solid rgba(126, 161, 210, 0.3); border-radius: 14px; background: rgba(255,255,255,0.64); box-shadow: inset 0 1px 0 rgba(255,255,255,0.82); }
+    body[data-openpets-view="settings"] .reaction-animation-name { min-width: 0; display: grid; gap: 3px; }
+    body[data-openpets-view="settings"] .reaction-animation-name strong { color: #102149; font-size: 13px; }
+    body[data-openpets-view="settings"] .reaction-animation-name small { color: #63708f; line-height: 1.25; }
+    body[data-openpets-view="settings"] .reaction-row-state { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; border: 1px solid rgba(126, 161, 210, 0.34); border-radius: 999px; padding: 0 8px; color: #64748b; background: rgba(248, 250, 252, 0.78); font-size: 10px; font-weight: 900; }
+    body[data-openpets-view="settings"] .reaction-row-state.changed { color: #176df2; background: #eff6ff; border-color: rgba(37, 99, 235, 0.28); }
+    body[data-openpets-view="settings"] .reaction-row-mini-stage { width: 58px; height: 62px; display: grid; place-items: center; overflow: hidden; border: 1px solid rgba(126, 161, 210, 0.24); border-radius: 13px; background: radial-gradient(circle at 50% 74%, rgba(125, 211, 252, 0.18), transparent 47%); }
+    body[data-openpets-view="settings"] .reaction-row-mini-frame { position: relative; width: 54px; height: 58px; overflow: visible; }
+    body[data-openpets-view="settings"] .reaction-row-mini-sprite { position: absolute; left: 50%; top: 50%; width: 192px; height: 208px; background-image: url("openpets-pet-preview://spritesheet/default"); background-size: 1536px 1872px; background-repeat: no-repeat; --preview-row-y: 0px; --preview-frames: 6; --preview-duration: 5500ms; --preview-iterations: infinite; background-position: 0 var(--preview-row-y); animation: reaction-preview-frames var(--preview-duration) steps(var(--preview-frames)) var(--preview-iterations); transform: translate(-50%, -50%) scale(0.28); transform-origin: center; filter: drop-shadow(0 6px 6px rgba(25, 44, 83, 0.16)); }
+    body[data-openpets-view="settings"] .reaction-row-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+    @keyframes reaction-preview-frames { from { background-position: 0 var(--preview-row-y); } to { background-position: calc(-192px * var(--preview-frames)) var(--preview-row-y); } }
     body[data-openpets-view="settings"] input[type="checkbox"] { width: 42px; height: 24px; flex: 0 0 auto; accent-color: #2478ff; cursor: pointer; }
-    body[data-openpets-view="settings"] .settings-select { min-height: 38px; min-width: 128px; box-sizing: border-box; border: 1px solid rgba(37, 99, 235, 0.34); border-radius: 11px; background: rgba(255,255,255,0.82); color: #17284f; padding: 0 12px; font: inherit; font-weight: 850; outline: none; }
+    body[data-openpets-view="settings"] .settings-select { min-height: 40px; min-width: 128px; box-sizing: border-box; border: 1px solid rgba(37, 99, 235, 0.34); border-radius: 11px; background: rgba(255,255,255,0.82); color: #17284f; padding: 0 12px; font: inherit; font-weight: 850; outline: none; }
     body[data-openpets-view="settings"] .settings-actions-inline { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     body[data-openpets-view="settings"] input[type="checkbox"]:focus-visible, body[data-openpets-view="settings"] button:focus-visible, body[data-openpets-view="settings"] .settings-select:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.34); outline-offset: 3px; }
-    body[data-openpets-view="settings"] button { min-height: 36px; border: 1px solid rgba(37, 99, 235, 0.34); border-radius: 11px; padding: 0 13px; background: rgba(255,255,255,0.76); color: #176df2; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 950; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(61, 99, 160, 0.08); }
+    body[data-openpets-view="settings"] button { min-height: 40px; border: 1px solid rgba(37, 99, 235, 0.34); border-radius: 11px; padding: 0 13px; background: rgba(255,255,255,0.76); color: #176df2; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; font-weight: 950; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(61, 99, 160, 0.08); }
     body[data-openpets-view="settings"] button:hover:not(:disabled) { background: #eff6ff; border-color: rgba(37, 99, 235, 0.64); transform: translateY(-1px); }
     body[data-openpets-view="settings"] button:disabled { cursor: default; opacity: 0.58; transform: none; }
     body[data-openpets-view="settings"] .settings-status { min-height: 20px; margin: 12px 0 0; padding: 12px 14px; border-radius: 14px; background: rgba(239, 246, 255, 0.78); border: 1px solid rgba(37, 99, 235, 0.18); color: #36547d; line-height: 1.4; }
     body[data-openpets-view="settings"] [data-error] { color: #b91c1c; }
-    @media (max-width: 620px) { body[data-openpets-view="settings"] .setting-row { align-items: flex-start; flex-direction: column; } }
+    @media (prefers-reduced-motion: reduce) { body[data-openpets-view="settings"] .reaction-row-mini-sprite { animation: none !important; } }
+    @media (max-width: 620px) { body[data-openpets-view="settings"] .setting-row { align-items: flex-start; flex-direction: column; } body[data-openpets-view="settings"] .reaction-animation-row { grid-template-columns: 1fr; } body[data-openpets-view="settings"] .reaction-row-actions { justify-content: flex-start; } }
 
     body[data-openpets-view="agent-setup"] { overflow: hidden; background: radial-gradient(circle at 12% 8%, rgba(219, 234, 254, 0.9), transparent 24%), linear-gradient(180deg, #f8fbff 0%, #eff7ff 54%, #e9f3ff 100%); color: #101f3f; }
     body[data-openpets-view="agent-setup"] .agent-shell { width: min(1160px, calc(100vw - 36px)); height: calc(100vh - 44px); padding: 22px 0 22px; overflow: hidden; }
@@ -1231,12 +1287,43 @@ function getTaskWindowKindForWebContents(webContentsId: number): TaskWindowKind 
   return null;
 }
 
-function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; petScale?: number } {
+async function getReactionAnimationSettingsSnapshot(): Promise<unknown> {
+  const state = getAppStateSnapshot();
+  const preview = await getDefaultPetPreviewSpriteInfo();
+  return {
+    reactions: reactionAnimationMetadata,
+    animations: selectableAnimationMetadata,
+    sprite: defaultPetSprite,
+    overrides: state.preferences.reactionAnimationOverrides ?? {},
+    previewSpriteUrl: `openpets-pet-preview://spritesheet/default?v=${encodeURIComponent(preview.version)}`,
+  };
+}
+
+async function getDefaultPetPreviewSpriteInfo(): Promise<{ readonly path: string; readonly version: string }> {
+  const state = getAppStateSnapshot();
+  const selected = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId);
+  const builtInPath = join(app.getAppPath(), "assets", defaultPetSprite.fileName);
+  const candidatePath = selected && !selected.broken && !selected.builtIn
+    ? join(getInstalledPetDir(selected.id), "spritesheet.webp")
+    : builtInPath;
+  try {
+    const spritesheet = await stat(candidatePath);
+    if (spritesheet.isFile() && spritesheet.size > 0 && spritesheet.size <= 100 * 1024 * 1024) {
+      return { path: candidatePath, version: `${selected?.id ?? "builtin"}-${Math.round(spritesheet.mtimeMs)}-${spritesheet.size}` };
+    }
+  } catch {
+    // Fall back to the bundled pet if an installed default disappears while Settings is open.
+  }
+  const fallback = await stat(builtInPath);
+  return { path: builtInPath, version: `builtin-${Math.round(fallback.mtimeMs)}-${fallback.size}` };
+}
+
+function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } {
   if (!isRecord(value)) {
     throw new Error("Invalid preferences patch.");
   }
 
-  const patch: { openDefaultPetOnLaunch?: boolean; petScale?: number } = {};
+  const patch: { openDefaultPetOnLaunch?: boolean; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } = {};
 
   if ("openDefaultPetOnLaunch" in value) {
     if (typeof value.openDefaultPetOnLaunch !== "boolean") throw new Error("Invalid open-on-launch value.");
@@ -1247,6 +1334,10 @@ function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boo
     const scale = normalizePetScale(value.petScale);
     if (scale !== value.petScale) throw new Error("Invalid pet scale value.");
     patch.petScale = scale;
+  }
+
+  if ("reactionAnimationOverrides" in value) {
+    patch.reactionAnimationOverrides = validateReactionAnimationOverrides(value.reactionAnimationOverrides);
   }
 
   return patch;
@@ -1262,7 +1353,7 @@ function isLaunchAtLoginSupported(): boolean {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function escapeHtml(value: string): string {
