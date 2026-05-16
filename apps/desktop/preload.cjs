@@ -1507,7 +1507,7 @@ function updateReactionPreviewSprite(sprite, snapshot, animationId, restart) {
   sprite.style.setProperty("--preview-row-y", `-${row.row * snapshot.sprite.frameHeight}px`);
   sprite.style.setProperty("--preview-frames", String(row.frames));
   sprite.style.setProperty("--preview-duration", `${row.durationMs}ms`);
-  sprite.style.setProperty("--preview-iterations", String(row.iterations || "infinite"));
+  sprite.style.setProperty("--preview-iterations", "infinite");
   if (restart) {
     sprite.style.animation = "none";
     void sprite.offsetWidth;
