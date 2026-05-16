@@ -13,6 +13,7 @@ const transientTimers = new Map<string, NodeJS.Timeout>();
 const transientAnimationTimers = new Map<string, NodeJS.Timeout>();
 const statusBadgeTimers = new Map<string, NodeJS.Timeout>();
 const dismissedAgentPets = new Set<string>();
+const displayGenerations = new Map<string, number>();
 const busyStatusBadgeMs = 120_000;
 
 export function showAgentPet(petId: string): boolean {
@@ -85,8 +86,24 @@ export function refreshAgentPetContent(): void {
   debug("pet.agent", "refresh all content", { activeWindows: agentPetWindows.size, petIds: [...agentPetWindows.keys()] });
   for (const [petId, window] of agentPetWindows.entries()) {
     if (!window.isDestroyed()) {
-      void loadExplicitPetContent(window, petId, transientDisplays.get(petId) ?? null, statusBadges.get(petId) ?? null);
+      const display = transientDisplays.get(petId) ?? null;
+      const badge = statusBadges.get(petId) ?? null;
+      void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge));
     }
+  }
+}
+
+function handleBubbleDismissed(petId: string, dismissToken: string): void {
+  const currentGeneration = displayGenerations.get(petId) ?? 0;
+  debug("pet.agent", "bubble dismissed callback", { petId, windowId: agentPetWindows.get(petId)?.id, dismissToken, currentGeneration });
+  if (dismissToken !== String(currentGeneration)) {
+    debug("pet.agent", "bubble dismissed stale token", { petId, dismissToken, currentGeneration });
+    return;
+  }
+  clearAgentDisplay(petId);
+  const window = agentPetWindows.get(petId);
+  if (window && !window.isDestroyed()) {
+    void loadExplicitPetContent(window, petId, null, null);
   }
 }
 
@@ -101,14 +118,17 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   if (!pet) throw new Error(`Installed pet is unavailable: ${petId}`);
   const offset = agentPetWindows.size + 1;
   const initial = getDefaultPetInitialPosition(defaultPetWindowSize);
+  const display = transientDisplays.get(petId) ?? null;
+  const badge = statusBadges.get(petId) ?? null;
   const window = createAgentPetWindow({
     petId,
     displayName: pet.displayName,
     position: { x: initial.x - offset * 36, y: initial.y - offset * 24 },
-    display: transientDisplays.get(petId) ?? null,
-    badge: statusBadges.get(petId) ?? null,
+    display,
+    badge,
     onCloseRequested: () => dismissAgentPetForActiveLease(petId),
-  });
+    onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
+  }, getCurrentDismissToken(petId, display, badge));
   const windowId = window.id;
 
   window.on("closed", () => {
@@ -123,7 +143,9 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
 
 function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
   debug("pet.agent", "display set", { petId, reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
-  const preparedDisplay = mergePetTransientDisplay(transientDisplays.get(petId) ?? null, display);
+  const nextGeneration = (displayGenerations.get(petId) ?? 0) + 1;
+  displayGenerations.set(petId, nextGeneration);
+  const preparedDisplay = mergePetTransientDisplay(transientDisplays.get(petId) ?? null, { ...display, dismissToken: String(nextGeneration) });
   transientDisplays.set(petId, preparedDisplay);
   if (display.reaction) setStatusBadge(petId, display.reaction);
   const existingTimer = transientTimers.get(petId);
@@ -153,11 +175,14 @@ function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
     if (animationTimer) clearTimeout(animationTimer);
     transientAnimationTimers.delete(petId);
     const window = agentPetWindows.get(petId);
-    if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, null, statusBadges.get(petId) ?? null);
+    if (window && !window.isDestroyed()) {
+      const badge = statusBadges.get(petId) ?? null;
+      void loadExplicitPetContent(window, petId, null, badge, getCurrentDismissToken(petId, null, badge));
+    }
   }, displayDurationMs);
   transientTimers.set(petId, timer);
   const window = agentPetWindows.get(petId);
-  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null);
+  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null, preparedDisplay.dismissToken);
 }
 
 function clearAgentDisplay(petId: string): void {
@@ -199,7 +224,10 @@ function setStatusBadge(petId: string, reaction: OpenPetsReaction): void {
   const timer = setTimeout(() => {
     clearStatusBadge(petId);
     const window = agentPetWindows.get(petId);
-    if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, transientDisplays.get(petId) ?? null, null);
+    if (window && !window.isDestroyed()) {
+      const display = transientDisplays.get(petId) ?? null;
+      void loadExplicitPetContent(window, petId, display, null, getCurrentDismissToken(petId, display, null));
+    }
   }, isBusyStatusBadgeReaction(reaction) ? busyStatusBadgeMs : transientDisplayMs);
   statusBadgeTimers.set(petId, timer);
 }
@@ -214,4 +242,8 @@ function clearStatusBadge(petId: string): void {
 
 function isBusyStatusBadgeReaction(reaction: OpenPetsReaction): boolean {
   return reaction === "thinking" || reaction === "working" || reaction === "editing" || reaction === "running" || reaction === "testing" || reaction === "waiting";
+}
+
+function getCurrentDismissToken(petId: string, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null): string | undefined {
+  return display?.dismissToken ?? (badge ? String(displayGenerations.get(petId) ?? 0) : undefined);
 }

@@ -13,6 +13,7 @@ let statusBadge: PetStatusBadgeReaction | null = null;
 let transientDisplayTimeout: NodeJS.Timeout | null = null;
 let transientAnimationTimeout: NodeJS.Timeout | null = null;
 let statusBadgeTimeout: NodeJS.Timeout | null = null;
+let displayGeneration = 0;
 const busyStatusBadgeMs = 120_000;
 
 export function showDefaultPet(): void {
@@ -52,7 +53,7 @@ export function setDefaultPetPaused(nextPaused: boolean): void {
     return;
   }
 
-  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge);
+  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken());
 }
 
 export function getDefaultPetPaused(): boolean {
@@ -66,7 +67,7 @@ export function refreshDefaultPetContent(): void {
   }
 
   debug("pet.default", "refresh content", { windowId: defaultPetWindow.id, paused, hasDisplay: Boolean(transientDisplay), badge: statusBadge, petId: getAppStateSnapshot().preferences.defaultPetId });
-  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge);
+  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken());
 }
 
 export function applyExternalPetReaction(reaction: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
@@ -113,6 +114,18 @@ export function installDefaultPetDisplayHandlers(): void {
   screen.on("display-metrics-changed", reclampDefaultPetWindow);
 }
 
+function handleBubbleDismissed(dismissToken: string): void {
+  debug("pet.default", "bubble dismissed callback", { windowId: defaultPetWindow?.id, dismissToken, currentGeneration: displayGeneration });
+  if (dismissToken !== String(displayGeneration)) {
+    debug("pet.default", "bubble dismissed stale token", { dismissToken, currentGeneration: displayGeneration });
+    return;
+  }
+  clearDefaultPetDisplayTimers();
+  if (defaultPetWindow && !defaultPetWindow.isDestroyed()) {
+    void loadDefaultPetContent(defaultPetWindow, paused, null, null);
+  }
+}
+
 function getOrCreateDefaultPetWindow(): BrowserWindow {
   if (defaultPetWindow && !defaultPetWindow.isDestroyed()) {
     return defaultPetWindow;
@@ -127,7 +140,8 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     badge: statusBadge,
     onPositionChanged: setDefaultPetPosition,
     onHideRequested: hideDefaultPet,
-  });
+    onBubbleDismissed: handleBubbleDismissed,
+  }, getCurrentDismissToken());
   const windowId = defaultPetWindow.id;
   info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
@@ -141,7 +155,8 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
 
 function setTransientDisplay(display: PetTransientDisplay): void {
   debug("pet.default", "transient display set", { reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
-  transientDisplay = mergePetTransientDisplay(transientDisplay, display);
+  displayGeneration++;
+  transientDisplay = mergePetTransientDisplay(transientDisplay, { ...display, dismissToken: String(displayGeneration) });
   if (display.reaction) setStatusBadge(display.reaction);
 
   if (transientDisplayTimeout) {
@@ -214,6 +229,10 @@ function clearDefaultPetDisplayTimers(): void {
   statusBadgeTimeout = null;
   transientDisplay = null;
   statusBadge = null;
+}
+
+function getCurrentDismissToken(): string | undefined {
+  return transientDisplay?.dismissToken ?? (statusBadge ? String(displayGeneration) : undefined);
 }
 
 function isBusyStatusBadgeReaction(reaction: OpenPetsReaction): boolean {

@@ -5,6 +5,30 @@ const allowedReactionStates = new Set(["idle", "running-right", "running-left", 
 let lastInteractiveHit = null;
 let dragging = false;
 
+const dismissBubble = (event) => {
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const bubble = target.closest(".bubble");
+  if (!bubble) return;
+
+  const dismissToken = bubble.dataset.dismissToken;
+  if (!dismissToken) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  bubble.remove();
+
+  const newTarget = document.elementFromPoint(event.clientX, event.clientY);
+  const stillInteractive = Boolean(newTarget && newTarget.closest(".pet-shell, .bubble")) || dragging;
+  reportInteractiveHit(stillInteractive, "bubble-dismiss", true);
+
+  ipcRenderer.send("openpets:bubble-dismissed", dismissToken);
+};
+
 ipcRenderer.on("openpets:pet-motion", (_event, state) => {
   if (!allowedMotionStates.has(state)) {
     return;
@@ -85,6 +109,8 @@ ipcRenderer.on("openpets:pet-probe-hit-test", (_event, point) => {
 const installMouseInterop = () => {
   lastInteractiveHit = null;
   dragging = false;
+
+  document.addEventListener("click", dismissBubble);
 
   document.addEventListener("mousemove", (event) => {
     updateInteractiveHit(event);

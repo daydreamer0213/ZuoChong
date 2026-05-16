@@ -124,6 +124,7 @@ assert.match(reactionMessagesSource, /satisfies Record<OpenPetsReaction, readonl
 assert.match(petWindowSource, /pickReactionMessage\(display\.reaction\)/, "reaction-only bubbles must render randomized messages instead of raw lowercase reaction ids.");
 assert.match(petWindowSource, /function preparePetTransientDisplay/, "reaction-only bubbles must prepare a stable random message before rerenders.");
 assert.match(petWindowSource, /function mergePetTransientDisplay/, "reaction-only events must not replace an active explicit message bubble.");
+assert.match(petWindowSource, /return \{ \.\.\.current, reaction: next\.reaction, dismissToken: next\.dismissToken \?\? current\.dismissToken \}/, "reaction-only updates merged into an active message must carry the latest dismiss token.");
 assert.match(petWindowSource, /function getTransientDisplayDurationMs[\s\S]*?12_000[\s\S]*?message\.length \* 70/, "speech bubbles must stay visible longer for longer messages without becoming permanent.");
 assert.match(defaultPetControllerSource, /getTransientDisplayDurationMs\(transientDisplay\)/, "default pet speech bubble timeout must be length-aware.");
 assert.match(agentPetControllerSourceForLogging, /getTransientDisplayDurationMs\(preparedDisplay\)/, "agent pet speech bubble timeout must be length-aware.");

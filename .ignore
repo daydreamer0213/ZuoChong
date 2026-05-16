@@ -2,3 +2,5 @@
 !web
 !lfs
 !local
+!.slim/deepwork/
+!.slim/deepwork/**

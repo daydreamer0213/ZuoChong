@@ -19,6 +19,7 @@ export interface DefaultPetWindowOptions {
   readonly badge: PetStatusBadgeReaction | null;
   readonly onPositionChanged: (position: Point) => void;
   readonly onHideRequested: () => void;
+  readonly onBubbleDismissed?: (dismissToken: string) => void;
 }
 
 export interface AgentPetWindowOptions {
@@ -28,12 +29,14 @@ export interface AgentPetWindowOptions {
   readonly display: PetTransientDisplay | null;
   readonly badge: PetStatusBadgeReaction | null;
   readonly onCloseRequested: () => void;
+  readonly onBubbleDismissed?: (dismissToken: string) => void;
 }
 
 export interface PetTransientDisplay {
   readonly reaction?: OpenPetsReaction;
   readonly message?: string;
   readonly reactionMessage?: string;
+  readonly dismissToken?: string;
 }
 
 export type PetStatusBadgeReaction = Exclude<OpenPetsReaction, "idle">;
@@ -50,10 +53,10 @@ const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
 const windowLoadChains = new WeakMap<BrowserWindow, Promise<void>>();
 const windowLoadSequences = new WeakMap<BrowserWindow, number>();
 
-export function createDefaultPetWindow(options: DefaultPetWindowOptions): BrowserWindow {
+export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismissToken?: string): BrowserWindow {
   const window = createBasePetWindow("OpenPets — Default Pet", options.position);
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
-  installMousePassthroughAndDrag(window);
+  installMousePassthroughAndDrag(window, options.onBubbleDismissed);
   installMotionStatePublisher(window);
   installPetContextMenu(window, { label: "Hide pet", click: options.onHideRequested });
 
@@ -72,18 +75,18 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions): Browse
     options.onPositionChanged(readWindowPosition(window));
   });
 
-  void loadDefaultPetContent(window, options.paused, options.display, options.badge);
+  void loadDefaultPetContent(window, options.paused, options.display, options.badge, dismissToken);
 
   return window;
 }
 
-export function createAgentPetWindow(options: AgentPetWindowOptions): BrowserWindow {
+export function createAgentPetWindow(options: AgentPetWindowOptions, dismissToken?: string): BrowserWindow {
   const window = createBasePetWindow(`OpenPets — ${options.displayName}`, options.position);
   info("pet.window", "agent window create", { windowId: window.id, petId: options.petId, displayName: options.displayName, position: options.position, hasDisplay: Boolean(options.display), badge: options.badge });
-  installMousePassthroughAndDrag(window);
+  installMousePassthroughAndDrag(window, options.onBubbleDismissed);
   installMotionStatePublisher(window);
   installPetContextMenu(window, { label: "Close pet", click: options.onCloseRequested });
-  void loadExplicitPetContent(window, options.petId, options.display, options.badge);
+  void loadExplicitPetContent(window, options.petId, options.display, options.badge, dismissToken);
   return window;
 }
 
@@ -100,7 +103,7 @@ function installPetContextMenu(window: BrowserWindow, action: { readonly label: 
   });
 }
 
-function installMousePassthroughAndDrag(window: BrowserWindow): void {
+function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed?: (dismissToken: string) => void): void {
   let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number } | null = null;
   let rendererReady = false;
   let listenersRemoved = false;
@@ -223,6 +226,12 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
     debug("pet.window", "drag end", { windowId, position: window.isDestroyed() ? null : readWindowPosition(window) });
   };
 
+  const handleBubbleDismissed = (event: IpcMainEvent, dismissToken: unknown): void => {
+    if (!isFromWindow(event)) return;
+    debug("pet.window", "bubble dismissed", { windowId, dismissToken });
+    if (typeof dismissToken === "string") onBubbleDismissed?.(dismissToken);
+  };
+
   const resetForNavigation = (): void => {
     dragging = null;
     rendererReady = false;
@@ -258,6 +267,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
     ipcMain.off("openpets:pet-drag-start", handleDragStart);
     ipcMain.off("openpets:pet-drag-move", handleDragMove);
     ipcMain.off("openpets:pet-drag-end", handleDragEnd);
+    ipcMain.off("openpets:bubble-dismissed", handleBubbleDismissed);
     clearRearmTimers();
     if (!webContents.isDestroyed()) {
       webContents.off("did-start-navigation", resetForNavigation);
@@ -273,6 +283,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow): void {
   ipcMain.on("openpets:pet-drag-start", handleDragStart);
   ipcMain.on("openpets:pet-drag-move", handleDragMove);
   ipcMain.on("openpets:pet-drag-end", handleDragEnd);
+  ipcMain.on("openpets:bubble-dismissed", handleBubbleDismissed);
   webContents.on("did-start-navigation", resetForNavigation);
   webContents.on("did-start-loading", resetForNavigation);
   webContents.on("did-finish-load", rearmAfterLoad);
@@ -354,10 +365,10 @@ function applyPetAlwaysOnTop(window: BrowserWindow): void {
   }
 }
 
-export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null): Promise<void> {
+export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string): Promise<void> {
   const sequence = allocateWindowLoadSequence(window);
   debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
-  const render = await createDefaultPetRender(paused, display, badge);
+  const render = await createDefaultPetRender(paused, display, badge, dismissToken);
   if (tryUpdateLoadedPetContent(window, render, "default", sequence)) return;
   await loadPetHtmlFile(window, render.html, "default", sequence).then(() => {
     petWindowRenderCache.set(window, render.cacheKey);
@@ -367,7 +378,7 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
   });
 }
 
-export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null): Promise<void> {
+export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string): Promise<void> {
   const sequence = allocateWindowLoadSequence(window);
   try {
     const state = getAppStateSnapshot();
@@ -376,7 +387,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
       throw new Error(`Cannot render explicit pet: ${petId}`);
     }
     debug("pet.window", "explicit content render begin", { windowId: window.id, sequence, petId, displayName: pet.displayName, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge });
-    const render = await createInstalledPetRender(pet.id, pet.displayName, false, display, state.preferences.petScale as PetScaleValue, badge, `explicit:${pet.id}`);
+    const render = await createInstalledPetRender(pet.id, pet.displayName, false, display, state.preferences.petScale as PetScaleValue, badge, `explicit:${pet.id}`, dismissToken);
     if (tryUpdateLoadedPetContent(window, render, `explicit-${pet.id}`, sequence)) return;
     await loadPetHtmlFile(window, render.html, `explicit-${pet.id}`, sequence);
     petWindowRenderCache.set(window, render.cacheKey);
@@ -393,7 +404,7 @@ export function preparePetTransientDisplay(display: PetTransientDisplay): PetTra
 
 export function mergePetTransientDisplay(current: PetTransientDisplay | null, next: PetTransientDisplay): PetTransientDisplay {
   if (next.message || !next.reaction || !current?.message) return preparePetTransientDisplay(next);
-  return { ...current, reaction: next.reaction };
+  return { ...current, reaction: next.reaction, dismissToken: next.dismissToken ?? current.dismissToken };
 }
 
 export function getTransientReactionAnimationMs(display: PetTransientDisplay): number | null {
@@ -440,14 +451,14 @@ export function readWindowPosition(window: BrowserWindow): Point {
   return clampToPrimaryWorkArea({ x, y }, defaultPetWindowSize);
 }
 
-async function createDefaultPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null): Promise<PetContentRender> {
-  const installedPetRender = await tryCreateInstalledPetRender(paused, display, badge);
+async function createDefaultPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string): Promise<PetContentRender> {
+  const installedPetRender = await tryCreateInstalledPetRender(paused, display, badge, dismissToken);
   if (installedPetRender) {
     return installedPetRender;
   }
 
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", defaultPetSprite.fileName)).toString();
-  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge), `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`);
+  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken), `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
   const scale = getAppStateSnapshot().preferences.petScale as PetScaleValue;
@@ -495,7 +506,7 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   };
 }
 
-async function tryCreateInstalledPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null): Promise<PetContentRender | null> {
+async function tryCreateInstalledPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string): Promise<PetContentRender | null> {
   const state = getAppStateSnapshot();
   const selected = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId);
 
@@ -504,7 +515,7 @@ async function tryCreateInstalledPetRender(paused: boolean, display: PetTransien
   }
 
   try {
-    return await createInstalledPetRender(selected.id, selected.displayName, paused, display, state.preferences.petScale as PetScaleValue, badge, `default:${selected.id}`);
+    return await createInstalledPetRender(selected.id, selected.displayName, paused, display, state.preferences.petScale as PetScaleValue, badge, `default:${selected.id}`, dismissToken);
   } catch (error) {
     console.error(`Failed to render installed default pet ${selected.id}; falling back to built-in pet.`, error);
     try {
@@ -516,7 +527,7 @@ async function tryCreateInstalledPetRender(paused: boolean, display: PetTransien
   }
 }
 
-async function createInstalledPetRender(petId: string, displayName: string, paused: boolean, display: PetTransientDisplay | null, scale: PetScaleValue, badge: PetStatusBadgeReaction | null, cachePrefix: string): Promise<PetContentRender> {
+async function createInstalledPetRender(petId: string, displayName: string, paused: boolean, display: PetTransientDisplay | null, scale: PetScaleValue, badge: PetStatusBadgeReaction | null, cachePrefix: string, dismissToken?: string): Promise<PetContentRender> {
   const spritesheetPath = join(getInstalledPetDir(petId), "spritesheet.webp");
   const spritesheet = await stat(spritesheetPath);
   if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) {
@@ -524,7 +535,7 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   }
 
   const imageUrl = pathToFileURL(spritesheetPath).toString();
-  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`);
+  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
 
@@ -601,6 +612,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .stage { width: 100%; height: 100%; position: relative; box-sizing: border-box; overflow: visible; }
     .pet-shell { position: absolute; left: 50%; bottom: ${petBottom}px; z-index: 1; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transform: translateX(-50%); transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: no-drag; cursor: grab; }
     .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
+    .bubble[data-dismiss-token] { cursor: pointer; }
     .bubble::after { content: ""; position: absolute; left: 64%; bottom: -7px; width: 12px; height: 12px; background: inherit; border-right: 1px solid rgba(255, 255, 255, 0.56); border-bottom: 1px solid rgba(255, 255, 255, 0.56); border-bottom-right-radius: 3px; transform: translateX(-50%) rotate(45deg); box-shadow: 3px 3px 7px rgba(15, 23, 42, 0.08); }
     .bubble-header { display: inline-flex; align-items: center; min-width: 0; gap: 7px; color: currentColor; font: 780 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
     .bubble-status-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; min-width: 18px; height: 18px; border-radius: 999px; background: #3b82f6; color: #fff; font: 900 12px/18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: center; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.3); }
@@ -647,7 +659,7 @@ function getReactionSpriteState(reaction: OpenPetsReaction | undefined): Univers
   return resolveReactionSpriteState(reaction, getAppStateSnapshot().preferences.reactionAnimationOverrides);
 }
 
-function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null): string {
+function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null, dismissToken?: string): string {
   const text = display?.message ?? display?.reactionMessage ?? (display?.reaction ? pickReactionMessage(display.reaction) : undefined) ?? (paused ? "Paused" : "");
   const status = !paused && badgeReaction ? getStatusBadge(badgeReaction) : null;
   if (!text && !status) return "";
@@ -656,7 +668,10 @@ function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean
   const header = status ? `<div class="bubble-header"><span class="bubble-status-icon" data-icon="${escapeHtml(status.icon)}" aria-hidden="true"></span><span class="bubble-status-label">${escapeHtml(status.label)}</span></div>` : "";
   const divider = status && text ? `<div class="bubble-divider" aria-hidden="true"></div>` : "";
   const body = text ? `<div class="bubble-body"><span class="bubble-text">${escapeHtml(text)}</span></div>` : "";
-  return `<div class="${className}" role="status" aria-live="polite">${header}${divider}${body}</div>`;
+  // Use provided dismissToken, fallback to display's dismissToken for transient messages
+  const token = dismissToken ?? display?.dismissToken;
+  const dismissAttr = token ? ` data-dismiss-token="${escapeHtml(token)}"` : "";
+  return `<div class="${className}" role="status" aria-live="polite"${dismissAttr}>${header}${divider}${body}</div>`;
 }
 
 function getStatusBadge(reaction: PetStatusBadgeReaction): { readonly className: string; readonly icon: string; readonly label: string } | null {
