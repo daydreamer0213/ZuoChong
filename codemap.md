@@ -2,7 +2,7 @@
 
 ## Project Responsibility
 
-OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plus npm packages that let coding agents control animated desktop pets. The workspace provides a local IPC protocol, MCP server, CLI tooling, and editor-specific integrations for Claude Code and OpenCode.
+OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plus npm packages that let coding agents control animated desktop pets. The workspace provides a local IPC protocol, MCP server, CLI tooling, and editor-specific integrations for Claude Code, OpenCode, Cursor, and Pi.
 
 ## System Entry Points
 
@@ -12,6 +12,8 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 - `packages/cli/src/index.ts`: command-line setup and pet management entry point.
 - `packages/mcp/src/index.ts`: MCP server entry point used by agents.
 - `packages/client/src/index.ts`: public IPC client API consumed by integrations and tools.
+- `packages/cursor/src/index.ts`: Cursor MCP/rules setup API.
+- `packages/pi/src/extension.ts`: Pi coding-agent extension runtime entry point.
 
 ## Directory Map
 
@@ -30,6 +32,8 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 | `packages/client/src/` | Protocol definitions, discovery logic, public client API, and smoke entry points. | [View Map](packages/client/src/codemap.md) |
 | `packages/cli/` | User-facing OpenPets CLI package. | [View Map](packages/cli/codemap.md) |
 | `packages/cli/src/` | CLI command parsing and orchestration across client, Claude, OpenCode, and MCP packages. | [View Map](packages/cli/src/codemap.md) |
+| `packages/cursor/` | Cursor editor integration package for managed MCP configuration and project-local rules. | [View Map](packages/cursor/codemap.md) |
+| `packages/cursor/src/` | Cursor config/rules planning, status classification, safe writes, previews, and validation checks. | [View Map](packages/cursor/src/codemap.md) |
 | `packages/install-pet/` | Standalone installer package for gallery/catalog pets. | [View Map](packages/install-pet/codemap.md) |
 | `packages/install-pet/src/` | Pet installation command implementation. | [View Map](packages/install-pet/src/codemap.md) |
 | `packages/mcp/` | MCP server package exposing OpenPets tools to compatible agents. | [View Map](packages/mcp/codemap.md) |
@@ -44,10 +48,12 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 ## Architecture Flow
 
 1. The desktop app starts `apps/desktop/src/main.ts`, initializes app state, creates tray/task windows, and starts a local IPC server.
-2. Agent integrations (`packages/claude`, `packages/opencode`, `packages/pi`, and `packages/mcp`) emit pet commands through `@open-pets/client`.
-3. The desktop IPC server routes commands through lease-managed controllers so default and agent pets can coexist safely.
-4. Pet assets are resolved from built-in assets, locally developed Codex pets, or remotely downloaded catalog ZIPs.
-5. Workspace packages share TypeScript/ESM build conventions and are wired together through pnpm `workspace:*` dependencies.
+2. Agent integrations (`packages/claude`, `packages/opencode`, `packages/cursor`, `packages/pi`, and `packages/mcp`) configure agents or emit pet commands through `@open-pets/client`.
+3. The client discovers Unix sockets, Windows named pipes, or TCP endpoints for WSL cross-platform access.
+4. The desktop IPC server routes commands through lease-managed controllers so default and agent pets can coexist safely.
+5. Pet windows render reaction-driven animations, speech bubbles, and status badges using desktop state plus reaction mapping metadata.
+6. Pet assets are resolved from built-in assets, locally developed Codex pets, or remotely downloaded catalog ZIPs.
+7. Workspace packages share TypeScript/ESM build conventions and are wired together through pnpm `workspace:*` dependencies.
 
 ## Working Notes
 

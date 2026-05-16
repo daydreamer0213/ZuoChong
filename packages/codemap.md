@@ -11,11 +11,11 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - **cli**: Main CLI tool for configuring agents and managing pets
 - **mcp**: MCP server implementation for agent integration
 - **opencode**: OpenCode editor integration (plugin, config management)
-- **pi**: Pi coding-agent extension integration (event reactions, slash commands)
 - **claude**: Claude Code integration (hooks, MCP config)
+- **cursor**: Cursor editor integration (MCP config, project rules)
 - **install-pet**: Standalone pet installer from gallery catalog
 
-## Design
+## Design/Patterns
 
 **Workspace Pattern**: Uses pnpm workspaces with `workspace:*` dependencies for internal linking.
 
@@ -35,6 +35,7 @@ Provides modular, reusable components for the OpenPets ecosystem:
 CLI Entry (packages/cli/src/index.ts)
     ├── Configures Claude → @open-pets/claude
     ├── Configures OpenCode → @open-pets/opencode
+    ├── Configures Cursor → @open-pets/cursor
     ├── Spawns MCP server → @open-pets/mcp
     └── Uses IPC client → @open-pets/client
 
@@ -45,21 +46,21 @@ MCP Server (packages/mcp/src/index.ts)
 OpenCode Plugin (packages/opencode/src/plugin.ts)
     └── Hooks into editor events → @open-pets/client
 
-Pi Extension (packages/pi/src/extension.ts)
-    └── Hooks into Pi extension events → @open-pets/client
-
 Claude Hooks (packages/claude/src/hooks.ts)
     └── Processes hook events → @open-pets/client
+
+Cursor Setup (packages/cursor/src/cursor-project-setup.ts)
+    └── Writes MCP config + rules → @open-pets/client
 ```
 
 ## Integration Points
 
 **Inter-Package Dependencies**:
-- `cli` depends on: `client`, `claude`, `mcp`, `opencode`
+- `cli` depends on: `client`, `claude`, `mcp`, `opencode`, `cursor`
 - `mcp` depends on: `client`
 - `claude` depends on: `client`, `agent-events`
 - `opencode` depends on: `client`, `agent-events`
-- `pi` depends on: `client`, `agent-events`
+- `cursor` depends on: `client`
 - `install-pet` depends on: `client`
 
 **External Integrations**:
@@ -69,4 +70,4 @@ Claude Hooks (packages/claude/src/hooks.ts)
 - `zod` - Schema validation in MCP tools
 
 **Desktop App Communication**:
-All packages ultimately communicate with the OpenPets desktop app via the IPC protocol defined in `client/src/protocol.ts`.
+All packages ultimately communicate with the OpenPets desktop app via the IPC protocol defined in `client/src/protocol.ts`, supporting Unix sockets, Windows named pipes, and TCP (for WSL cross-platform).

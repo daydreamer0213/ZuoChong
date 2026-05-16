@@ -2,38 +2,32 @@
 
 ## Responsibility
 
-Pure Node.js package for Cursor editor integration file management. Provides helpers for detecting, installing, updating, and removing OpenPets MCP entries in Cursor's `mcp.json` config files, plus optional project-local Cursor rules guidance.
+Pure Node.js package for Cursor editor integration file management. Manages OpenPets MCP entries in Cursor's `mcp.json` configuration files and optional project-local Cursor rules guidance. Provides safe, atomic file operations with validation, backup, and redaction capabilities.
 
-## Entry Points
+## Design/Patterns
 
-- `src/index.ts`: Public API exports
-- `src/cursor-mcp.ts`: MCP entry builders and path utilities
-- `src/cursor-status.ts`: Status classification and config read/write operations
-- `src/cursor-previews.ts`: Config preview and redaction helpers
-- `src/cursor-rules.ts`: Project-local Cursor rules preview/status/write/remove helpers
-- `src/check-cursor.ts`: Contract validation tests
+### Config Path Resolution
+- **Global config**: `<homeDir>/.cursor/mcp.json` - user-wide MCP settings
+- **Project config**: `<projectDir>/.cursor/mcp.json` - project-specific MCP settings
+- **Rules path**: `<projectDir>/.cursor/rules/openpets.mdc` - project-local Cursor rules
+- All APIs accept explicit `configPath` for custom locations
 
-## Key Behaviors
-
-### Config Paths
-- Global: `<homeDir>/.cursor/mcp.json`
-- Project: `<projectDir>/.cursor/mcp.json`
-- Explicit `configPath` accepted by all APIs
-
-### Safety Rules
-- Strict JSON only (no JSONC)
-- Max config size: 256 KiB
-- Reject symlinks and non-regular files
-- Validate parent directories before creating `.cursor`
-- Atomic writes with temp files and backups
+### Safety-First File Operations
+- Strict JSON only (no JSONC comments)
+- Maximum config size: 256 KiB (rules: 64 KiB)
+- Reject symlinks at any path level (config file, parent directories, ancestors)
+- Reject non-regular files (directories, sockets, etc.)
+- Validate parent directories before creating `.cursor` folders
+- Atomic writes using temp files and atomic rename
+- Automatic backup creation before modifications
 - Private file permissions (0o600) where supported
 
-### Status Classification
-- `missing`: No config or no openpets entry
-- `installed`: Matching OpenPets entry
-- `needs-update`: Old version or different pet
-- `conflict`: Non-OpenPets openpets entry
-- `invalid`: Parse error, oversized, unsafe path
+### Status Classification (MCP & Rules)
+- `missing`: No config file or no OpenPets entry exists
+- `installed`: Matching OpenPets entry present and up-to-date
+- `needs-update`: Old version, different pet, or content drift
+- `conflict`: Non-OpenPets entry blocking installation
+- `invalid`: Parse error, oversized, unsafe path, malformed schema
 - `error`: Unexpected I/O failure
 
 ### MCP Entry Format
@@ -45,19 +39,72 @@ Pure Node.js package for Cursor editor integration file management. Provides hel
 }
 ```
 
-### Redaction
-Recursive, case-insensitive redaction of: `env`, `headers`, `auth`, `authorization`, `token`, `secret`, `password`, `credentials`, and URLs with token-like query params.
+### Managed Entry Detection
+- Published mode: `npx -y @open-pets/mcp@SEMVER [--pet PET]`
+- Local mode: `node <absolute-path> [--pet PET]`
+- Validates semantic versioning and pet ID format
+- Rejects unpinned versions (e.g., `@latest`)
 
-### Project Rules
-- Path: `<projectDir>/.cursor/rules/openpets.mdc`
-- Desktop uses preview/copy only; CLI writes project-local rules only.
-- Exact whole-file ownership requires recognized frontmatter plus one ordered `OPENPETS:CURSOR_RULES:START/END` marker pair.
-- Reject symlinks, non-regular files, unsafe parents, and files over 64 KiB.
-- Atomic writes with temp files and backups; removal deletes only managed `openpets.mdc` and leaves directories.
+### Sensitive Data Redaction
+Recursive, case-insensitive redaction of:
+- Keys: `env`, `headers`, `auth`, `authorization`, `token`, `secret`, `password`, `credentials`
+- URL query parameters matching sensitive patterns
+- String values containing `token=`, `api_key=`, `secret=`, `password=`, `auth=`
 
-## Exported APIs
+### Cursor Rules Management
+- Exact whole-file ownership requires recognized frontmatter
+- Requires exactly one ordered `OPENPETS:CURSOR_RULES:START/END` marker pair
+- Rejects duplicate, reversed, or missing markers
+- Rejects user content before/after managed block
+- Desktop uses preview/copy only; CLI writes project-local rules
 
-### From cursor-mcp.ts
+## Flow
+
+### MCP Installation Flow
+1. **Read** existing config via `readCursorMcpConfig(path)`
+2. **Classify** status via `classifyCursorMcpStatus(result, path, expected)`
+3. **Plan** operation via `planCursorMcpInstall(path, options, allowReplace?)`
+4. **Execute** write via `executeCursorMcpWrite(plan)`
+5. Atomic write creates temp file, backs up existing, renames to target
+
+### MCP Replacement Flow
+1. Read and classify existing config
+2. Verify status is `needs-update`, `conflict`, or `installed`
+3. Plan replace via `planCursorMcpReplace(path, options)`
+4. Execute preserves unrelated MCP servers and top-level fields
+
+### MCP Removal Flow
+1. Read and classify existing config
+2. Verify entry is managed by OpenPets (not conflict)
+3. Plan remove via `planCursorMcpRemove(path)`
+4. Execute removes only `mcpServers.openpets`, preserves other servers
+5. Empty `mcpServers` kept as `{}` after removal
+
+### Rules Installation Flow
+1. **Read** existing rules via `readCursorOpenPetsRules(projectDir)`
+2. **Classify** status via `classifyCursorRulesStatus(result, path, expected?)`
+3. **Plan** via `planCursorRulesInstall(projectDir, allowReplace?)`
+4. **Execute** via `executeCursorRulesWrite(plan)`
+5. Managed content includes frontmatter + START/END markers
+
+### Preview/Redaction Flow
+1. Build preview via `buildOpenPetsOnlyPreview(options)`
+2. Redact sensitive config via `redactCursorConfig(config)`
+3. Safe for logging and UI display
+
+## Integration
+
+### Entry Points
+- `src/index.ts`: Public API exports (re-exports all modules)
+- `src/cursor-mcp.ts`: MCP entry builders and path utilities
+- `src/cursor-status.ts`: Status classification and config read/write operations
+- `src/cursor-previews.ts`: Config preview and redaction helpers
+- `src/cursor-rules.ts`: Project-local Cursor rules preview/status/write/remove helpers
+- `src/check-cursor.ts`: Contract validation tests (runs via `npm test`)
+
+### Exported APIs
+
+**From cursor-mcp.ts:**
 - `buildCursorMcpEntry(options)`: Build MCP entry object
 - `formatCursorMcpConfig(options)`: Build full config with openpets entry
 - `getCursorGlobalMcpPath(homeDir)`: Get global config path
@@ -65,7 +112,7 @@ Recursive, case-insensitive redaction of: `env`, `headers`, `auth`, `authorizati
 - `validateOpenPetsPetId(id)`: Validate and return pet ID
 - `isValidPetId(id)`: Check if pet ID is valid
 
-### From cursor-status.ts
+**From cursor-status.ts:**
 - `classifyCursorMcpStatus(result, path, expected)`: Classify config status
 - `readCursorMcpConfig(path)`: Read and validate config file
 - `planCursorMcpInstall(path, options, allowReplace?)`: Plan install operation
@@ -75,11 +122,11 @@ Recursive, case-insensitive redaction of: `env`, `headers`, `auth`, `authorizati
 - `isManagedOpenPetsMcpEntry(value)`: Check if entry is OpenPets-managed
 - `maxCursorConfigBytes`: 256 KiB limit constant
 
-### From cursor-previews.ts
+**From cursor-previews.ts:**
 - `buildOpenPetsOnlyPreview(options)`: Build OpenPets-only preview
 - `redactCursorConfig(config)`: Redact sensitive fields from config
 
-### From cursor-rules.ts
+**From cursor-rules.ts:**
 - `getCursorProjectRulesPath(projectDir)`: Get project rules path
 - `buildCursorOpenPetsRule()`: Build managed Cursor rules content
 - `buildCursorRulesPreview()`: Build copyable rules preview
@@ -92,34 +139,38 @@ Recursive, case-insensitive redaction of: `env`, `headers`, `auth`, `authorizati
 - `isManagedCursorOpenPetsRule(content)`: Check managed marker/frontmatter shape
 - `maxCursorRulesBytes`: 64 KiB limit constant
 
-## Test Coverage
+### Package Scripts
+- `npm test`: Run contract validation tests (`node dist/check-cursor.js`)
+- `npm run check`: Full typecheck + build + test pipeline
+- `npm run typecheck`: TypeScript type checking only
+- `npm run build`: Compile TypeScript to `dist/`
 
+### Downstream Consumers
+- Desktop app: Uses preview/redaction APIs for UI display
+- CLI tools: Uses planning/execution APIs for install/remove operations
+- Both use status classification to determine available actions
+
+### Test Coverage
 `check-cursor.ts` validates:
-- Pet ID validation (valid/invalid patterns)
-- MCP entry building (published/local modes)
-- Config formatting
-- Path helpers
-- Missing config classification
-- Empty config classification
-- Installed status detection
-- Needs-update status (old version, different pet)
-- Conflict status (non-OpenPets entry)
-- Invalid status (parse error, oversized, symlink)
-- Non-object top-level config rejection
-- Non-object mcpServers rejection
-- Malformed mcpServers.openpets handling
-- Backup creation
-- Atomic write behavior
-- Uninstall preserves unrelated entries
+- Pet ID validation (valid/invalid patterns, length limits)
+- MCP entry building (published/local modes, version validation)
+- Config formatting and path helpers
+- All status classifications (missing, empty, installed, needs-update, conflict, invalid)
+- Parse errors, oversized files, symlink rejection
+- Non-object schema rejection (top-level, mcpServers, entries)
+- Backup creation and atomic write behavior
+- Uninstall preserves unrelated entries and top-level fields
 - No writes on invalid/error status
 - No conflict write without explicit replace
 - Explicit replace preserves unrelated servers/fields
 - Recursive and case-insensitive redaction
 - URL token parameter redaction
-- Symlink parent rejection
-- Empty mcpServers kept as empty object after remove
+- Symlink parent/ancestor rejection
+- Empty mcpServers preservation after remove
 - Cursor project rules generation and path resolution
 - Rules missing/installed/needs-update/conflict classification
-- Rules duplicate/reversed/missing marker and frontmatter conflict handling
-- Rules symlink parent/file, dangling symlink, non-regular, and oversized rejection
+- Rules duplicate/reversed/missing marker handling
+- Rules frontmatter conflict detection
+- Rules symlink parent/file, dangling symlink, non-regular, oversized rejection
 - Rules backup, atomic write, replace, remove, and no-write invalid behavior
+</content>

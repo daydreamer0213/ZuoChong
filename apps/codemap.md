@@ -20,6 +20,6 @@ Container for deployable application packages. Currently hosts the OpenPets desk
 
 ## Integration Points
 
-- **packages/**: Consumes `@open-pets/agent-events`, `@open-pets/claude`, `@open-pets/cli`, `@open-pets/mcp`, `@open-pets/opencode`
+- **packages/**: Consumes `@open-pets/agent-events`, `@open-pets/claude`, `@open-pets/cli`, `@open-pets/cursor`, `@open-pets/mcp`, `@open-pets/opencode`
 - **External**: GitHub Releases API (update checks), openpets.dev (catalog), zip.openpets.dev (pet downloads)
 - **System**: Claude Code CLI, OpenCode CLI, OS tray/dock, file system (userData, ~/.codex, ~/.claude)
