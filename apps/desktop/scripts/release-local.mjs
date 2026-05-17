@@ -18,6 +18,7 @@ const allowedArgs = new Set([
   "--include-mac-zip",
   "--include-win-portable",
   "--include-linux-deb",
+  "--include-linux-rpm",
   "--include-linux-targz",
   "--include-experimental-arm",
   "--skip-checks",
@@ -33,6 +34,7 @@ const includeOptional = args.has("--include-optional");
 const includeMacZip = includeOptional || args.has("--include-mac-zip");
 const includeWinPortable = includeOptional || args.has("--include-win-portable");
 const includeLinuxDeb = includeOptional || args.has("--include-linux-deb");
+const includeLinuxRpm = includeOptional || args.has("--include-linux-rpm");
 const includeLinuxTarGz = includeOptional || args.has("--include-linux-targz");
 const includeExperimentalArm = args.has("--include-experimental-arm");
 const skipChecks = args.has("--skip-checks");
@@ -133,6 +135,7 @@ function createBuildPlan() {
   if (includeMacZip) plan.push({ name: "mac zip x64+arm64", args: ["--mac", "zip", "--x64", "--arm64"] });
   if (includeWinPortable) plan.push({ name: "windows portable x64", args: ["--win", "portable", "--x64"] });
   if (includeLinuxDeb) plan.push({ name: "linux deb x64", args: ["--linux", "deb", "--x64"] });
+  if (includeLinuxRpm) plan.push({ name: "linux rpm x64", args: ["--linux", "rpm", "--x64"] });
   if (includeLinuxTarGz) plan.push({ name: "linux tar.gz x64", args: ["--linux", "tar.gz", "--x64"] });
   if (includeExperimentalArm) {
     plan.push({ name: "windows nsis arm64", args: ["--win", "nsis", "--arm64"] });
@@ -145,7 +148,7 @@ function createBuildPlan() {
 
 function collectArtifacts(dir) {
   const allowedNames = new Set(["SHA256SUMS"]);
-  const allowedExtensions = new Set([".dmg", ".zip", ".exe", ".AppImage", ".deb"]);
+  const allowedExtensions = new Set([".dmg", ".zip", ".exe", ".AppImage", ".deb", ".rpm"]);
   const artifacts = [];
   for (const entry of readdirSync(dir)) {
     const filePath = join(dir, entry);
@@ -214,5 +217,5 @@ function defaultReleaseNotes() {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a draft GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - Windows nsis x64\n  - Linux AppImage x64\n\nOptions:\n  --yes                       create the draft GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-optional          include all optional x64 targets below\n  --include-mac-zip           also build macOS zip x64+arm64\n  --include-win-portable      also build Windows portable x64\n  --include-linux-deb         also build Linux deb x64\n  --include-linux-targz       also build Linux tar.gz x64\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
+  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a draft GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - Windows nsis x64\n  - Linux AppImage x64\n\nOptions:\n  --yes                       create the draft GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-optional          include all optional x64 targets below\n  --include-mac-zip           also build macOS zip x64+arm64\n  --include-win-portable      also build Windows portable x64\n  --include-linux-deb         also build Linux deb x64\n  --include-linux-rpm         also build Linux rpm x64\n  --include-linux-targz       also build Linux tar.gz x64\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
 }

@@ -61,12 +61,13 @@ Optional flags:
 pnpm release:desktop -- --yes --include-mac-zip
 pnpm release:desktop -- --yes --include-win-portable
 pnpm release:desktop -- --yes --include-linux-deb
+pnpm release:desktop -- --yes --include-linux-rpm
 pnpm release:desktop -- --yes --include-linux-targz
 pnpm release:desktop -- --yes --include-optional
 pnpm release:desktop -- --yes --include-experimental-arm
 ```
 
-`--include-optional` includes mac zip, Windows portable, Linux deb, and Linux tar.gz x64 targets.
+`--include-optional` includes mac zip, Windows portable, Linux deb, Linux rpm, and Linux tar.gz x64 targets.
 
 `--include-experimental-arm` adds Windows ARM64 and Linux ARM64 artifacts. Only use this if those artifacts can be tested.
 
@@ -87,11 +88,13 @@ Do not use `0.0.0` or prerelease tags unless the release script is intentionally
 
 ### 2. Bump package versions
 
-Update all workspace package versions together so bundled packages and npm packages report the same release version.
+For a **desktop-only release** that changes only the Electron app and GitHub desktop artifacts, bump `apps/desktop/package.json` only. Do not bump or publish public npm packages unless their package contents changed.
 
-Use a new version for every release. npm package versions are immutable, so any change to a published package requires a new version across all public OpenPets npm packages.
+For a full workspace/npm release, update all workspace package versions together so bundled packages and npm packages report the same release version.
 
-Files to update:
+Use a new version for every release artifact you publish. npm package versions are immutable, so any change to a published package requires a new version across all public OpenPets npm packages.
+
+Files to update for a full workspace/npm release:
 
 ```txt
 package.json
@@ -143,7 +146,7 @@ Check status:
 git status --short
 ```
 
-Commit the version bump and any intentional release changes:
+Commit the version bump and any intentional release changes. For a desktop-only release, stage `apps/desktop/package.json` instead of every package manifest.
 
 ```bash
 git add package.json apps/desktop/package.json packages/*/package.json pnpm-lock.yaml
@@ -276,6 +279,7 @@ pnpm --dir apps/desktop exec electron-builder --mac dmg --x64 --publish never
 pnpm --dir apps/desktop exec electron-builder --mac dmg --arm64 --publish never
 pnpm --dir apps/desktop exec electron-builder --win nsis --x64 --publish never
 pnpm --dir apps/desktop exec electron-builder --linux AppImage --x64 --publish never
+pnpm --dir apps/desktop exec electron-builder --linux rpm --x64 --publish never
 ```
 
 Artifacts are written to:
