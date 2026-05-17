@@ -85,10 +85,10 @@ function main() {
   }
 
   const target = commandOutput("git", ["rev-parse", "HEAD"], { cwd: repoRoot }).trim();
-  run("gh", ["release", "create", tag, "--repo", repository, "--target", target, "--draft", "--title", `OpenPets ${tag}`, "--notes", defaultReleaseNotes()], { cwd: repoRoot });
+  run("gh", ["release", "create", tag, "--repo", repository, "--target", target, "--title", `OpenPets ${tag}`, "--notes", defaultReleaseNotes()], { cwd: repoRoot });
   run("gh", ["release", "upload", tag, "--repo", repository, ...uploadArtifacts], { cwd: repoRoot });
-  console.log(`\nDraft release created: https://github.com/${repository}/releases/tag/${tag}`);
-  console.log("Draft releases are not visible to the app update checker until you publish them.");
+  console.log(`\nPublished release created: https://github.com/${repository}/releases/tag/${tag}`);
+  console.log("Published releases are visible to the app update checker.");
 }
 
 function preflight() {
@@ -217,5 +217,5 @@ function defaultReleaseNotes() {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a draft GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - Windows nsis x64\n  - Linux AppImage x64\n\nOptions:\n  --yes                       create the draft GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-optional          include all optional x64 targets below\n  --include-mac-zip           also build macOS zip x64+arm64\n  --include-win-portable      also build Windows portable x64\n  --include-linux-deb         also build Linux deb x64\n  --include-linux-rpm         also build Linux rpm x64\n  --include-linux-targz       also build Linux tar.gz x64\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
+  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a published GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - Windows nsis x64\n  - Linux AppImage x64\n\nOptions:\n  --yes                       create the published GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-optional          include all optional x64 targets below\n  --include-mac-zip           also build macOS zip x64+arm64\n  --include-win-portable      also build Windows portable x64\n  --include-linux-deb         also build Linux deb x64\n  --include-linux-rpm         also build Linux rpm x64\n  --include-linux-targz       also build Linux tar.gz x64\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
 }

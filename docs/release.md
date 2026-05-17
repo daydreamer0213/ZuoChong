@@ -1,6 +1,6 @@
 # OpenPets Desktop Release Guide
 
-This guide is for an AI agent creating a new OpenPets desktop release from a local macOS machine. The release flow builds Electron artifacts locally, creates a draft GitHub Release, and uploads the assets.
+This guide is for an AI agent creating a new OpenPets desktop release from a local macOS machine. The release flow builds Electron artifacts locally, creates a published GitHub Release, and uploads the assets.
 
 ## Repository and app
 
@@ -26,10 +26,10 @@ This guide is for an AI agent creating a new OpenPets desktop release from a loc
 10. Runs build/checks.
 11. Builds release artifacts.
 12. Generates `SHA256SUMS`.
-13. Creates a draft GitHub Release.
+13. Creates a published GitHub Release.
 14. Uploads top-level whitelisted artifacts only.
 
-Draft releases are not visible to the app update checker until published.
+Published releases are visible to the app update checker.
 
 ## Default release assets
 
@@ -188,7 +188,7 @@ git status --short
 
 The release script requires a clean tree before release creation.
 
-### 8. Create the draft GitHub Release and upload assets
+### 8. Create the published GitHub Release and upload assets
 
 For the recommended default release:
 
@@ -202,7 +202,7 @@ For a fuller x64 release with optional artifacts:
 pnpm release:desktop -- --yes --include-optional
 ```
 
-The script creates a draft release named/tagged:
+The script creates a published release named/tagged:
 
 ```txt
 v<version>
@@ -214,9 +214,9 @@ Example:
 v2.0.1
 ```
 
-### 9. Smoke test before publishing
+### 9. Smoke test after publishing
 
-Before publishing the draft release, manually test at least:
+After publishing the release, manually test at least:
 
 - macOS DMG on the current Mac.
 - Windows installer on a Windows machine or VM.
@@ -226,12 +226,6 @@ Unsigned release warnings are expected until code signing/notarization is config
 
 - macOS may show Gatekeeper warnings.
 - Windows may show SmartScreen warnings.
-
-### 10. Publish the draft release
-
-After smoke testing, publish the draft release on GitHub.
-
-The app update checker will only see the release after it is published.
 
 ## Common failure modes
 
@@ -257,16 +251,16 @@ Use a new version, or manually inspect GitHub releases/tags before proceeding.
 
 ### Partial GitHub upload failure
 
-If the script creates the draft release but upload fails:
+If the script creates the release but upload fails:
 
-1. Inspect the draft release on GitHub.
+1. Inspect the release on GitHub.
 2. Upload missing artifacts manually with:
 
 ```bash
 gh release upload v<version> --repo alvinunreal/openpets <artifact-path>
 ```
 
-3. Or delete the draft release/tag and rerun after fixing the issue.
+3. Or delete the release/tag and rerun after fixing the issue.
 
 ## Manual packaging smoke commands
 
