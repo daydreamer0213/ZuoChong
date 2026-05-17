@@ -4,3 +4,4 @@
 !local
 !.slim/deepwork/
 !.slim/deepwork/**
+!docs
