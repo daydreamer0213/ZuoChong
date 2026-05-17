@@ -9,7 +9,7 @@ import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { completeOnboarding, getAppStateSnapshot, normalizePetScale, petScaleOptions, updatePreferences } from "./app-state.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
-import { refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
+import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
 import { getInstalledPetDir } from "./pet-paths.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
@@ -175,6 +175,8 @@ export function installInternalUiHandlers(): void {
 
     const state = await setDefaultInstalledPet(petId);
     refreshDefaultPetContent();
+    recoverDefaultPetMouseInterop("default-pet-changed");
+    setTimeout(() => recoverDefaultPetMouseInterop("default-pet-changed+500ms"), 500).unref?.();
     return state;
   });
 

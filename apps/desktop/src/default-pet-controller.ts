@@ -1,10 +1,10 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, powerMonitor, screen } from "electron";
 
 import { getAppStateSnapshot, getDefaultPetPosition, resetDefaultPetPosition, setDefaultPetPosition, updatePreferences } from "./app-state.js";
 import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 let paused = false;
@@ -70,6 +70,16 @@ export function refreshDefaultPetContent(): void {
   void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken());
 }
 
+export function recoverDefaultPetMouseInterop(reason: string): void {
+  if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
+    debug("pet.default", "mouse interop recovery skipped", { reason, skippedReason: "no-window" });
+    return;
+  }
+
+  debug("pet.default", "mouse interop recovery requested", { windowId: defaultPetWindow.id, reason, petId: getAppStateSnapshot().preferences.defaultPetId });
+  recoverPetMouseInterop(defaultPetWindow, reason);
+}
+
 export function applyExternalPetReaction(reaction: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
   if (paused) {
     return { shown: false, reason: "paused" };
@@ -112,6 +122,7 @@ export function installDefaultPetDisplayHandlers(): void {
   screen.on("display-added", reclampDefaultPetWindow);
   screen.on("display-removed", reclampDefaultPetWindow);
   screen.on("display-metrics-changed", reclampDefaultPetWindow);
+  powerMonitor.on("resume", recoverDefaultPetWindowAfterResume);
 }
 
 function handleBubbleDismissed(dismissToken: string): void {
@@ -248,6 +259,12 @@ function reclampDefaultPetWindow(): void {
   info("pet.default", "reclamp position", { windowId: defaultPetWindow.id, position: safePosition });
   defaultPetWindow.setPosition(safePosition.x, safePosition.y, false);
   setDefaultPetPosition(safePosition);
+  recoverDefaultPetMouseInterop("display-change");
+}
+
+function recoverDefaultPetWindowAfterResume(): void {
+  recoverDefaultPetMouseInterop("power-resume");
+  setTimeout(() => recoverDefaultPetMouseInterop("power-resume+500ms"), 500).unref?.();
 }
 
 export function shouldOpenDefaultPetOnLaunch(): boolean {

@@ -53,6 +53,7 @@ const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
 
 const windowLoadChains = new WeakMap<BrowserWindow, Promise<void>>();
 const windowLoadSequences = new WeakMap<BrowserWindow, number>();
+const petMouseInteropRecovery = new WeakMap<BrowserWindow, (reason: string) => void>();
 
 export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismissToken?: string): BrowserWindow {
   const window = createBasePetWindow("OpenPets — Default Pet", options.position);
@@ -91,6 +92,17 @@ export function createAgentPetWindow(options: AgentPetWindowOptions, dismissToke
   return window;
 }
 
+export function recoverPetMouseInterop(window: BrowserWindow, reason: string): void {
+  if (window.isDestroyed()) return;
+  const recover = petMouseInteropRecovery.get(window);
+  if (recover) {
+    recover(reason);
+    return;
+  }
+
+  debug("pet.window", "mouse interop recovery skipped", { windowId: window.id, reason, skippedReason: "unregistered-window" });
+}
+
 function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void }): void {
   const webContents = window.webContents;
   const handleContextMenu = (event: Electron.Event): void => {
@@ -113,6 +125,26 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
   const windowId = window.id;
   const webContents = window.webContents;
   const canForwardMouseEvents = process.platform === "darwin" || process.platform === "win32";
+
+  const scheduleMouseInteropRecovery = (reason: string): void => {
+    if (window.isDestroyed()) return;
+    dragging = null;
+    rendererReady = false;
+    lastInteractive = false;
+    clearRearmTimers();
+    debug("pet.window", "mouse interop recovery", { windowId, reason });
+    setPassthrough(false);
+    if (process.platform === "win32") {
+      requestCursorHitTestProbe(reason);
+      scheduleWindowsMouseForwardingRearm(`${reason}+250ms`, 250);
+      scheduleWindowsMouseForwardingRearm(`${reason}+500ms`, 500);
+      scheduleWindowsMouseForwardingRearm(`${reason}+1000ms`, 1_000);
+      scheduleWindowsMouseForwardingRearm(`${reason}+1500ms`, 1_500);
+      return;
+    }
+
+    rearmPassthrough(reason);
+  };
 
   const isFromWindow = (event: IpcMainEvent): boolean => event.sender === webContents;
   const setPassthrough = (passthrough: boolean): void => {
@@ -177,7 +209,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     rearmTimers.add(timer);
   };
 
-  const rearmPassthroughAfterLoad = (): void => {
+  const rearmPassthrough = (reason: string): void => {
     if (window.isDestroyed()) return;
     if (process.platform !== "win32") {
       setPassthrough(true);
@@ -189,9 +221,13 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     // Toggle immediately, probe the current cursor hit target, then repeat the
     // toggle shortly after load because Windows sometimes re-registers mouse
     // forwarding after Chromium finishes late compositing work.
-    rearmWindowsMouseForwarding("did-finish-load");
-    scheduleWindowsMouseForwardingRearm("did-finish-load+75ms", 75);
-    scheduleWindowsMouseForwardingRearm("did-finish-load+175ms", 175);
+    rearmWindowsMouseForwarding(reason);
+    scheduleWindowsMouseForwardingRearm(`${reason}+75ms`, 75);
+    scheduleWindowsMouseForwardingRearm(`${reason}+175ms`, 175);
+  };
+
+  const rearmPassthroughAfterLoad = (): void => {
+    rearmPassthrough("did-finish-load");
   };
 
   const handleHitTest = (event: IpcMainEvent, interactive: unknown, source: unknown): void => {
@@ -270,6 +306,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     ipcMain.off("openpets:pet-drag-end", handleDragEnd);
     ipcMain.off("openpets:bubble-dismissed", handleBubbleDismissed);
     clearRearmTimers();
+    petMouseInteropRecovery.delete(window);
     if (!webContents.isDestroyed()) {
       webContents.off("did-start-navigation", resetForNavigation);
       webContents.off("did-start-loading", resetForNavigation);
@@ -278,6 +315,8 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
       webContents.off("did-fail-load", handleLoadFailure);
     }
   };
+
+  petMouseInteropRecovery.set(window, scheduleMouseInteropRecovery);
 
   ipcMain.on("openpets:pet-ready", handleReady);
   ipcMain.on("openpets:pet-hit-test", handleHitTest);

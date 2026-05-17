@@ -144,9 +144,11 @@ assert.match(petWindowSource, /function installMousePassthroughAndDrag/, "pet wi
 assert.match(petWindowSource, /setIgnoreMouseEvents\(true, \{ forward: true \}\)/, "transparent pet window background must use OS-level mouse passthrough.");
 assert.match(petWindowSource, /setIgnoreMouseEvents\(false\)/, "visible pet and bubble hit targets must re-enable mouse handling.");
 assert.match(petWindowSource, /openpets:pet-ready/, "pet windows must resync passthrough after each renderer reload.");
-assert.match(petWindowSource, /function installMousePassthroughAndDrag[\s\S]*?const rearmPassthroughAfterLoad[\s\S]*?process\.platform !== "win32"[\s\S]*?window\.setIgnoreMouseEvents\(false\);[\s\S]*?window\.setIgnoreMouseEvents\(true, \{ forward: true \}\);/, "Windows pet reloads must toggle forwarded mouse passthrough to re-register hover and drag tracking.");
-assert.match(petWindowSource, /scheduleWindowsMouseForwardingRearm\("did-finish-load\+75ms", 75\);[\s\S]*?scheduleWindowsMouseForwardingRearm\("did-finish-load\+175ms", 175\);/, "Windows pet reloads must retry mouse forwarding rearm after load settles.");
+assert.match(petWindowSource, /function installMousePassthroughAndDrag[\s\S]*?const rearmPassthrough[\s\S]*?process\.platform !== "win32"[\s\S]*?rearmWindowsMouseForwarding\(reason\)/, "Windows pet reloads must toggle forwarded mouse passthrough to re-register hover and drag tracking.");
+assert.match(petWindowSource, /scheduleWindowsMouseForwardingRearm\(`\$\{reason\}\+75ms`, 75\);[\s\S]*?scheduleWindowsMouseForwardingRearm\(`\$\{reason\}\+175ms`, 175\);/, "Windows pet reloads must retry mouse forwarding rearm after load settles.");
 assert.match(petWindowSource, /openpets:pet-probe-hit-test/, "Windows pet reloads must probe current cursor hit target when mousemove forwarding is stale.");
+assert.match(petWindowSource, /export function recoverPetMouseInterop/, "pet windows must expose a controlled mouse interop recovery hook for OS display and resume events.");
+assert.match(petWindowSource, /petMouseInteropRecovery\.set\(window, scheduleMouseInteropRecovery\)/, "pet windows must register their mouse interop recovery callback.");
 assert.match(petPreloadSource, /openpets:pet-probe-hit-test[\s\S]*?elementFromPoint\(clientX, clientY\)[\s\S]*?reportInteractiveHit/, "pet preload must answer main-process cursor hit-test probes.");
 assert.match(petWindowSource, /did-finish-load", rearmAfterLoad/, "pet windows must re-arm mouse passthrough after every content load.");
 assert.match(petWindowSource, /did-fail-load", handleLoadFailure/, "pet windows must restore passthrough after failed content loads.");
@@ -163,6 +165,9 @@ assert.match(petWindowSource, /\.pet-shell[\s\S]*?-webkit-app-region: no-drag; c
 assert.match(petPreloadSource, /openpets:pet-hit-test/, "pet preload must report visible pet and bubble hit testing for passthrough.");
 assert.match(petPreloadSource, /openpets:pet-ready/, "pet preload must report readiness after installing mouse handlers.");
 assert.match(petPreloadSource, /openpets:pet-drag-start/, "pet preload must start controlled pet dragging from the sprite.");
+assert.match(defaultPetControllerSource, /powerMonitor\.on\("resume", recoverDefaultPetWindowAfterResume\)/, "default pet must recover mouse interop after Windows sleep or resume.");
+assert.match(defaultPetControllerSource, /recoverDefaultPetMouseInterop\("display-change"\)/, "default pet must recover mouse interop after monitor topology changes.");
+assert.match(windowsSource, /recoverDefaultPetMouseInterop\("default-pet-changed"\)/, "changing default pet must recover mouse interop for dragging without app restart.");
 assert.match(petWindowSource, /function installPetContextMenu/, "pet windows must install a native right-click context menu.");
 assert.match(petWindowSource, /webContents\.on\("context-menu"/, "pet context menu must be handled in the Electron main process.");
 assert.match(petWindowSource, /Menu\.buildFromTemplate/, "pet context menu must use a small native Electron menu.");
