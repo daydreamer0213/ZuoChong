@@ -208,9 +208,13 @@ function run(command, args, options) {
 
 function defaultReleaseNotes() {
   return [
-    `Local draft release for OpenPets ${tag}.`,
+    `Desktop release for OpenPets ${tag}.`,
     "",
-    "Before publishing:",
+    "Highlights:",
+    "- Windows pet drag recovery after default pet changes, display changes, and resume.",
+    "- Linux RPM artifact added alongside AppImage, deb, and tar.gz.",
+    "",
+    "After publishing:",
     "- Smoke test macOS, Windows, and Linux artifacts.",
     "- Expect Gatekeeper/SmartScreen warnings until signing/notarization is configured.",
   ].join("\n");
