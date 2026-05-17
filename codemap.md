@@ -21,6 +21,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 |-----------|------------------------|--------------|
 | `apps/` | Deployable application workspace, currently the tray-first Electron desktop app that consumes shared packages. | [View Map](apps/codemap.md) |
 | `apps/desktop/` | User-facing Electron companion app: tray UX, pet windows, pet installation, agent setup, update checks, and local IPC server. | [View Map](apps/desktop/codemap.md) |
+| `apps/desktop/contracts/` | Desktop public-boundary contract tests for catalog fixtures and local IPC protocol behavior. | [View Map](apps/desktop/contracts/codemap.md) |
 | `apps/desktop/src/` | Main-process service layer for app lifecycle, state, tray/windows, IPC routing, lease-managed agent pets, catalog installation, and editor integration. | [View Map](apps/desktop/src/codemap.md) |
 | `apps/desktop/scripts/` | Desktop package cleanup and local release automation scripts. | [View Map](apps/desktop/scripts/codemap.md) |
 | `packages/` | Publishable npm package workspace for shared protocol, CLI, MCP, and coding-agent integrations. | [View Map](packages/codemap.md) |
@@ -29,6 +30,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 | `packages/claude/` | Claude Code integration package for hooks, MCP setup, and settings/memory management. | [View Map](packages/claude/codemap.md) |
 | `packages/claude/src/` | Claude Code hook handlers, hook settings, CLI integration, and exported setup APIs. | [View Map](packages/claude/src/codemap.md) |
 | `packages/client/` | IPC client package that discovers and communicates with the desktop app. | [View Map](packages/client/codemap.md) |
+| `packages/client/contracts/` | Client protocol contract tests for discovery, endpoint validation, responses, and pet result parsing. | [View Map](packages/client/contracts/codemap.md) |
 | `packages/client/src/` | Protocol definitions, discovery logic, public client API, and smoke entry points. | [View Map](packages/client/src/codemap.md) |
 | `packages/cli/` | User-facing OpenPets CLI package. | [View Map](packages/cli/codemap.md) |
 | `packages/cli/src/` | CLI command parsing and orchestration across client, Claude, OpenCode, and MCP packages. | [View Map](packages/cli/src/codemap.md) |

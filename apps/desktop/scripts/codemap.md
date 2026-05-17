@@ -28,6 +28,11 @@ Preflight checks (git clean, remote sync, version validity)
 → (if --yes) Create GitHub draft release + upload artifacts
 ```
 
+**Desktop Tests** (`run-tests.mjs`):
+```
+Check preload syntax → Compile tests to .test-dist → Run behavior tests → Run contract tests → Run remaining dist checks
+```
+
 ## Integration Points
 
 - **File System**: `apps/desktop/dist-electron/` (build output), `apps/desktop/dist/` (compiled JS)
@@ -40,6 +45,7 @@ Preflight checks (git clean, remote sync, version validity)
 
 - `clean-package-output.cjs`: Removes `dist-electron` directory with path safety checks
 - `release-local.mjs`: Full release orchestration with preflight validation, multi-platform builds, and GitHub draft creation
+- `run-tests.mjs`: Desktop test runner for preload syntax checks, `.test-dist` behavior/contract tests, and remaining runtime checks
 
 ## Build Plan (release-local.mjs)
 

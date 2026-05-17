@@ -89,3 +89,6 @@ net.createConnection({ host, port }) → Windows desktop app
 - `readDiscoveryFile()`, `getDiscoveryFilePath()` - Discovery utilities
 - `parseIpcEndpoint()`, `validateEndpoint()` - Endpoint handling
 - `OpenPetsClientError`, error codes, types
+
+**Contracts**:
+- `contracts/client-protocol.contract.ts` - Runtime protocol validation tests

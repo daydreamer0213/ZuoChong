@@ -30,7 +30,7 @@ Let users import locally generated Codex pets from `~/.codex/pets/` directly in 
 
 ## Automated Checks
 
-- `check-codex-pets.ts` covers Codex metadata validation and preview-size gating.
+- `tests/codex-pets.test.ts` covers Codex metadata validation and preview-size gating.
 - Desktop test script includes the Codex check.
 
 ## Manual Verification

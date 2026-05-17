@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetScale, petScaleOptions } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetScale, petScaleOptions } from "../src/app-state-core.js";
 
 assert.equal(normalizeOnboardingCompleted({}), false);
 assert.equal(normalizeOnboardingCompleted({ onboardingCompleted: true }), true);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { createParsedUpdateStatus, isVersionNewer, normalizeVersion } from "./update-version.js";
+import { createParsedUpdateStatus, isVersionNewer, normalizeVersion } from "../src/update-version.js";
 
 assert.equal(normalizeVersion("v1.2.3"), "1.2.3");
 assert.equal(normalizeVersion("1.2.3"), "1.2.3");

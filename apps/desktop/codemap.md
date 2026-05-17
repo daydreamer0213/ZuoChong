@@ -71,3 +71,12 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `preload.cjs`/`pet-preload.cjs`: Renderer preload scripts (contextBridge APIs)
 - `electron-builder.yml`: Packaging configuration
 - `scripts/release-local.mjs`: macOS-local release automation with GitHub draft creation
+- `contracts/catalog-fixture.contract.ts`: Catalog V2 validation contract tests against fixture data
+- `contracts/local-ipc-protocol.contract.ts`: IPC protocol validation contract tests for request/response parsing
+
+## Test Structure
+
+- **Behavior tests** (`tests/*.test.ts`): Unit tests for lease manager, state management, version checking, ZIP safety, Codex pets, Claude memory, and reaction animation mapping. Compiled to `.test-dist/tests/`.
+- **Contract tests** (`contracts/*.contract.ts`): Public API boundary validation for catalog fixtures and IPC protocol. Compiled to `.test-dist/contracts/`.
+- **Runtime checks** (`src/check-*.ts`): Remaining runtime validation checks compiled to `dist/`.
+- **Test runner** (`scripts/run-tests.mjs`): Orchestrates preload syntax checks → test compilation → behavior tests → contract tests → dist checks.

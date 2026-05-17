@@ -141,8 +141,10 @@ pet-installation.ts
 - `update-checker.ts`: GitHub release polling, update status
 - `update-version.ts`: Version parsing and comparison
 
-**Check Files** (contract/validation tests, excluded from detailed docs):
-- `check-*.ts`: Runtime contract checks executed during `pnpm test`
+**Tests** (excluded from detailed codemap coverage per repository conventions):
+- Behavior tests live in `tests/*.test.ts` (compiled to `.test-dist/tests/`)
+- Contract tests live in `contracts/*.contract.ts` (compiled to `.test-dist/contracts/`)
+- Runtime checks (`check-*.ts`) remain in `src/` for packaging/validation (compiled to `dist/`)
 
 ## Data Flow Summary
 

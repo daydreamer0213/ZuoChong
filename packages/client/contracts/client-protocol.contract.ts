@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 
-import { parseIpcEndpoint, validateDiscovery } from "./discovery.js";
-import { parsePetInstallResult, parsePetListResult } from "./index.js";
-import { OpenPetsClientError, parseIpcResponse, validateReaction } from "./protocol.js";
+import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
+import { parsePetInstallResult, parsePetListResult } from "../src/index.js";
+import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
 
 const baseDiscovery = {
   protocolVersion: 1,

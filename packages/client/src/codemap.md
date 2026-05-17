@@ -80,9 +80,11 @@ Discovery file handling (226 lines). `getDiscoveryFilePath()`, `readDiscoveryFil
 
 Manual testing CLI for client operations (hello, status, react, say, invalid-token).
 
-### check-client-protocol.ts
+## Related Contracts
 
-Contract validation (79 lines). Runtime assertions for protocol compliance.
+### ../contracts/client-protocol.contract.ts
+
+Contract validation (moved from src/check-client-protocol.ts). Runtime assertions for protocol compliance.
 
 **Test Coverage:**
 - Discovery validation (protocol, version, endpoint, token)

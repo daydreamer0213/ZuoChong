@@ -3,6 +3,7 @@ web
 node_modules
 dist
 dist-electron
+.test-dist
 apps/desktop/dist-electron
 *.tsbuildinfo
 .DS_Store

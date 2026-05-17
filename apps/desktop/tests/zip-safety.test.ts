@@ -1,4 +1,4 @@
-import { validateZipEntryName, assertRejectsPath, ZipEntryPathTracker, hasSupportedZipMagic } from "./zip-safety.js";
+import { validateZipEntryName, assertRejectsPath, ZipEntryPathTracker, hasSupportedZipMagic } from "../src/zip-safety.js";
 import yauzl from "yauzl";
 
 validateZipEntryName("pet-package/");

@@ -23,7 +23,8 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - `src/` - TypeScript source
 - `dist/` - Compiled output (not committed)
 - `package.json` - Standard npm metadata with exports map
-- Contract check files (`check-*.ts`) for runtime validation
+- `contracts/` - Runtime contract validation tests (client package)
+- Contract check files (`check-*.ts`) for runtime validation (other packages)
 
 **ESM-First**: All packages are ESM (`"type": "module"`) with dual exports for types.
 

@@ -1,4 +1,6 @@
-import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage } from "./local-ipc-protocol.js";
+import assert from "node:assert/strict";
+
+import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage } from "../src/local-ipc-protocol.js";
 
 const token = "test-token";
 const valid = {
@@ -11,14 +13,14 @@ const valid = {
 
 parseIpcRequest(JSON.stringify(valid), token);
 parseIpcRequest(JSON.stringify({ ...valid, method: "pets.list" }), token);
-assertRejects(() => parseIpcRequest(JSON.stringify({ ...valid, token: "bad" }), token));
-assertRejects(() => parseIpcRequest(JSON.stringify({ ...valid, version: 2 }), token));
-assertRejects(() => parseIpcRequest(JSON.stringify({ ...valid, method: "pet.install" }), token));
-assertRejects(() => parseIpcRequest("not json", token));
+assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, token: "bad" }), token));
+assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, version: 2 }), token));
+assert.throws(() => parseIpcRequest(JSON.stringify({ ...valid, method: "pet.install" }), token));
+assert.throws(() => parseIpcRequest("not json", token));
 
 validateReaction("testing");
 validateReaction("waving");
-assertRejects(() => validateReaction("bad"));
+assert.throws(() => validateReaction("bad"));
 
 validateSayMessage("Working on it");
 for (const unsafe of [
@@ -31,7 +33,7 @@ for (const unsafe of [
   "/Users/alvin/project/file.ts",
   "api_key=abc123",
 ]) {
-  assertRejects(() => validateSayMessage(unsafe));
+  assert.throws(() => validateSayMessage(unsafe));
 }
 
 if (Buffer.byteLength(JSON.stringify({ message: "x".repeat(maxIpcMessageBytes) }), "utf8") <= maxIpcMessageBytes) {
@@ -44,12 +46,3 @@ if (response.ok || response.error?.code !== "internal_error") {
 }
 
 console.log("Local IPC protocol validation passed.");
-
-function assertRejects(callback: () => unknown): void {
-  try {
-    callback();
-  } catch {
-    return;
-  }
-  throw new Error("Expected validation to reject.");
-}

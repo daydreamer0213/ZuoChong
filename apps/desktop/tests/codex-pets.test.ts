@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { maxCodexPets, maxCodexSpritesheetBytes, maxCodexThumbnailSourceBytes, validateCodexPetMetadata } from "./codex-pets-core.js";
+import { maxCodexPets, maxCodexSpritesheetBytes, maxCodexThumbnailSourceBytes, validateCodexPetMetadata } from "../src/codex-pets-core.js";
 
 const valid = validateCodexPetMetadata({
   id: "fixer",
@@ -26,4 +26,4 @@ assert.equal(maxCodexSpritesheetBytes, 100 * 1024 * 1024);
 assert.equal(maxCodexThumbnailSourceBytes, 24 * 1024 * 1024);
 assert.equal(maxCodexPets, 100);
 
-console.error("Codex pet validation passed.");
+console.log("Codex pet validation passed.");

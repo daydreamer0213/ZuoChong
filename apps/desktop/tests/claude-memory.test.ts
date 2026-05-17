@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { ensureImportLine, ensureManagedImport, installClaudeOpenPetsMemory, openPetsClaudeImportLine, removeImportLine, removeOpenPetsMemoryBlock, uninstallClaudeOpenPetsMemory, upsertOpenPetsMemoryBlock } from "./claude-memory.js";
+import { ensureImportLine, ensureManagedImport, installClaudeOpenPetsMemory, openPetsClaudeImportLine, removeImportLine, removeOpenPetsMemoryBlock, uninstallClaudeOpenPetsMemory, upsertOpenPetsMemoryBlock } from "../src/claude-memory.js";
 
 assert.equal(ensureImportLine("", openPetsClaudeImportLine), `${openPetsClaudeImportLine}\n`);
 assert.equal(ensureImportLine("# User notes\n", openPetsClaudeImportLine), `# User notes\n\n${openPetsClaudeImportLine}\n`);
@@ -72,4 +72,4 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.error("Claude memory validation passed.");
+console.log("Claude memory validation passed.");
