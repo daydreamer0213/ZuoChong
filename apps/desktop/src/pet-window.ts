@@ -188,24 +188,24 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     };
   };
 
-  const requestCursorHitTestProbe = (reason: string): void => {
+  const requestCursorHitTestProbe = (reason: string, logProbe = true): void => {
     if (window.isDestroyed() || webContents.isDestroyed()) return;
     const probe = getCursorProbe();
-    debug("pet.window", "cursor hit-test probe", { windowId, reason, inside: probe.inside, cursor: probe.cursor, bounds: probe.bounds });
+    if (logProbe) debug("pet.window", "cursor hit-test probe", { windowId, reason, inside: probe.inside, cursor: probe.cursor, bounds: probe.bounds });
     if (!probe.inside) return;
     webContents.send("openpets:pet-probe-hit-test", { clientX: probe.clientX, clientY: probe.clientY, reason });
   };
 
-  const rearmWindowsMouseForwarding = (reason: string): void => {
+  const rearmWindowsMouseForwarding = (reason: string, logRearm = true): void => {
     if (window.isDestroyed()) return;
     if (dragging || lastInteractive) {
-      debug("pet.window", "windows mouse forwarding rearm skipped", { windowId, reason, dragging: Boolean(dragging), interactive: lastInteractive });
+      if (logRearm) debug("pet.window", "windows mouse forwarding rearm skipped", { windowId, reason, dragging: Boolean(dragging), interactive: lastInteractive });
       return;
     }
-    debug("pet.window", "windows mouse forwarding rearm", { windowId, reason });
+    if (logRearm) debug("pet.window", "windows mouse forwarding rearm", { windowId, reason });
     window.setIgnoreMouseEvents(false);
     window.setIgnoreMouseEvents(true, { forward: true });
-    requestCursorHitTestProbe(reason);
+    requestCursorHitTestProbe(reason, logRearm);
   };
 
   const scheduleWindowsMouseForwardingRearm = (reason: string, delayMs: number): void => {
@@ -221,7 +221,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     forwardingWatchTimer = setTimeout(() => {
       forwardingWatchTimer = null;
       if (window.isDestroyed() || dragging || lastInteractive) return;
-      if (getCursorProbe().inside) rearmWindowsMouseForwarding(reason);
+      if (getCursorProbe().inside) rearmWindowsMouseForwarding(reason, false);
       scheduleWindowsForwardingWatch(reason);
     }, 750);
     forwardingWatchTimer.unref?.();
@@ -252,7 +252,8 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
     if (!isFromWindow(event)) return;
     rendererReady = true;
     lastInteractive = Boolean(interactive);
-    debug("pet.window", "hit test", { windowId, interactive: lastInteractive, dragging, source: typeof source === "string" ? source : undefined });
+    const sourceName = typeof source === "string" ? source : undefined;
+    if (sourceName !== "idle-forwarding-watch" || lastInteractive) debug("pet.window", "hit test", { windowId, interactive: lastInteractive, dragging, source: sourceName });
     setPassthrough(!lastInteractive && !dragging);
     if (lastInteractive || dragging) clearWindowsForwardingWatch();
     else scheduleWindowsForwardingWatch("idle-forwarding-watch");
