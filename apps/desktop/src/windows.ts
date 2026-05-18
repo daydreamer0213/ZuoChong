@@ -1256,7 +1256,7 @@ function createTaskWindowStyles(): string {
     body[data-openpets-view="pet-manager"] .pm-detail-actions button:hover:not(:disabled) { background: linear-gradient(180deg, #55a6ff, #176df2); transform: translateY(-1px); }
     body[data-openpets-view="pet-manager"] .pm-detail-actions button:active:not(:disabled) { transform: scale(0.96); }
     body[data-openpets-view="pet-manager"] .pm-detail-actions button.secondary { background: rgba(255,255,255,0.76); color: #176df2; border-color: rgba(37, 99, 235, 0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(61, 99, 160, 0.08); }
-    body[data-openpets-view="pet-manager"] .pm-detail-actions button.secondary:hover:not(:disabled) { background: #fef2f2; color: #dc2626; border-color: rgba(239, 68, 68, 0.58); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1), inset 0 1px 0 rgba(255,255,255,0.94); }
+    body[data-openpets-view="pet-manager"] .pm-detail-actions button.secondary:hover:not(:disabled) { background: rgba(255,255,255,0.95); border-color: rgba(37, 99, 235, 0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,1), 0 8px 18px rgba(61, 99, 160, 0.12); }
     body[data-openpets-view="pet-manager"] .pm-detail-actions button:disabled { opacity: 1; cursor: default; background: linear-gradient(180deg, #ecf5ff, #dbeafe); color: #176df2; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9); }
     body[data-openpets-view="pet-manager"] .pm-detail-actions button:only-child { grid-column: 1 / -1; }
     body[data-openpets-view="pet-manager"] .pm-empty-state { grid-column: 1 / -1; padding: 28px; text-align: center; color: #667694; border: 1px dashed rgba(126, 161, 210, 0.48); border-radius: 18px; background: rgba(255,255,255,0.5); }

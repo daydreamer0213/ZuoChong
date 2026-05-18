@@ -117,8 +117,9 @@ function renderPluginsSnapshot(snapshot) {
   const list = requireElement("plugins-list");
   const detail = requireElement("plugins-detail");
   const status = requireElement("plugins-status");
-  list.replaceChildren();
+
   status.textContent = snapshot.plugins.length === 0 ? "No plugins installed yet." : `${snapshot.plugins.length} plugin${snapshot.plugins.length === 1 ? "" : "s"} installed.`;
+  status.className = "";
   requireButton("plugins-refresh").onclick = () => {
     if (currentPluginsTab === "discover") {
       void renderDiscover(true).catch(renderCaughtError);
@@ -126,39 +127,78 @@ function renderPluginsSnapshot(snapshot) {
       void renderPlugins().catch(renderCaughtError);
     }
   };
+
   requireButton("plugins-installed-tab").onclick = () => setPluginsTab("installed");
   requireButton("plugins-discover-tab").onclick = () => setPluginsTab("discover");
   requireButton("plugins-developer-tab").onclick = () => setPluginsTab("developer");
+
   const loadLocalButton = document.getElementById("plugins-load-local");
   if (loadLocalButton) loadLocalButton.onclick = () => { void loadLocalPlugin().catch(renderCaughtError); };
+
   if (!snapshot.plugins.some((plugin) => plugin.id === activePluginId)) activePluginId = snapshot.plugins[0]?.id || "";
+
   if (snapshot.plugins.length === 0) {
-    detail.className = "panel empty";
-    detail.textContent = "Installed manifest plugins will appear here. Catalog and local loading are coming in later phases.";
+    list.textContent = "";
+    detail.className = "panel empty-state";
+    detail.innerHTML = `
+      <h3>No plugins installed</h3>
+      <p>Use Discover to install catalog plugins, or Developer to load a local manifest.</p>
+    `;
     return;
   }
+
+  list.textContent = "";
   for (const plugin of snapshot.plugins) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `plugin-card${plugin.id === activePluginId ? " active" : ""}`;
+
+    const titleRow = document.createElement("div");
+    titleRow.style.display = "flex";
+    titleRow.style.justifyContent = "space-between";
+    titleRow.style.alignItems = "center";
+
     const title = document.createElement("strong");
     title.textContent = plugin.name || plugin.id;
-    const meta = document.createElement("div");
-    meta.className = "muted";
-    meta.textContent = `${plugin.version} · ${plugin.source} · ${plugin.enabled ? "enabled" : "disabled"}`;
-    button.append(title, meta);
+
+    const statusDot = document.createElement("div");
+    statusDot.className = `status-dot ${plugin.brokenReason ? "broken" : plugin.enabled ? "enabled" : ""}`;
+    statusDot.title = plugin.brokenReason ? "Broken" : plugin.enabled ? "Enabled" : "Disabled";
+
+    titleRow.append(title, statusDot);
+
+    const metaRow = document.createElement("div");
+    metaRow.style.display = "flex";
+    metaRow.style.justifyContent = "space-between";
+    metaRow.style.fontSize = "12px";
+    metaRow.style.color = "#94a3b8";
+
+    const version = document.createElement("span");
+    version.textContent = `v${plugin.version}`;
+
+    const source = document.createElement("span");
+    source.textContent = plugin.source;
+
+    metaRow.append(version, source);
+
+    button.append(titleRow, metaRow);
+
     if (plugin.brokenReason) {
       const broken = document.createElement("div");
-      broken.className = "error";
-      broken.textContent = "Needs attention";
+      broken.className = "pill error";
+      broken.textContent = "Broken";
+      broken.style.alignSelf = "flex-start";
+      broken.style.marginTop = "4px";
       button.append(broken);
     }
+
     button.onclick = () => {
       activePluginId = plugin.id;
       renderPluginsSnapshot(snapshot);
     };
     list.append(button);
   }
+
   const selected = snapshot.plugins.find((plugin) => plugin.id === activePluginId) || snapshot.plugins[0];
   renderPluginDetail(selected);
 }
@@ -176,101 +216,190 @@ async function loadLocalPlugin() {
 function renderPluginDetail(plugin) {
   const detail = requireElement("plugins-detail");
   detail.className = "panel";
-  detail.replaceChildren();
+  detail.textContent = "";
+
+  const header = document.createElement("div");
+  header.className = "detail-header";
+
+  const titleCol = document.createElement("div");
+  titleCol.className = "detail-title";
+
   const title = document.createElement("h2");
   title.textContent = plugin.name || plugin.id;
-  const meta = document.createElement("p");
-  meta.className = "muted";
-  meta.textContent = `${plugin.id} · ${plugin.version} · ${plugin.source}`;
-  detail.append(title, meta);
+
+  const meta = document.createElement("div");
+  meta.className = "detail-meta";
+
+  const idBadge = document.createElement("span");
+  idBadge.className = "pill";
+  idBadge.textContent = plugin.id;
+
+  const verBadge = document.createElement("span");
+  verBadge.className = "pill";
+  verBadge.textContent = `v${plugin.version}`;
+
+  const srcBadge = document.createElement("span");
+  srcBadge.className = "pill";
+  srcBadge.textContent = plugin.source;
+
+  meta.append(idBadge, verBadge, srcBadge);
+  titleCol.append(title, meta);
+
   if (plugin.brokenReason) {
-    const broken = document.createElement("p");
-    broken.className = "error";
-    broken.textContent = plugin.brokenReason;
-    detail.append(broken);
+    const broken = document.createElement("div");
+    broken.className = "pill error";
+    broken.textContent = `Broken: ${plugin.brokenReason}`;
+    broken.style.marginTop = "8px";
+    titleCol.append(broken);
   }
-  const permissions = document.createElement("div");
-  for (const permission of plugin.approvedPermissions || []) {
-    const pill = document.createElement("span");
-    pill.className = "pill";
-    pill.textContent = permission;
-    permissions.append(pill);
-  }
-  detail.append(permissions);
-  const actions = document.createElement("div");
-  actions.className = "actions";
+
+  const toggleWrap = document.createElement("div");
+  toggleWrap.style.display = "flex";
+  toggleWrap.style.flexDirection = "column";
+  toggleWrap.style.alignItems = "flex-end";
+  toggleWrap.style.gap = "8px";
+
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.className = "primary";
-  toggle.textContent = plugin.enabled ? "Disable" : "Enable";
+  toggle.className = `toggle ${plugin.enabled ? "enabled" : ""}`;
+  toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-checked", String(plugin.enabled));
+  toggle.title = plugin.enabled ? "Disable plugin" : "Enable plugin";
   toggle.onclick = () => runPluginAction(() => pluginsApi.setEnabled(plugin.id, !plugin.enabled));
+
+  const toggleLabel = document.createElement("span");
+  toggleLabel.textContent = plugin.enabled ? "Enabled" : "Disabled";
+  toggleLabel.style.fontSize = "13px";
+  toggleLabel.style.color = plugin.enabled ? "#10b981" : "#94a3b8";
+  toggleLabel.style.fontWeight = "500";
+
+  toggleWrap.append(toggle, toggleLabel);
+  header.append(titleCol, toggleWrap);
+  detail.append(header);
+
+  if (plugin.description) {
+    const desc = document.createElement("p");
+    desc.textContent = plugin.description;
+    desc.style.marginBottom = "24px";
+    detail.append(desc);
+  }
+
+  if (plugin.approvedPermissions?.length) {
+    const perms = document.createElement("div");
+    perms.style.marginBottom = "24px";
+    perms.style.display = "flex";
+    perms.style.gap = "8px";
+    perms.style.flexWrap = "wrap";
+    for (const permission of plugin.approvedPermissions) {
+      const p = document.createElement("span");
+      p.className = "pill";
+      p.textContent = permission;
+      perms.append(p);
+    }
+    detail.append(perms);
+  }
+
+  renderPluginConfigForm(detail, plugin);
+
+  const dangerZone = document.createElement("div");
+  dangerZone.className = "danger-zone";
+
   const reload = document.createElement("button");
+  reload.className = "secondary";
   reload.type = "button";
   reload.textContent = "Reload";
   reload.onclick = () => runPluginAction(() => pluginsApi.reload(plugin.id));
-  actions.append(toggle, reload);
 
-  const uninstallBtn = document.createElement("button");
-  uninstallBtn.type = "button";
-  uninstallBtn.textContent = "Uninstall";
-  uninstallBtn.onclick = () => {
+  const uninstall = document.createElement("button");
+  uninstall.className = "destructive";
+  uninstall.type = "button";
+  uninstall.textContent = "Uninstall";
+  uninstall.onclick = () => {
     if (confirm(`Are you sure you want to uninstall ${plugin.name || plugin.id}?`)) {
       runPluginAction(() => pluginsApi.uninstall(plugin.id));
     }
   };
-  actions.append(uninstallBtn);
 
-  detail.append(actions);
-  renderPluginConfigForm(detail, plugin);
+  dangerZone.append(reload, uninstall);
+  detail.append(dangerZone);
 }
 
 function renderPluginConfigForm(parent, plugin) {
   const schema = plugin.configSchema || {};
-  const keys = Object.keys(schema).sort((a, b) => a.localeCompare(b));
+  const keys = Object.keys(schema);
+
+  const container = document.createElement("div");
+  container.className = "config-panel";
+
+  const title = document.createElement("h3");
+  title.textContent = "Settings";
+  container.append(title);
+
   if (keys.length === 0) {
     const empty = document.createElement("p");
     empty.className = "muted";
     empty.textContent = "This plugin has no settings.";
-    parent.append(empty);
+    container.append(empty);
+    parent.append(container);
     return;
   }
+
   const form = document.createElement("form");
   form.dataset.pluginConfigForm = plugin.id;
   const values = plugin.effectiveConfig || {};
+
   for (const key of keys) {
     const field = schema[key];
-    const wrap = document.createElement("div");
-    wrap.className = "field";
+    if (!field) continue;
+    const wrapper = document.createElement("div");
+    wrapper.className = "field";
     const label = document.createElement("label");
     label.textContent = field.label || key;
     label.htmlFor = `plugin-config-${key}`;
+    if (field.description) label.title = field.description;
     const input = createPluginConfigInput(key, field, values[key]);
-    wrap.append(label, input);
+    wrapper.append(label, input);
     if (field.description) {
-      const help = document.createElement("small");
-      help.className = "muted";
-      help.textContent = field.description;
-      wrap.append(help);
+      const desc = document.createElement("div");
+      desc.className = "muted";
+      desc.style.fontSize = "11px";
+      desc.style.marginTop = "4px";
+      desc.textContent = field.description;
+      wrapper.append(desc);
     }
-    form.append(wrap);
+    form.append(wrapper);
   }
+
   if (plugin.configErrors?.length) {
-    const errors = document.createElement("p");
-    errors.className = "error";
+    const errors = document.createElement("div");
+    errors.className = "pill error";
+    errors.style.marginTop = "16px";
+    errors.style.display = "block";
+    errors.style.padding = "12px";
+    errors.style.borderRadius = "8px";
     errors.textContent = plugin.configErrors.map((error) => error.message).join(" ");
     form.append(errors);
   }
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.style.marginTop = "24px";
+
   const save = document.createElement("button");
-  save.type = "submit";
   save.className = "primary";
+  save.type = "submit";
   save.textContent = "Save settings";
-  form.append(save);
+  actions.append(save);
+  form.append(actions);
+
   form.onsubmit = (event) => {
     event.preventDefault();
     const nextConfig = collectPluginConfigForm(form, schema);
     void runPluginAction(() => pluginsApi.saveConfig(plugin.id, nextConfig));
   };
-  parent.append(form);
+
+  container.append(form);
+  parent.append(container);
 }
 
 function createPluginConfigInput(key, field, value) {
@@ -325,10 +454,11 @@ async function runPluginAction(action) {
     requireElement("plugins-status").textContent = result.error || "Plugin action failed.";
     requireElement("plugins-status").className = "error";
     if (isPluginsSnapshot(result.snapshot)) renderPluginsSnapshot(result.snapshot);
-    return;
+    return false;
   }
   if (isPluginsSnapshot(result?.snapshot)) renderPluginsSnapshot(result.snapshot);
   else await renderPlugins();
+  return true;
 }
 
 async function renderDiscover(refresh = false) {
@@ -347,8 +477,11 @@ async function renderDiscover(refresh = false) {
 
     if (catalog.plugins.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "empty muted";
-      empty.textContent = "No plugins available in the catalog.";
+      empty.className = "empty-state";
+      empty.innerHTML = `
+        <h3>Catalog empty</h3>
+        <p>No plugins available in the catalog at this time.</p>
+      `;
       list.append(empty);
       status.textContent = "Catalog loaded.";
       return;
@@ -356,11 +489,27 @@ async function renderDiscover(refresh = false) {
 
     for (const plugin of catalog.plugins) {
       const card = document.createElement("div");
-      card.className = "plugin-card";
+      card.className = "discover-card";
+
+      const titleRow = document.createElement("div");
+      titleRow.style.display = "flex";
+      titleRow.style.justifyContent = "space-between";
+      titleRow.style.alignItems = "center";
+      titleRow.style.marginBottom = "4px";
 
       const title = document.createElement("h3");
       title.textContent = plugin.name || plugin.id;
-      title.style.margin = "0 0 4px 0";
+      title.style.margin = "0";
+
+      titleRow.append(title);
+
+      if (plugin.installed) {
+        const badge = document.createElement("span");
+        badge.className = "pill success";
+        badge.textContent = "Installed";
+        badge.style.fontSize = "11px";
+        titleRow.append(badge);
+      }
 
       const meta = document.createElement("div");
       meta.className = "muted";
@@ -385,15 +534,21 @@ async function renderDiscover(refresh = false) {
       installBtn.type = "button";
       if (plugin.installed) {
         installBtn.textContent = "Update";
-        installBtn.onclick = () => runPluginAction(() => pluginsApi.updateCatalog(plugin.id));
+        installBtn.onclick = async () => {
+          const ok = await runPluginAction(() => pluginsApi.updateCatalog(plugin.id));
+          if (ok) void renderDiscover();
+        };
       } else {
         installBtn.className = "primary";
         installBtn.textContent = "Install";
-        installBtn.onclick = () => runPluginAction(() => pluginsApi.installCatalog(plugin.id));
+        installBtn.onclick = async () => {
+          const ok = await runPluginAction(() => pluginsApi.installCatalog(plugin.id));
+          if (ok) void renderDiscover();
+        };
       }
       actions.append(installBtn);
 
-      card.append(title, meta, desc, permissions, actions);
+      card.append(titleRow, meta, desc, permissions, actions);
       list.append(card);
     }
 
