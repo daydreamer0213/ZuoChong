@@ -20,10 +20,17 @@ const behaviorTests = [
   ".test-dist/tests/zip-safety.test.js",
   ".test-dist/tests/codex-pets.test.js",
   ".test-dist/tests/claude-memory.test.js",
+  ".test-dist/tests/plugin-config.test.js",
+  ".test-dist/tests/plugin-state.test.js",
+  ".test-dist/tests/plugin-runtime.test.js",
+  ".test-dist/tests/plugin-service.test.js",
+  ".test-dist/tests/plugins-window.test.js",
+  ".test-dist/tests/plugin-ui-static.test.js",
 ];
 const contractTests = [
   ".test-dist/contracts/local-ipc-protocol.contract.js",
   ".test-dist/contracts/catalog-fixture.contract.js",
+  ".test-dist/contracts/plugin-manifest.contract.js",
 ];
 const distChecks = [
   "dist/check-opencode-desktop-setup.js",
@@ -36,6 +43,7 @@ function run(command, args = [], options = {}) {
     const child = spawn(command, args, {
       stdio: "inherit",
       cwd: rootDir,
+      env: { ...process.env, OPENPETS_DESKTOP_ROOT: rootDir },
       ...options,
     });
     child.on("close", (code) => {

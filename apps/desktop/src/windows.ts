@@ -12,10 +12,12 @@ import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
 import { getInstalledPetDir } from "./pet-paths.js";
+import { getPluginService, type PluginServiceResult } from "./plugin-service.js";
+import { createPluginsHtml } from "./plugins-window.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
-type TaskWindowKind = "pet-manager" | "agent-setup" | "settings" | "onboarding";
+type TaskWindowKind = "pet-manager" | "agent-setup" | "settings" | "onboarding" | "plugins";
 
 interface TaskWindowDefinition {
   readonly title: string;
@@ -43,6 +45,11 @@ const taskWindowDefinitions: Record<TaskWindowKind, TaskWindowDefinition> = {
     title: "OpenPets — Welcome",
     heading: "Welcome to OpenPets",
     description: "Set up your pets and coding-agent integrations, or skip anything and come back later from the tray.",
+  },
+  plugins: {
+    title: "OpenPets — Plugins",
+    heading: "Plugins",
+    description: "Manage installed manifest plugins and configure how they interact with your pet.",
   },
 };
 
@@ -100,6 +107,34 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:onboarding-open-agent-setup", (event) => {
     assertAllowedSender(event, ["onboarding"]);
     openTaskWindow("agent-setup");
+  });
+
+  ipcMain.handle("openpets:plugins-snapshot", async (event) => {
+    assertAllowedSender(event, ["plugins"]);
+    return getPluginService().getSnapshot();
+  });
+
+  ipcMain.handle("openpets:plugins-set-enabled", async (event, id: unknown, enabled: unknown): Promise<PluginServiceResult> => {
+    assertAllowedSender(event, ["plugins"]);
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id) || typeof enabled !== "boolean") return pluginUiError("Invalid plugin enable request.");
+    return getPluginService().setEnabled(id, enabled);
+  });
+
+  ipcMain.handle("openpets:plugins-save-config", async (event, id: unknown, config: unknown): Promise<PluginServiceResult> => {
+    assertAllowedSender(event, ["plugins"]);
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id) || !isPlainObject(config)) return pluginUiError("Invalid plugin config request.");
+    return getPluginService().saveConfig(id, config);
+  });
+
+  ipcMain.handle("openpets:plugins-reload", async (event, id: unknown): Promise<PluginServiceResult> => {
+    assertAllowedSender(event, ["plugins"]);
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin reload request.");
+    return getPluginService().reload(id);
+  });
+
+  ipcMain.handle("openpets:plugins-load-local", async (event): Promise<PluginServiceResult> => {
+    assertAllowedSender(event, ["plugins"]);
+    return getPluginService().loadLocal();
   });
 
   ipcMain.handle("openpets:get-catalog", async (event) => {
@@ -305,7 +340,7 @@ export function openTaskWindow(kind: TaskWindowKind): void {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      ...(kind === "pet-manager" || kind === "settings" || kind === "agent-setup" || kind === "onboarding" ? { preload: getPreloadPath() } : {}),
+      ...(kind === "pet-manager" || kind === "settings" || kind === "agent-setup" || kind === "onboarding" || kind === "plugins" ? { preload: getPreloadPath() } : {}),
     },
   });
 
@@ -378,7 +413,21 @@ function createTaskWindowDataUrl(kind: TaskWindowKind, definition: TaskWindowDef
     return createDataUrl(createOnboardingHtml(definition));
   }
 
+  if (kind === "plugins") {
+    return createDataUrl(createPluginsHtml(definition));
+  }
+
   return createDataUrl(createAgentSetupHtml(definition));
+}
+
+function pluginUiError(error: string): PluginServiceResult {
+  return { ok: false, error, snapshot: { plugins: [] } };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
 }
 
 function createPlaceholderHtml(definition: TaskWindowDefinition): string {

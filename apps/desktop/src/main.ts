@@ -5,6 +5,8 @@ import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDef
 import { installAppLifecycle } from "./lifecycle.js";
 import { error as logError, getLogFilePath, info, initializeLogger } from "./logger.js";
 import { startLocalIpcServer } from "./local-ipc.js";
+import { defaultPluginPetApi } from "./plugin-pet-api.js";
+import { initializePluginService } from "./plugin-service.js";
 import { createAppTray, refreshTrayMenu } from "./tray.js";
 import { checkForGitHubReleaseUpdate } from "./update-checker.js";
 import { installInternalUiHandlers, installInternalUiProtocol, openTaskWindow } from "./windows.js";
@@ -41,6 +43,7 @@ if (!gotSingleInstanceLock) {
     }
 
     initializeAppState();
+    await initializePluginService(app.getPath("userData"), defaultPluginPetApi).start();
     installInternalUiProtocol();
     installInternalUiHandlers();
     createAppTray();

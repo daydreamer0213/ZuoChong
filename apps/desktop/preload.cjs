@@ -33,6 +33,14 @@ const onboardingApi = {
   openAgentSetup: () => ipcRenderer.invoke("openpets:onboarding-open-agent-setup"),
 };
 
+const pluginsApi = {
+  snapshot: () => ipcRenderer.invoke("openpets:plugins-snapshot"),
+  setEnabled: (id, enabled) => ipcRenderer.invoke("openpets:plugins-set-enabled", id, enabled),
+  saveConfig: (id, config) => ipcRenderer.invoke("openpets:plugins-save-config", id, config),
+  reload: (id) => ipcRenderer.invoke("openpets:plugins-reload", id),
+  loadLocal: () => ipcRenderer.invoke("openpets:plugins-load-local"),
+};
+
 let activeAgentCommandMode = "published";
 let agentSetupControlStates = null;
 let activePetManagerSelection = "";
@@ -47,11 +55,18 @@ const remoteCatalogFilters = new Set(["original", "western", "asian"]);
 contextBridge.exposeInMainWorld("openPets", api);
 contextBridge.exposeInMainWorld("openpetsAgentSetup", agentSetupApi);
 contextBridge.exposeInMainWorld("openpetsOnboarding", onboardingApi);
+contextBridge.exposeInMainWorld("openpetsPlugins", pluginsApi);
 
 window.addEventListener("DOMContentLoaded", () => {
   const view = document.body.dataset.openpetsView;
 
-  if (view !== "pet-manager" && view !== "settings" && view !== "agent-setup" && view !== "onboarding") {
+  if (view !== "pet-manager" && view !== "settings" && view !== "agent-setup" && view !== "onboarding" && view !== "plugins") {
+    return;
+  }
+
+  if (view === "plugins") {
+    void renderPlugins();
+    window.addEventListener("focus", () => { void renderPlugins(); });
     return;
   }
 
@@ -81,6 +96,229 @@ async function renderCurrentState(view) {
   } else {
     await renderAgentSetup();
   }
+}
+
+let activePluginId = "";
+
+async function renderPlugins() {
+  const snapshot = await pluginsApi.snapshot();
+  if (!isPluginsSnapshot(snapshot)) {
+    renderError("Plugin state is unavailable.");
+    return;
+  }
+  renderPluginsSnapshot(snapshot);
+}
+
+function renderPluginsSnapshot(snapshot) {
+  const list = requireElement("plugins-list");
+  const detail = requireElement("plugins-detail");
+  const status = requireElement("plugins-status");
+  list.replaceChildren();
+  status.textContent = snapshot.plugins.length === 0 ? "No plugins installed yet." : `${snapshot.plugins.length} plugin${snapshot.plugins.length === 1 ? "" : "s"} installed.`;
+  requireButton("plugins-refresh").onclick = () => { void renderPlugins().catch(renderCaughtError); };
+  requireButton("plugins-installed-tab").onclick = () => setPluginsTab("installed");
+  requireButton("plugins-developer-tab").onclick = () => setPluginsTab("developer");
+  const loadLocalButton = document.getElementById("plugins-load-local");
+  if (loadLocalButton) loadLocalButton.onclick = () => { void loadLocalPlugin().catch(renderCaughtError); };
+  if (!snapshot.plugins.some((plugin) => plugin.id === activePluginId)) activePluginId = snapshot.plugins[0]?.id || "";
+  if (snapshot.plugins.length === 0) {
+    detail.className = "panel empty";
+    detail.textContent = "Installed manifest plugins will appear here. Catalog and local loading are coming in later phases.";
+    return;
+  }
+  for (const plugin of snapshot.plugins) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `plugin-card${plugin.id === activePluginId ? " active" : ""}`;
+    const title = document.createElement("strong");
+    title.textContent = plugin.name || plugin.id;
+    const meta = document.createElement("div");
+    meta.className = "muted";
+    meta.textContent = `${plugin.version} · ${plugin.source} · ${plugin.enabled ? "enabled" : "disabled"}`;
+    button.append(title, meta);
+    if (plugin.brokenReason) {
+      const broken = document.createElement("div");
+      broken.className = "error";
+      broken.textContent = "Needs attention";
+      button.append(broken);
+    }
+    button.onclick = () => {
+      activePluginId = plugin.id;
+      renderPluginsSnapshot(snapshot);
+    };
+    list.append(button);
+  }
+  const selected = snapshot.plugins.find((plugin) => plugin.id === activePluginId) || snapshot.plugins[0];
+  renderPluginDetail(selected);
+}
+
+async function loadLocalPlugin() {
+  const result = await pluginsApi.loadLocal();
+  if (!result || result.ok === false) {
+    renderError(result && typeof result.error === "string" ? result.error : "Failed to load local plugin.");
+    return;
+  }
+  renderPluginsSnapshot(result.snapshot);
+  setPluginsTab("developer");
+}
+
+function renderPluginDetail(plugin) {
+  const detail = requireElement("plugins-detail");
+  detail.className = "panel";
+  detail.replaceChildren();
+  const title = document.createElement("h2");
+  title.textContent = plugin.name || plugin.id;
+  const meta = document.createElement("p");
+  meta.className = "muted";
+  meta.textContent = `${plugin.id} · ${plugin.version} · ${plugin.source}`;
+  detail.append(title, meta);
+  if (plugin.brokenReason) {
+    const broken = document.createElement("p");
+    broken.className = "error";
+    broken.textContent = plugin.brokenReason;
+    detail.append(broken);
+  }
+  const permissions = document.createElement("div");
+  for (const permission of plugin.approvedPermissions || []) {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = permission;
+    permissions.append(pill);
+  }
+  detail.append(permissions);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "primary";
+  toggle.textContent = plugin.enabled ? "Disable" : "Enable";
+  toggle.onclick = () => runPluginAction(() => pluginsApi.setEnabled(plugin.id, !plugin.enabled));
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.textContent = "Reload";
+  reload.onclick = () => runPluginAction(() => pluginsApi.reload(plugin.id));
+  actions.append(toggle, reload);
+  detail.append(actions);
+  renderPluginConfigForm(detail, plugin);
+}
+
+function renderPluginConfigForm(parent, plugin) {
+  const schema = plugin.configSchema || {};
+  const keys = Object.keys(schema).sort((a, b) => a.localeCompare(b));
+  if (keys.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "This plugin has no settings.";
+    parent.append(empty);
+    return;
+  }
+  const form = document.createElement("form");
+  form.dataset.pluginConfigForm = plugin.id;
+  const values = plugin.effectiveConfig || {};
+  for (const key of keys) {
+    const field = schema[key];
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const label = document.createElement("label");
+    label.textContent = field.label || key;
+    label.htmlFor = `plugin-config-${key}`;
+    const input = createPluginConfigInput(key, field, values[key]);
+    wrap.append(label, input);
+    if (field.description) {
+      const help = document.createElement("small");
+      help.className = "muted";
+      help.textContent = field.description;
+      wrap.append(help);
+    }
+    form.append(wrap);
+  }
+  if (plugin.configErrors?.length) {
+    const errors = document.createElement("p");
+    errors.className = "error";
+    errors.textContent = plugin.configErrors.map((error) => error.message).join(" ");
+    form.append(errors);
+  }
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "primary";
+  save.textContent = "Save settings";
+  form.append(save);
+  form.onsubmit = (event) => {
+    event.preventDefault();
+    const nextConfig = collectPluginConfigForm(form, schema);
+    void runPluginAction(() => pluginsApi.saveConfig(plugin.id, nextConfig));
+  };
+  parent.append(form);
+}
+
+function createPluginConfigInput(key, field, value) {
+  if (field.type === "select") {
+    const select = document.createElement("select");
+    select.id = `plugin-config-${key}`;
+    select.name = key;
+    select.dataset.configType = field.type;
+    for (const option of field.options || []) {
+      const item = document.createElement("option");
+      item.value = option.value;
+      item.textContent = option.label;
+      select.append(item);
+    }
+    if (typeof value === "string") select.value = value;
+    return select;
+  }
+  if (field.type === "textarea") {
+    const textarea = document.createElement("textarea");
+    textarea.id = `plugin-config-${key}`;
+    textarea.name = key;
+    textarea.dataset.configType = field.type;
+    textarea.value = typeof value === "string" ? value : "";
+    return textarea;
+  }
+  const input = document.createElement("input");
+  input.id = `plugin-config-${key}`;
+  input.name = key;
+  input.dataset.configType = field.type;
+  input.type = field.type === "number" ? "number" : field.type === "boolean" ? "checkbox" : "text";
+  if (field.type === "boolean") input.checked = Boolean(value);
+  else if (value !== undefined) input.value = String(value);
+  return input;
+}
+
+function collectPluginConfigForm(form, schema) {
+  const config = {};
+  for (const key of Object.keys(schema)) {
+    const field = schema[key];
+    const input = form.elements.namedItem(key);
+    if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement)) continue;
+    if (field.type === "boolean") config[key] = input instanceof HTMLInputElement ? input.checked : false;
+    else if (field.type === "number") config[key] = Number(input.value);
+    else config[key] = input.value;
+  }
+  return config;
+}
+
+async function runPluginAction(action) {
+  const result = await action();
+  if (result?.ok === false) {
+    requireElement("plugins-status").textContent = result.error || "Plugin action failed.";
+    requireElement("plugins-status").className = "error";
+    if (isPluginsSnapshot(result.snapshot)) renderPluginsSnapshot(result.snapshot);
+    return;
+  }
+  if (isPluginsSnapshot(result?.snapshot)) renderPluginsSnapshot(result.snapshot);
+  else await renderPlugins();
+}
+
+function setPluginsTab(tab) {
+  const installed = tab === "installed";
+  requireElement("plugins-installed-view").hidden = !installed;
+  requireElement("plugins-developer-view").hidden = installed;
+  requireButton("plugins-installed-tab").classList.toggle("active", installed);
+  requireButton("plugins-developer-tab").classList.toggle("active", !installed);
+}
+
+function isPluginsSnapshot(value) {
+  return Boolean(value && Array.isArray(value.plugins));
 }
 
 async function renderOnboarding() {

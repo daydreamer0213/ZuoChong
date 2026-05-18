@@ -4,6 +4,7 @@ import { closeAllAgentPets } from "./agent-pet-controller.js";
 import { destroyDefaultPet } from "./default-pet-controller.js";
 import { info } from "./logger.js";
 import { stopLocalIpcServer } from "./local-ipc.js";
+import { stopPluginService } from "./plugin-service.js";
 import { focusOpenTaskWindows } from "./windows.js";
 
 let intentionalQuit = false;
@@ -32,6 +33,7 @@ export function installAppLifecycle(): void {
     intentionalQuit = true;
     info("app", "before quit cleanup begin");
     scheduleHardExitFallback("before-quit");
+    stopPluginService();
     stopLocalIpcServer();
     closeAllAgentPets();
     destroyDefaultPet();

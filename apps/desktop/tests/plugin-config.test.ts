@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+
+import { getEffectivePluginConfig, getPluginDefaultConfig, resolvePluginNumericConfig, validatePluginConfigReplacement } from "../src/plugin-config.js";
+import type { OpenPetsPluginManifest } from "../src/plugin-manifest.js";
+
+const base = manifest();
+
+assert.deepEqual(getPluginDefaultConfig(base), { enabled: true, intervalMinutes: 10, message: "Stretch", mood: "calm" });
+
+assertInvalidReplacement({ message: null }, "invalid_config_value");
+assertInvalidReplacement({ message: ["x"] }, "invalid_config_value");
+assertInvalidReplacement({ message: { text: "x" } }, "invalid_config_value");
+assertInvalidReplacement({ missing: true }, "unknown_config_key");
+assertInvalidReplacement({ intervalMinutes: Number.POSITIVE_INFINITY }, "invalid_config_value");
+assertInvalidReplacement({ mood: "unknown" }, "invalid_select_value");
+assertInvalidReplacement(new Date(), "invalid_config");
+assertInvalidReplacement(new Map(), "invalid_config");
+assertInvalidReplacement([], "invalid_config");
+assert.deepEqual(validatePluginConfigReplacement(base, { message: "Move", details: "Now", intervalMinutes: 12, enabled: false, mood: "active" }), {
+  ok: true,
+  config: { details: "Now", enabled: false, intervalMinutes: 12, message: "Move", mood: "active" },
+  errors: [],
+});
+
+assert.deepEqual(getEffectivePluginConfig(base, { stale: { old: true }, message: "Hydrate" }), {
+  ok: true,
+  config: { enabled: true, intervalMinutes: 10, message: "Hydrate", mood: "calm" },
+  errors: [],
+});
+const invalidPersisted = getEffectivePluginConfig(base, { intervalMinutes: "10" });
+assert.equal(invalidPersisted.ok, false);
+assert.equal(invalidPersisted.errors[0]?.code, "invalid_config_value");
+
+assert.equal(resolvePluginNumericConfig(base, {}, "intervalMinutes", { min: 5 }), 10);
+assert.equal(resolvePluginNumericConfig(base, { intervalMinutes: 7, stale: true }, "intervalMinutes", { min: 5 }), 7);
+assert.throws(() => resolvePluginNumericConfig(base, { intervalMinutes: 4 }, "intervalMinutes", { min: 5 }), /at least 5/);
+assert.throws(() => resolvePluginNumericConfig(manifest({ configSchema: { intervalMinutes: { type: "number" } } }), {}, "intervalMinutes", { min: 5 }), /must resolve to an integer/);
+assert.throws(() => resolvePluginNumericConfig(base, { intervalMinutes: 6.5 }, "intervalMinutes", { min: 5 }), /must resolve to an integer/);
+
+console.error("Plugin config validation passed.");
+
+function assertInvalidReplacement(config: unknown, code: string): void {
+  const result = validatePluginConfigReplacement(base, config);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some((error) => error.code === code), JSON.stringify(result.errors));
+}
+
+function manifest(patch: Partial<OpenPetsPluginManifest> = {}): OpenPetsPluginManifest {
+  return {
+    manifestVersion: 1,
+    id: "plug",
+    name: "Plug",
+    version: "1.0.0",
+    runtime: "declarative",
+    permissions: ["timer"],
+    configSchema: patch.configSchema ?? {
+      message: { type: "text", default: "Stretch" },
+      details: { type: "textarea" },
+      intervalMinutes: { type: "number", default: 10 },
+      enabled: { type: "boolean", default: true },
+      mood: { type: "select", default: "calm", options: [{ label: "Calm", value: "calm" }, { label: "Active", value: "active" }] },
+    },
+    triggers: [],
+  };
+}

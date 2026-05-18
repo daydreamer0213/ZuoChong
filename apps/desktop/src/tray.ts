@@ -88,6 +88,10 @@ export function refreshTrayMenu(): void {
       click: () => openTaskWindow("agent-setup"),
     },
     {
+      label: "Plugins...",
+      click: () => openTaskWindow("plugins"),
+    },
+    {
       label: "Settings...",
       click: () => openTaskWindow("settings"),
     },
