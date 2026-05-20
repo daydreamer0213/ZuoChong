@@ -263,6 +263,20 @@ await localScenario("loadLocalRoots loads children and reports bad plugins", asy
   assert.equal(store.getRecord("root-good")?.source, "local");
 });
 
+await localScenario("loadLocalRoots prunes stale plugins-dev records", async ({ service, root, userData, store }) => {
+  const pluginsRoot = join(root, "official");
+  const good = join(pluginsRoot, "good");
+  writeManifest(good, manifest({ id: "root-good" }));
+  const staleInstall = join(userData, "plugins-dev", "old-sample");
+  const staleManifest = writeManifest(staleInstall, manifest({ id: "old-sample" }));
+  store.upsertRecord({ id: "old-sample", version: "1.0.0", installPath: staleInstall, manifestPath: staleManifest, source: "local", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  const results = await service.loadLocalRoots([pluginsRoot], { autoApprove: true, pruneStale: true });
+  assert.equal(results.some((result) => result.ok && result.id === "root-good"), true);
+  assert.equal(store.getRecord("root-good")?.source, "local");
+  assert.equal(store.getRecord("old-sample"), undefined);
+  assert.equal(existsSync(staleInstall), false);
+});
+
 await localScenario("loadLocal rejects javascript nested entry symlink", async ({ service, source, root }) => {
   writeManifest(source, { manifestVersion: 2, id: "js-entry-link", name: "JS Entry Link", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "nested/index.mjs", permissions: ["pet:speak"] });
   mkdirSync(join(source, "nested"), { recursive: true });
@@ -332,6 +346,13 @@ await catalogCompatibilityScenario("catalog filters and blocks incompatible plug
   const result = await service.installCatalog("future-plug");
   assert.equal(result.ok, false);
   assert.match(result.error, /newer OpenPets/);
+});
+
+await scenario("disabled catalog returns no discover plugins", async ({ userData, store, runtime }) => {
+  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), plugins: [catalogEntry("hidden-plug", "1.0.0")] }), { status: 200 });
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, fetchImpl, disableCatalog: true });
+  const snapshot = await service.getCatalogSnapshot(true);
+  assert.deepEqual(snapshot.plugins, []);
 });
 
 console.error("Plugin service validation passed.");

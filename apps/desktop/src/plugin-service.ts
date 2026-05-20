@@ -57,6 +57,7 @@ export type PluginServiceOptions = {
   readonly fetchImpl?: typeof fetch;
   readonly currentAppVersion?: string;
   readonly runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
+  readonly disableCatalog?: boolean;
 };
 
 export class PluginService {
@@ -70,6 +71,7 @@ export class PluginService {
   readonly #catalogOptions?: PluginCatalogOptions;
   readonly #fetchImpl?: typeof fetch;
   readonly #currentAppVersion: string;
+  readonly #disableCatalog: boolean;
 
   constructor(options: PluginServiceOptions) {
     if (!options.stateStore && !options.userDataPath) throw new Error("Plugin service requires userDataPath or stateStore.");
@@ -81,6 +83,7 @@ export class PluginService {
     this.#catalogOptions = options.catalogOptions;
     this.#fetchImpl = options.fetchImpl;
     this.#currentAppVersion = options.currentAppVersion ?? "0.0.0";
+    this.#disableCatalog = options.disableCatalog === true;
     this.stateStore = options.stateStore ?? new PluginStateStore({ userDataPath: options.userDataPath ?? "" });
     if (options.runtime) {
       this.runtime = options.runtime;
@@ -149,6 +152,7 @@ export class PluginService {
   }
 
   async getCatalogSnapshot(refresh = false): Promise<PluginCatalogSnapshot> {
+    if (this.#disableCatalog) return { plugins: [] };
     try {
       const catalog = await getPluginCatalog({ ...this.#catalogOptions, fetchImpl: this.#fetchImpl ?? this.#catalogOptions?.fetchImpl, refresh });
       for (const entry of catalog.plugins) await this.#updateCatalogMetadata(entry);
@@ -231,13 +235,16 @@ export class PluginService {
     return { ok: true, snapshot: await this.getSnapshot() };
   }
 
-  async loadLocalRoots(rootPaths: readonly string[], options: { readonly autoApprove?: boolean } = {}): Promise<readonly DevPluginLoadResult[]> {
+  async loadLocalRoots(rootPaths: readonly string[], options: { readonly autoApprove?: boolean; readonly pruneStale?: boolean } = {}): Promise<readonly DevPluginLoadResult[]> {
     const results: DevPluginLoadResult[] = [];
+    const activeIds = new Set<string>();
+    let scannedRoot = false;
     for (const rootPath of rootPaths) {
       let entries: string[] = [];
       try {
         const root = await fs.realpath(rootPath);
         const dirents = await fs.readdir(root, { withFileTypes: true });
+        scannedRoot = true;
         entries = dirents.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => join(root, entry.name)).sort((a, b) => a.localeCompare(b));
       } catch (error) {
         results.push({ path: rootPath, ok: false, error: safeError(error) });
@@ -246,12 +253,35 @@ export class PluginService {
       for (const path of entries) {
         try { await fs.access(join(path, OPENPETS_PLUGIN_MANIFEST_FILENAME)); }
         catch { continue; }
+        let id: string | undefined;
+        try { id = (await readLocalPluginSourceManifest({ sourceFolder: path, maxManifestBytes: this.#maxManifestBytes })).manifest.id; }
+        catch { /* loadLocalPath will report the validation error below. */ }
         const result = await this.loadLocalPath(path, options);
-        if (result.ok) results.push({ path, ok: true });
+        if (result.ok) { if (id) activeIds.add(id); results.push({ path, id, ok: true }); }
         else results.push({ path, ok: false, error: result.error });
       }
     }
+    if (options.pruneStale === true && scannedRoot) await this.#pruneStaleDevLocalPlugins(activeIds);
     return results;
+  }
+
+  async #pruneStaleDevLocalPlugins(activeIds: ReadonlySet<string>): Promise<void> {
+    if (!this.#userDataPath) return;
+    const devRoot = join(this.#userDataPath, "plugins-dev");
+    let realDevRoot: string;
+    try { realDevRoot = await fs.realpath(devRoot); }
+    catch { return; }
+    for (const record of this.stateStore.listRecords()) {
+      if (record.source !== "local" || activeIds.has(record.id)) continue;
+      let isDevRecord = false;
+      try { isDevRecord = isUnderPath(await fs.realpath(record.installPath), realDevRoot); }
+      catch { isDevRecord = record.installPath.startsWith(`${devRoot}/`); }
+      if (!isDevRecord) continue;
+      this.stateStore.removeRecord(record.id);
+      await this.runtime.reloadPlugin(record.id);
+      await fs.rm(record.installPath, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(join(this.#userDataPath, "plugin-storage", `${record.id}.json`), { force: true }).catch(() => undefined);
+    }
   }
 
   async #installOrUpdateCatalog(id: string, update: boolean): Promise<PluginServiceResult> {
@@ -324,8 +354,8 @@ export class PluginService {
 
 let appPluginService: PluginService | null = null;
 
-export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void): PluginService {
-  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger });
+export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, disableCatalog?: boolean): PluginService {
+  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, disableCatalog });
   return appPluginService;
 }
 
@@ -368,6 +398,10 @@ function isPermissionSubset(next: readonly PluginPermission[], approved: readonl
 function isStringSubset(next: readonly string[], approved: readonly string[]): boolean {
   const approvedSet = new Set(approved);
   return next.every((value) => approvedSet.has(value));
+}
+
+function isUnderPath(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(`${parent}/`);
 }
 
 function isCatalogEntryCompatible(minOpenPetsVersion: string | undefined, maxOpenPetsVersion: string | undefined, currentAppVersion: string): boolean {

@@ -105,508 +105,569 @@ async function renderCurrentState(view) {
 
 let activePluginId = "";
 
-async function renderPlugins() {
-  const snapshot = await pluginsApi.snapshot();
-  if (!isPluginsSnapshot(snapshot)) {
-    renderError("Plugin state is unavailable.");
-    return;
-  }
-  renderPluginsSnapshot(snapshot);
-}
 
-function renderPluginsSnapshot(snapshot) {
-  const list = requireElement("plugins-list");
-  const detail = requireElement("plugins-detail");
+let currentSnapshot = null;
+let currentCatalog = null;
+
+async function renderPlugins(refresh = false) {
   const status = requireElement("plugins-status");
-
-  status.textContent = snapshot.plugins.length === 0 ? "No plugins installed yet." : `${snapshot.plugins.length} plugin${snapshot.plugins.length === 1 ? "" : "s"} installed.`;
-  status.className = "";
-  requireButton("plugins-refresh").onclick = () => {
-    if (currentPluginsTab === "discover") {
-      void renderDiscover(true).catch(renderCaughtError);
-    } else {
-      void renderPlugins().catch(renderCaughtError);
-    }
-  };
-
-  requireButton("plugins-installed-tab").onclick = () => setPluginsTab("installed");
-  requireButton("plugins-discover-tab").onclick = () => setPluginsTab("discover");
-  requireButton("plugins-developer-tab").onclick = () => setPluginsTab("developer");
-
-  const loadLocalButton = document.getElementById("plugins-load-local");
-  if (loadLocalButton) loadLocalButton.onclick = () => { void loadLocalPlugin().catch(renderCaughtError); };
-
-  if (!snapshot.plugins.some((plugin) => plugin.id === activePluginId)) activePluginId = snapshot.plugins[0]?.id || "";
-
-  if (snapshot.plugins.length === 0) {
-    list.textContent = "";
-    detail.className = "panel empty-state";
-    detail.innerHTML = `
-      <h3>No plugins installed</h3>
-      <p>Use Discover to install catalog plugins, or Developer to load a local manifest.</p>
-    `;
-    return;
-  }
-
-  list.textContent = "";
-  for (const plugin of snapshot.plugins) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `plugin-card${plugin.id === activePluginId ? " active" : ""}`;
-
-    const titleRow = document.createElement("div");
-    titleRow.style.display = "flex";
-    titleRow.style.justifyContent = "space-between";
-    titleRow.style.alignItems = "center";
-
-    const title = document.createElement("strong");
-    title.textContent = plugin.name || plugin.id;
-
-    const statusDot = document.createElement("div");
-    statusDot.className = `status-dot ${plugin.brokenReason ? "broken" : plugin.enabled ? "enabled" : ""}`;
-    statusDot.title = plugin.brokenReason ? "Broken" : plugin.enabled ? "Enabled" : "Disabled";
-
-    titleRow.append(title, statusDot);
-
-    const metaRow = document.createElement("div");
-    metaRow.style.display = "flex";
-    metaRow.style.justifyContent = "space-between";
-    metaRow.style.fontSize = "12px";
-    metaRow.style.color = "#94a3b8";
-
-    const version = document.createElement("span");
-    version.textContent = `v${plugin.version}`;
-
-    const source = document.createElement("span");
-    source.textContent = plugin.source;
-
-    metaRow.append(version, source);
-
-    button.append(titleRow, metaRow);
-
-    if (plugin.brokenReason) {
-      const broken = document.createElement("div");
-      broken.className = "pill error";
-      broken.textContent = "Broken";
-      broken.style.alignSelf = "flex-start";
-      broken.style.marginTop = "4px";
-      button.append(broken);
-    }
-
-    button.onclick = () => {
-      activePluginId = plugin.id;
-      renderPluginsSnapshot(snapshot);
-    };
-    list.append(button);
-  }
-
-  const selected = snapshot.plugins.find((plugin) => plugin.id === activePluginId) || snapshot.plugins[0];
-  renderPluginDetail(selected);
-}
-
-async function loadLocalPlugin() {
-  const result = await pluginsApi.loadLocal();
-  if (!result || result.ok === false) {
-    renderError(result && typeof result.error === "string" ? result.error : "Failed to load local plugin.");
-    return;
-  }
-  renderPluginsSnapshot(result.snapshot);
-  setPluginsTab("developer");
-}
-
-function renderPluginDetail(plugin) {
-  const detail = requireElement("plugins-detail");
-  detail.className = "panel";
-  detail.textContent = "";
-
-  const header = document.createElement("div");
-  header.className = "detail-header";
-
-  const titleCol = document.createElement("div");
-  titleCol.className = "detail-title";
-
-  const title = document.createElement("h2");
-  title.textContent = plugin.name || plugin.id;
-
-  const meta = document.createElement("div");
-  meta.className = "detail-meta";
-
-  const idBadge = document.createElement("span");
-  idBadge.className = "pill";
-  idBadge.textContent = plugin.id;
-
-  const verBadge = document.createElement("span");
-  verBadge.className = "pill";
-  verBadge.textContent = `v${plugin.version}`;
-
-  const srcBadge = document.createElement("span");
-  srcBadge.className = "pill";
-  srcBadge.textContent = plugin.source;
-
-  meta.append(idBadge, verBadge, srcBadge);
-  titleCol.append(title, meta);
-
-  if (plugin.brokenReason) {
-    const broken = document.createElement("div");
-    broken.className = "pill error";
-    broken.textContent = `Broken: ${plugin.brokenReason}`;
-    broken.style.marginTop = "8px";
-    titleCol.append(broken);
-  }
-
-  const toggleWrap = document.createElement("div");
-  toggleWrap.style.display = "flex";
-  toggleWrap.style.flexDirection = "column";
-  toggleWrap.style.alignItems = "flex-end";
-  toggleWrap.style.gap = "8px";
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = `toggle ${plugin.enabled ? "enabled" : ""}`;
-  toggle.setAttribute("role", "switch");
-  toggle.setAttribute("aria-checked", String(plugin.enabled));
-  toggle.title = plugin.enabled ? "Disable plugin" : "Enable plugin";
-  toggle.onclick = () => runPluginAction(() => pluginsApi.setEnabled(plugin.id, !plugin.enabled));
-
-  const toggleLabel = document.createElement("span");
-  toggleLabel.textContent = plugin.enabled ? "Enabled" : "Disabled";
-  toggleLabel.style.fontSize = "13px";
-  toggleLabel.style.color = plugin.enabled ? "#10b981" : "#94a3b8";
-  toggleLabel.style.fontWeight = "500";
-
-  toggleWrap.append(toggle, toggleLabel);
-  header.append(titleCol, toggleWrap);
-  detail.append(header);
-
-  if (plugin.description) {
-    const desc = document.createElement("p");
-    desc.textContent = plugin.description;
-    desc.style.marginBottom = "24px";
-    detail.append(desc);
-  }
-
-  if (plugin.approvedPermissions?.length) {
-    const perms = document.createElement("div");
-    perms.style.marginBottom = "24px";
-    perms.style.display = "flex";
-    perms.style.gap = "8px";
-    perms.style.flexWrap = "wrap";
-    for (const permission of plugin.approvedPermissions) {
-      const p = document.createElement("span");
-      p.className = "pill";
-      p.textContent = permission;
-      perms.append(p);
-    }
-    detail.append(perms);
-  }
-
-  renderPluginConfigForm(detail, plugin);
-
-  if (plugin.status || (Array.isArray(plugin.commands) && plugin.commands.length > 0)) {
-    const panel = document.createElement("div");
-    panel.className = "config-panel";
-    if (plugin.status) { const s = document.createElement("p"); s.className = `pill ${plugin.status.tone || ""}`; s.textContent = plugin.status.text; panel.append(s); }
-    for (const command of plugin.commands || []) { const b = document.createElement("button"); b.type = "button"; b.className = "secondary"; b.textContent = command.title || command.id; b.title = command.description || ""; b.onclick = () => runPluginAction(() => pluginsApi.executeCommand(plugin.id, command.id)); panel.append(b); }
-    detail.append(panel);
-  }
-
-  const dangerZone = document.createElement("div");
-  dangerZone.className = "danger-zone";
-
-  const reload = document.createElement("button");
-  reload.className = "secondary";
-  reload.type = "button";
-  reload.textContent = "Reload";
-  reload.onclick = () => runPluginAction(() => pluginsApi.reload(plugin.id));
-
-  const uninstall = document.createElement("button");
-  uninstall.className = "destructive";
-  uninstall.type = "button";
-  uninstall.textContent = "Uninstall";
-  uninstall.onclick = () => {
-    if (confirm(`Are you sure you want to uninstall ${plugin.name || plugin.id}?`)) {
-      runPluginAction(() => pluginsApi.uninstall(plugin.id));
-    }
-  };
-
-  dangerZone.append(reload, uninstall);
-  detail.append(dangerZone);
-}
-
-function renderPluginConfigForm(parent, plugin) {
-  const schema = plugin.configSchema || {};
-  const keys = Object.keys(schema);
-
-  const container = document.createElement("div");
-  container.className = "config-panel";
-
-  const title = document.createElement("h3");
-  title.textContent = "Settings";
-  container.append(title);
-
-  if (keys.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "This plugin has no settings.";
-    container.append(empty);
-    parent.append(container);
-    return;
-  }
-
-  const form = document.createElement("form");
-  form.dataset.pluginConfigForm = plugin.id;
-  const values = plugin.effectiveConfig || {};
-
-  for (const key of keys) {
-    const field = schema[key];
-    if (!field) continue;
-    const wrapper = document.createElement("div");
-    wrapper.className = "field";
-    const label = document.createElement("label");
-    label.textContent = field.label || key;
-    label.htmlFor = `plugin-config-${key}`;
-    if (field.description) label.title = field.description;
-    const input = createPluginConfigInput(key, field, values[key]);
-    wrapper.append(label, input);
-    if (field.description) {
-      const desc = document.createElement("div");
-      desc.className = "muted";
-      desc.style.fontSize = "11px";
-      desc.style.marginTop = "4px";
-      desc.textContent = field.description;
-      wrapper.append(desc);
-    }
-    form.append(wrapper);
-  }
-
-  if (plugin.configErrors?.length) {
-    const errors = document.createElement("div");
-    errors.className = "pill error";
-    errors.style.marginTop = "16px";
-    errors.style.display = "block";
-    errors.style.padding = "12px";
-    errors.style.borderRadius = "8px";
-    errors.textContent = plugin.configErrors.map((error) => error.message).join(" ");
-    form.append(errors);
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "actions";
-  actions.style.marginTop = "24px";
-
-  const save = document.createElement("button");
-  save.className = "primary";
-  save.type = "submit";
-  save.textContent = "Save settings";
-  actions.append(save);
-  form.append(actions);
-
-  form.onsubmit = (event) => {
-    event.preventDefault();
-    let nextConfig;
-    try { nextConfig = collectPluginConfigForm(form, schema); }
-    catch (error) { requireElement("plugins-status").textContent = error instanceof Error ? error.message : "Invalid plugin settings."; requireElement("plugins-status").className = "error"; return; }
-    void runPluginAction(() => pluginsApi.saveConfig(plugin.id, nextConfig));
-  };
-
-  container.append(form);
-  parent.append(container);
-}
-
-function createPluginConfigInput(key, field, value) {
-  if (field.type === "select") {
-    const select = document.createElement("select");
-    select.id = `plugin-config-${key}`;
-    select.name = key;
-    select.dataset.configType = field.type;
-    for (const option of field.options || []) {
-      const item = document.createElement("option");
-      item.value = option.value;
-      item.textContent = option.label;
-      select.append(item);
-    }
-    if (typeof value === "string") select.value = value;
-    return select;
-  }
-  if (field.type === "multiSelect") {
-    const select = document.createElement("select"); select.id = `plugin-config-${key}`; select.name = key; select.dataset.configType = field.type; select.multiple = true;
-    for (const option of field.options || []) { const item = document.createElement("option"); item.value = option.value; item.textContent = option.label; item.selected = Array.isArray(value) && value.includes(option.value); select.append(item); }
-    return select;
-  }
-  if (field.type === "list") {
-    const textarea = document.createElement("textarea"); textarea.id = `plugin-config-${key}`; textarea.name = key; textarea.dataset.configType = field.type; textarea.value = JSON.stringify(Array.isArray(value) ? value : [], null, 2); return textarea;
-  }
-  if (field.type === "textarea") {
-    const textarea = document.createElement("textarea");
-    textarea.id = `plugin-config-${key}`;
-    textarea.name = key;
-    textarea.dataset.configType = field.type;
-    textarea.value = typeof value === "string" ? value : "";
-    return textarea;
-  }
-  const input = document.createElement("input");
-  input.id = `plugin-config-${key}`;
-  input.name = key;
-  input.dataset.configType = field.type;
-  input.type = field.type === "number" ? "number" : field.type === "boolean" ? "checkbox" : "text";
-  if (field.type === "time") input.type = "time";
-  if (field.min !== undefined) input.min = String(field.min);
-  if (field.max !== undefined) input.max = String(field.max);
-  if (field.step !== undefined) input.step = String(field.step);
-  if (field.maxLength !== undefined) input.maxLength = Number(field.maxLength);
-  if (field.type === "boolean") input.checked = Boolean(value);
-  else if (value !== undefined) input.value = String(value);
-  return input;
-}
-
-function collectPluginConfigForm(form, schema) {
-  const config = {};
-  for (const key of Object.keys(schema)) {
-    const field = schema[key];
-    const input = form.elements.namedItem(key);
-    if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement || input instanceof HTMLTextAreaElement)) continue;
-    if (field.type === "boolean") config[key] = input instanceof HTMLInputElement ? input.checked : false;
-    else if (field.type === "number") config[key] = Number(input.value);
-    else if (field.type === "multiSelect" && input instanceof HTMLSelectElement) config[key] = Array.from(input.selectedOptions).map((option) => option.value);
-    else if (field.type === "list") { try { config[key] = JSON.parse(input.value || "[]"); } catch { throw new Error(`Invalid JSON for ${field.label || key}.`); } }
-    else config[key] = input.value;
-  }
-  return config;
-}
-
-async function runPluginAction(action) {
-  const result = await action();
-  if (result?.ok === false) {
-    requireElement("plugins-status").textContent = result.error || "Plugin action failed.";
-    requireElement("plugins-status").className = "error";
-    if (isPluginsSnapshot(result.snapshot)) renderPluginsSnapshot(result.snapshot);
-    return false;
-  }
-  if (isPluginsSnapshot(result?.snapshot)) renderPluginsSnapshot(result.snapshot);
-  else await renderPlugins();
-  return true;
-}
-
-async function renderDiscover(refresh = false) {
-  const status = requireElement("plugins-status");
-  status.textContent = "Loading catalog...";
+  status.textContent = "Loading plugins...";
   status.className = "muted";
 
   try {
-    const catalog = await pluginsApi.catalogSnapshot(refresh);
-    if (!catalog || !Array.isArray(catalog.plugins)) {
-      throw new Error("Invalid catalog data.");
-    }
+    const [snapshot, catalog] = await Promise.all([
+      pluginsApi.snapshot(),
+      pluginsApi.catalogSnapshot(refresh).catch(() => ({ plugins: [] }))
+    ]);
 
-    const list = requireElement("plugins-discover-list");
-    list.replaceChildren();
-
-    if (catalog.plugins.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.innerHTML = `
-        <h3>Catalog empty</h3>
-        <p>No plugins available in the catalog at this time.</p>
-      `;
-      list.append(empty);
-      status.textContent = "Catalog loaded.";
+    if (!isPluginsSnapshot(snapshot)) {
+      renderError("Plugin state is unavailable.");
       return;
     }
 
-    for (const plugin of catalog.plugins) {
-      const card = document.createElement("div");
-      card.className = "discover-card";
+    currentSnapshot = snapshot;
+    currentCatalog = catalog;
 
-      const titleRow = document.createElement("div");
-      titleRow.style.display = "flex";
-      titleRow.style.justifyContent = "space-between";
-      titleRow.style.alignItems = "center";
-      titleRow.style.marginBottom = "4px";
+    status.textContent = `${snapshot.plugins.length} plugin${snapshot.plugins.length === 1 ? "" : "s"} installed.`;
+    status.className = "";
 
-      const title = document.createElement("h3");
-      title.textContent = plugin.name || plugin.id;
-      title.style.margin = "0";
+    requireButton("plugins-refresh").onclick = () => {
+      void renderPlugins(true).catch(renderCaughtError);
+    };
 
-      titleRow.append(title);
-
-      if (plugin.installed) {
-        const badge = document.createElement("span");
-        badge.className = "pill success";
-        badge.textContent = "Installed";
-        badge.style.fontSize = "11px";
-        titleRow.append(badge);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "muted";
-      meta.textContent = `${plugin.version} · ${plugin.runtime}`;
-
-      const desc = document.createElement("p");
-      desc.textContent = plugin.description;
-      desc.style.margin = "8px 0";
-
-      const permissions = document.createElement("div");
-      for (const permission of plugin.permissions || []) {
-        const pill = document.createElement("span");
-        pill.className = "pill";
-        pill.textContent = permission;
-        permissions.append(pill);
-      }
-
-      const actions = document.createElement("div");
-      actions.className = "actions";
-
-      const installBtn = document.createElement("button");
-      installBtn.type = "button";
-      if (plugin.installed) {
-        installBtn.textContent = "Update";
-        installBtn.onclick = async () => {
-          const ok = await runPluginAction(() => pluginsApi.updateCatalog(plugin.id));
-          if (ok) void renderDiscover();
-        };
-      } else {
-        installBtn.className = "primary";
-        installBtn.textContent = "Install";
-        installBtn.onclick = async () => {
-          const ok = await runPluginAction(() => pluginsApi.installCatalog(plugin.id));
-          if (ok) void renderDiscover();
-        };
-      }
-      actions.append(installBtn);
-
-      card.append(titleRow, meta, desc, permissions, actions);
-      list.append(card);
+    const loadLocalBtn = document.getElementById("plugins-load-local");
+    if (loadLocalBtn) {
+      loadLocalBtn.onclick = async () => {
+        try {
+          const result = await pluginsApi.loadLocal();
+          if (result && result.ok === false) {
+            renderError(result.error || "Failed to load local plugin");
+            return;
+          }
+          await renderPlugins();
+        } catch (err) {
+          renderError(err.message);
+        }
+      };
     }
 
-    status.textContent = `Showing ${catalog.plugins.length} plugin${catalog.plugins.length === 1 ? "" : "s"} from catalog.`;
-  } catch {
-    status.textContent = "Failed to load plugin catalog.";
-    status.className = "error";
+    const devModeToggle = document.getElementById("dev-mode-toggle");
+    const devActions = document.getElementById("dev-actions");
+    if (devModeToggle && devActions) {
+      devActions.style.display = devModeToggle.checked ? "block" : "none";
+      devModeToggle.onchange = () => { devActions.style.display = devModeToggle.checked ? "block" : "none"; };
+    }
+
+    const backBtn = document.getElementById("back-to-hub");
+    if (backBtn) {
+      backBtn.onclick = () => {
+        const detailView = document.getElementById("detail-view");
+        const hubView = document.getElementById("hub-view");
+        if (detailView) detailView.classList.remove("active");
+        if (hubView) hubView.classList.add("active");
+        activePluginId = "";
+        window.dispatchEvent(new CustomEvent('openpets-plugin-detail-closed'));
+      };
+    }
+
+    renderPluginsHub();
+
+    if (activePluginId) {
+      const updatedPlugin = currentSnapshot.plugins.find(p => p.id === activePluginId);
+      if (updatedPlugin) {
+        renderPluginDetail(updatedPlugin);
+      } else {
+        // Plugin no longer exists, go back to hub
+        if (backBtn) backBtn.click();
+      }
+    }
+  } catch (err) {
+    renderCaughtError(err);
   }
 }
 
-let currentPluginsTab = "installed";
+function renderPluginsHub() {
+  const grid = requireElement("plugins-grid");
+  grid.innerHTML = '';
 
-function setPluginsTab(tab) {
-  currentPluginsTab = tab;
-  const installed = tab === "installed";
-  const discover = tab === "discover";
-  const developer = tab === "developer";
-  requireElement("plugins-installed-view").hidden = !installed;
-  requireElement("plugins-discover-view").hidden = !discover;
-  requireElement("plugins-developer-view").hidden = !developer;
-  requireButton("plugins-installed-tab").classList.toggle("active", installed);
-  requireButton("plugins-discover-tab").classList.toggle("active", discover);
-  requireButton("plugins-developer-tab").classList.toggle("active", developer);
+  const allPlugins = new Map();
 
-  if (discover) {
-    void renderDiscover();
+  // Add installed plugins first
+  if (currentSnapshot && currentSnapshot.plugins) {
+    for (const plugin of currentSnapshot.plugins) {
+      allPlugins.set(plugin.id, { installed: plugin, catalog: null });
+    }
   }
+
+  // Add catalog plugins
+  if (currentCatalog && currentCatalog.plugins) {
+    for (const plugin of currentCatalog.plugins) {
+      if (allPlugins.has(plugin.id)) {
+        allPlugins.get(plugin.id).catalog = plugin;
+      } else {
+        allPlugins.set(plugin.id, { installed: null, catalog: plugin });
+      }
+    }
+  }
+
+  if (allPlugins.size === 0) {
+    grid.innerHTML = '<div class="empty-state"><h3>No plugins found</h3><p>No installed plugins and catalog is unavailable.</p></div>';
+    return;
+  }
+
+  for (const [id, data] of allPlugins.entries()) {
+    const { installed, catalog } = data;
+    const info = installed || catalog;
+
+    const card = document.createElement("article");
+    card.className = `plugin-card ${installed ? "featured" : ""}`;
+
+    const top = document.createElement("div");
+    top.className = "plugin-card-top";
+
+    const icon = document.createElement("span");
+    icon.className = "plugin-icon";
+    icon.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>';
+
+    const statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    if (installed) {
+      if (installed.brokenReason) {
+        statusPill.textContent = "Broken";
+        statusPill.classList.add("error");
+      } else if (installed.enabled) {
+        statusPill.textContent = "Enabled";
+        statusPill.classList.add("success");
+      } else {
+        statusPill.textContent = "Disabled";
+        statusPill.classList.add("muted");
+      }
+    } else {
+      statusPill.textContent = "Available";
+      statusPill.classList.add("info");
+    }
+
+    top.append(icon, statusPill);
+
+    const title = document.createElement("h2");
+    title.textContent = info.name || id;
+
+    const desc = document.createElement("p");
+    desc.textContent = info.description || (installed ? (installed.brokenReason || "Installed plugin") : "Available in catalog");
+
+    const actions = document.createElement("div");
+    actions.className = "plugin-actions stacked";
+
+    if (installed) {
+      const configBtn = document.createElement("button");
+      configBtn.className = "primary";
+      configBtn.textContent = "Configure";
+      configBtn.onclick = () => renderPluginDetail(installed);
+
+      const toggleBtn = document.createElement("button");
+      toggleBtn.className = "secondary";
+      toggleBtn.textContent = installed.enabled ? "Disable" : "Enable";
+      toggleBtn.onclick = async () => {
+        toggleBtn.disabled = true;
+        try {
+          if (installed.enabled) {
+            await pluginsApi.setEnabled(id, false);
+          } else {
+            await pluginsApi.setEnabled(id, true);
+          }
+          await renderPlugins();
+        } catch (err) {
+          renderError(err.message);
+        }
+      };
+
+      actions.append(configBtn, toggleBtn);
+    } else {
+      const installBtn = document.createElement("button");
+      installBtn.className = "primary";
+      installBtn.textContent = "Install";
+      installBtn.onclick = async () => {
+        installBtn.disabled = true;
+        installBtn.textContent = "Installing...";
+        try {
+          await pluginsApi.installCatalog(id);
+          await renderPlugins();
+        } catch (err) {
+          renderError(err.message);
+          installBtn.disabled = false;
+          installBtn.textContent = "Install";
+        }
+      };
+      actions.append(installBtn);
+    }
+
+    card.append(top, title, desc, actions);
+    grid.append(card);
+  }
+}
+
+function renderPluginDetail(plugin) {
+  activePluginId = plugin.id;
+  const content = requireElement("plugin-detail-content");
+  content.innerHTML = '';
+
+  const header = document.createElement("header");
+  header.className = "detail-header";
+
+  const icon = document.createElement("span");
+  icon.className = "plugin-icon";
+  icon.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>';
+
+  const headerText = document.createElement("div");
+  headerText.className = "detail-header-text";
+
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Plugin Configuration";
+
+  const title = document.createElement("h1");
+  title.style.margin = "0 0 8px";
+  title.textContent = plugin.name || plugin.id;
+
+  const desc = document.createElement("p");
+  desc.textContent = plugin.description || "";
+
+  headerText.append(eyebrow, title, desc);
+  header.append(icon, headerText);
+
+  const statusCard = document.createElement("article");
+  statusCard.className = "config-card";
+
+  const statusHeader = document.createElement("div");
+  statusHeader.className = "config-section-header";
+  statusHeader.innerHTML = '<span><small>Status</small><strong>Plugin State</strong></span>';
+
+  const toggleRow = document.createElement("div");
+  toggleRow.className = "toggle-row";
+  toggleRow.innerHTML = `
+    <div class="toggle-row-text">
+      <strong>${plugin.enabled ? 'Enabled' : 'Disabled'}</strong>
+      <small>${plugin.brokenReason ? 'Plugin is broken: ' + plugin.brokenReason : 'Toggle this plugin on or off.'}</small>
+    </div>
+    <label class="toggle-switch">
+      <input type="checkbox" id="detail-enable-toggle" ${plugin.enabled ? 'checked' : ''} />
+      <span class="toggle-slider"></span>
+    </label>
+  `;
+
+  statusCard.append(statusHeader, toggleRow);
+  content.append(header, statusCard);
+
+  if (plugin.configErrors && plugin.configErrors.length > 0) {
+    const errorCard = document.createElement("article");
+    errorCard.className = "config-card";
+    errorCard.style.borderColor = "rgba(220, 38, 38, 0.3)";
+    const errorHeader = document.createElement("div");
+    errorHeader.className = "config-section-header";
+    errorHeader.innerHTML = '<span><small style="color: #dc2626;">Configuration Errors</small><strong style="color: #991b1b;">Invalid Settings</strong></span>';
+    const errorList = document.createElement("ul");
+    errorList.style.color = "#dc2626";
+    errorList.style.margin = "0";
+    errorList.style.paddingLeft = "20px";
+    for (const err of plugin.configErrors) {
+      const li = document.createElement("li");
+      li.textContent = err && typeof err.message === "string" ? err.message : String(err);
+      errorList.append(li);
+    }
+    errorCard.append(errorHeader, errorList);
+    content.append(errorCard);
+  }
+
+  if (plugin.configSchema) {
+    const settingsCard = document.createElement("article");
+    settingsCard.className = "config-card";
+
+    const settingsHeader = document.createElement("div");
+    settingsHeader.className = "config-section-header";
+    settingsHeader.innerHTML = '<span><small>Settings</small><strong>Configuration</strong></span>';
+
+    const form = document.createElement("form");
+    form.id = "plugin-config-form";
+    form.style.display = "flex";
+    form.style.flexDirection = "column";
+    form.style.gap = "16px";
+    form.onsubmit = (e) => e.preventDefault();
+
+    const currentConfig = plugin.effectiveConfig || {};
+
+    for (const [key, schema] of Object.entries(plugin.configSchema)) {
+      form.append(createConfigField(key, schema, currentConfig[key]));
+    }
+
+    const actions = document.createElement("div");
+    actions.style.marginTop = "8px";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "primary";
+    saveBtn.type = "button";
+    saveBtn.textContent = "Save Configuration";
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
+      try {
+        const newConfig = collectConfigData(plugin.configSchema);
+        await pluginsApi.saveConfig(plugin.id, newConfig);
+        await renderPlugins();
+        saveBtn.textContent = "Saved!";
+        setTimeout(() => {
+          saveBtn.disabled = false;
+          saveBtn.textContent = "Save Configuration";
+        }, 1500);
+      } catch (err) {
+        renderError(err.message);
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save Configuration";
+      }
+    };
+    actions.append(saveBtn);
+    form.append(actions);
+
+    settingsCard.append(settingsHeader, form);
+    content.append(settingsCard);
+  }
+
+  const dangerCard = document.createElement("article");
+  dangerCard.className = "config-card";
+  dangerCard.style.borderColor = "rgba(220, 38, 38, 0.3)";
+
+  const dangerHeader = document.createElement("div");
+  dangerHeader.className = "config-section-header";
+  dangerHeader.innerHTML = '<span><small style="color: #dc2626;">Danger Zone</small><strong style="color: #991b1b;">Uninstall Plugin</strong></span>';
+
+  const uninstallBtn = document.createElement("button");
+  uninstallBtn.className = "danger";
+  uninstallBtn.textContent = "Uninstall";
+  uninstallBtn.onclick = async () => {
+    if (confirm(`Are you sure you want to uninstall ${plugin.name || plugin.id}?`)) {
+      uninstallBtn.disabled = true;
+      try {
+        await pluginsApi.uninstall(plugin.id);
+        requireElement('back-to-hub').click();
+        await renderPlugins();
+      } catch (err) {
+        renderError(err.message);
+        uninstallBtn.disabled = false;
+      }
+    }
+  };
+
+  dangerCard.append(dangerHeader, uninstallBtn);
+  content.append(dangerCard);
+
+  document.getElementById('detail-enable-toggle').onchange = async (e) => {
+    const checked = e.target.checked;
+    e.target.disabled = true;
+    try {
+      if (checked) {
+        await pluginsApi.setEnabled(plugin.id, true);
+      } else {
+        await pluginsApi.setEnabled(plugin.id, false);
+      }
+      await renderPlugins();
+      // Re-render detail to update state
+      const updated = currentSnapshot.plugins.find(p => p.id === plugin.id);
+      if (updated) renderPluginDetail(updated);
+    } catch (err) {
+      renderError(err.message);
+      e.target.disabled = false;
+      e.target.checked = !checked;
+    }
+  };
+
+  requireElement("hub-view").classList.remove("active");
+  requireElement("detail-view").classList.add("active");
+}
+
+function createConfigField(key, schema, value, prefix = "") {
+  const group = document.createElement("div");
+  group.className = "form-group";
+  group.dataset.fieldKey = prefix ? `${prefix}.${key}` : key;
+  group.dataset.schemaKey = key;
+  group.dataset.fieldType = schema.type;
+
+  const label = document.createElement("label");
+  label.textContent = schema.label || schema.title || key;
+  group.append(label);
+
+  if (schema.description) {
+    const help = document.createElement("div");
+    help.className = "help-text";
+    help.textContent = schema.description;
+    group.append(help);
+  }
+
+  if (schema.type === "boolean") {
+    const wrapper = document.createElement("div");
+    wrapper.className = "toggle-row";
+    wrapper.style.padding = "0";
+    wrapper.innerHTML = `
+      <label class="toggle-switch">
+        <input type="checkbox" class="config-input" ${value ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    `;
+    group.append(wrapper);
+  } else if (schema.type === "textarea") {
+    const input = document.createElement("textarea");
+    input.className = "form-input config-input";
+    input.value = value || schema.default || "";
+    group.append(input);
+  } else if (schema.type === "select") {
+    const select = document.createElement("select");
+    select.className = "form-input config-input";
+    for (const opt of (schema.options || [])) {
+      const option = document.createElement("option");
+      const optValue = typeof opt === "object" && opt !== null ? opt.value : opt;
+      const optLabel = typeof opt === "object" && opt !== null ? (opt.label || opt.value) : opt;
+      option.value = optValue;
+      option.textContent = optLabel;
+      if (value === optValue || (!value && schema.default === optValue)) option.selected = true;
+      select.append(option);
+    }
+    group.append(select);
+  } else if (schema.type === "multiSelect") {
+    const chips = document.createElement("div");
+    chips.className = "chips-container config-input-multi";
+    const selected = Array.isArray(value) ? value : (schema.default || []);
+    for (const opt of (schema.options || [])) {
+      const label = document.createElement("label");
+      label.className = "chip-label";
+      const optValue = typeof opt === "object" && opt !== null ? opt.value : opt;
+      const optLabel = typeof opt === "object" && opt !== null ? (opt.label || opt.value) : opt;
+      const isChecked = selected.includes(optValue);
+      label.innerHTML = `
+        <input type="checkbox" value="${optValue}" ${isChecked ? 'checked' : ''} />
+        <span class="chip-text">${optLabel}</span>
+      `;
+      chips.append(label);
+    }
+    group.append(chips);
+  } else if (schema.type === "number") {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "form-input config-input";
+    input.value = value !== undefined ? value : (schema.default || 0);
+    if (schema.min !== undefined) input.min = schema.min;
+    if (schema.max !== undefined) input.max = schema.max;
+    group.append(input);
+  } else if (schema.type === "time") {
+    const input = document.createElement("input");
+    input.type = "time";
+    input.className = "form-input config-input";
+    input.value = value || schema.default || "";
+    group.append(input);
+  } else if (schema.type === "list" && schema.itemSchema) {
+    const listEditor = document.createElement("div");
+    listEditor.className = "list-editor config-input-list";
+    listEditor.dataset.itemSchemaStr = JSON.stringify(schema.itemSchema);
+
+    const itemsContainer = document.createElement("div");
+    itemsContainer.className = "list-items-container";
+    itemsContainer.style.display = "flex";
+    itemsContainer.style.flexDirection = "column";
+    itemsContainer.style.gap = "12px";
+
+    const items = Array.isArray(value) ? value : (schema.default || []);
+
+    const renderItem = (itemValue, index) => {
+      const card = document.createElement("div");
+      card.className = "list-item-card";
+      card.dataset.index = index;
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "list-item-remove";
+      removeBtn.type = "button";
+      removeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      removeBtn.onclick = () => card.remove();
+      card.append(removeBtn);
+
+      for (const [subKey, subSchema] of Object.entries(schema.itemSchema)) {
+        card.append(createConfigField(subKey, subSchema, itemValue ? itemValue[subKey] : undefined, `${prefix ? prefix + '.' : ''}${key}[${index}]`));
+      }
+
+      return card;
+    };
+
+    items.forEach((item, idx) => itemsContainer.append(renderItem(item, idx)));
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "secondary compact";
+    addBtn.style.alignSelf = "flex-start";
+    addBtn.textContent = "+ Add Item";
+    addBtn.onclick = () => {
+      const newIdx = itemsContainer.children.length;
+      itemsContainer.append(renderItem({}, newIdx));
+    };
+
+    listEditor.append(itemsContainer, addBtn);
+    group.append(listEditor);
+  } else {
+    // default text
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "form-input config-input";
+    input.value = value || schema.default || "";
+    group.append(input);
+  }
+
+  return group;
+}
+
+function collectConfigData(schema, container = document.getElementById("plugin-config-form")) {
+  const data = {};
+
+  for (const [key, fieldSchema] of Object.entries(schema)) {
+    // Find the direct group for this key
+    const group = Array.from(container.children).find(g => g.classList.contains('form-group') && g.dataset.schemaKey === key);
+    if (!group) continue;
+
+    if (fieldSchema.type === "boolean") {
+      data[key] = group.querySelector('input[type="checkbox"]').checked;
+    } else if (fieldSchema.type === "number") {
+      data[key] = Number(group.querySelector('.config-input').value);
+    } else if (fieldSchema.type === "multiSelect") {
+      const chips = group.querySelectorAll('.chip-label input:checked');
+      data[key] = Array.from(chips).map(c => c.value);
+    } else if (fieldSchema.type === "list" && fieldSchema.itemSchema) {
+      const listData = [];
+      const itemCards = group.querySelectorAll(':scope > .list-editor > .list-items-container > .list-item-card');
+      itemCards.forEach(card => {
+        listData.push(collectConfigData(fieldSchema.itemSchema, card));
+      });
+      data[key] = listData;
+    } else {
+      data[key] = group.querySelector('.config-input').value;
+    }
+  }
+
+  return data;
 }
 
 function isPluginsSnapshot(value) {
   return Boolean(value && Array.isArray(value.plugins));
 }
+
+window.openpets = window.openpets || {};
+window.openpets.plugins = {
+  clearDetailSelection: () => {},
+  loadLocalPlugin: async () => {
+    try {
+      const result = await pluginsApi.loadLocal();
+      if (result && result.ok === false) {
+        renderError(result.error || "Failed to load local plugin");
+        return;
+      }
+      await renderPlugins();
+    } catch (err) {
+      renderError(err.message);
+    }
+  }
+};
 
 async function renderOnboarding() {
   const snapshot = await onboardingApi.snapshot();

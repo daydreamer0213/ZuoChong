@@ -37,6 +37,7 @@ export function createPluginsHtml(definition: PluginsWindowDefinition): string {
             cursor: pointer; user-select: none;
             border: 1px solid rgba(37, 99, 235, 0.34); background: rgba(255,255,255,0.76); color: #176df2;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(61, 99, 160, 0.08);
+            transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
           }
           button:hover:not(:disabled) { transform: translateY(-1px); }
           button:active:not(:disabled) { transform: scale(0.96); }
@@ -48,125 +49,97 @@ export function createPluginsHtml(definition: PluginsWindowDefinition): string {
           button.secondary { background: rgba(255,255,255,0.76); color: #176df2; border-color: rgba(37, 99, 235, 0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(61, 99, 160, 0.08); }
           button.secondary:hover:not(:disabled) { background: rgba(255,255,255,0.95); border-color: rgba(37, 99, 235, 0.55); box-shadow: inset 0 1px 0 rgba(255,255,255,1), 0 8px 18px rgba(61, 99, 160, 0.12); }
 
-          button.destructive { color: #dc2626; border-color: rgba(239, 68, 68, 0.42); }
-          button.destructive:hover:not(:disabled) { background: #fef2f2; border-color: rgba(239, 68, 68, 0.62); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08), inset 0 1px 0 rgba(255,255,255,0.94); }
+          button.compact { min-height: 32px; padding: 0 10px; font-size: 11px; border-radius: 9px; }
+          button.danger { color: #dc2626; border-color: rgba(220, 38, 38, 0.3); }
 
-          button:focus-visible, .discover-card:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+          /* Layout & Views */
+          .view-section { display: none; }
+          .view-section.active { display: block; }
 
-          /* Segmented Control / Tabs */
-          .tabs {
-            display: inline-flex; background: rgba(239, 246, 255, 0.5); border: 1px solid rgba(126, 161, 210, 0.28);
-            border-radius: 16px; padding: 4px; gap: 2px; margin-bottom: 32px;
-          }
-          .tab {
-            background: transparent; border: none; border-radius: 12px; color: #526483;
-            padding: 8px 20px; font-weight: 900; min-height: 36px; box-shadow: none; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px;
-          }
-          .tab:hover:not(:disabled) { background: rgba(255,255,255,0.4); color: #102149; transform: none; }
-          .tab.active { background: rgba(255,255,255,0.82); color: #176df2; box-shadow: 0 4px 12px rgba(61, 99, 160, 0.08), inset 0 1px 0 rgba(255,255,255,0.9); border: 1px solid rgba(126, 161, 210, 0.34); }
-          .tab.active:hover:not(:disabled) { background: rgba(255,255,255,0.9); }
+          /* Plugin Hub Grid */
+          .plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 24px; }
 
-          [hidden] { display: none !important; }
-          /* Layouts */
-          .layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; align-items: start; }
+          /* Cards */
+          .plugin-card { min-height: 248px; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; border: 1px solid rgba(126, 161, 210, 0.44); border-radius: 20px; background: rgba(255,255,255,0.76); box-shadow: 0 16px 38px rgba(61, 99, 160, 0.1), inset 0 1px 0 rgba(255,255,255,0.94); padding: 16px; }
+          .plugin-card.featured { border-color: rgba(37, 99, 235, 0.36); background: linear-gradient(180deg, rgba(239, 247, 255, 0.92), rgba(255,255,255,0.78)); }
+          .plugin-card.disabled { opacity: 0.74; filter: grayscale(0.5); }
+          .plugin-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .plugin-icon { width: 48px; height: 48px; display: grid; place-items: center; border: 1px solid rgba(126, 161, 210, 0.34); border-radius: 16px; background: rgba(255,255,255,0.76); box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 20px rgba(61, 99, 160, 0.08); font-size: 24px; }
+          .plugin-icon img, .plugin-icon svg { width: 28px; height: 28px; object-fit: contain; }
+          .plugin-card h2 { margin: 0; font-size: 20px; color: #102149; }
+          .plugin-card p { flex: 1 1 auto; margin: 0; color: #526483; line-height: 1.35; font-size: 14px; }
 
-          /* Panels & Cards */
-          .panel {
-            background: rgba(255,255,255,0.76); border: 1px solid rgba(126, 161, 210, 0.44);
-            border-radius: 20px; padding: 24px; box-shadow: 0 16px 38px rgba(61, 99, 160, 0.1), inset 0 1px 0 rgba(255,255,255,0.94);
-          }
+          /* Status Pills */
+          .status-pill { height: 30px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 1px solid rgba(126, 161, 210, 0.36); border-radius: 10px; padding: 0 10px; background: rgba(255,255,255,0.68); color: #526483; font-size: 10px; font-weight: 900; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.05em; }
+          .status-pill.success { color: #047857; background: rgba(236, 253, 245, 0.86); border-color: rgba(16, 185, 129, 0.28); }
+          .status-pill.info { color: #176df2; background: rgba(239, 246, 255, 0.9); border-color: rgba(37, 99, 235, 0.28); }
+          .status-pill.error { color: #b91c1c; background: rgba(254, 242, 242, 0.9); border-color: rgba(248, 113, 113, 0.32); }
+          .status-pill.muted { color: #64748b; background: rgba(248, 250, 252, 0.82); }
 
-          .plugin-list { display: flex; flex-direction: column; gap: 8px; }
-
-          /* Sidebar Cards */
-          .plugin-card {
-            display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left;
-            padding: 16px; border-radius: 16px; background: rgba(255,255,255,0.5);
-            border: 1px solid rgba(126, 161, 210, 0.28); cursor: pointer;
-            box-shadow: none;
-          }
-          .plugin-card:hover { background: rgba(255,255,255,0.8); border-color: rgba(126, 161, 210, 0.44); transform: none; }
-          .plugin-card:active { transform: scale(0.98); }
-          .plugin-card.active {
-            background: linear-gradient(180deg, rgba(239, 247, 255, 0.92), rgba(255,255,255,0.78)); border-color: rgba(37, 99, 235, 0.36);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.94);
-          }
-
-          /* Discover Grid */
-          #plugins-discover-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-          .discover-card {
-            display: flex; flex-direction: column; padding: 20px; border-radius: 20px;
-            background: rgba(255,255,255,0.76); border: 1px solid rgba(126, 161, 210, 0.44);
-            box-shadow: 0 16px 38px rgba(61, 99, 160, 0.1), inset 0 1px 0 rgba(255,255,255,0.94);
-          }
-          .discover-card:hover {
-            border-color: rgba(37, 99, 235, 0.36); transform: translateY(-2px);
-            box-shadow: 0 20px 42px rgba(61, 99, 160, 0.15), inset 0 1px 0 rgba(255,255,255,0.94);
-          }
-          .discover-card .actions { margin-top: auto; padding-top: 20px; }
+          /* Actions */
+          .plugin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
+          .plugin-actions.stacked { grid-template-columns: 1fr; gap: 8px; }
+          .plugin-actions button:only-child { grid-column: 1 / -1; }
 
           /* Detail View */
-          .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid rgba(126, 161, 210, 0.28); }
-          .detail-title { display: flex; flex-direction: column; gap: 8px; }
-          .detail-meta { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #63708f; }
+          .detail-toolbar { display: flex; justify-content: flex-start; margin-bottom: 24px; padding: 4px 2px 0; }
+          .detail-pane { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+          .detail-header { display: flex; align-items: flex-start; gap: 20px; margin-bottom: 16px; }
+          .detail-header-text { flex: 1 1 auto; }
+          .detail-header-text .eyebrow { margin: 0 0 4px; color: #2478ff; font-weight: 900; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
 
-          /* Form Elements */
-          .config-panel { background: rgba(239, 246, 255, 0.5); border-radius: 16px; padding: 24px; border: 1px solid rgba(126, 161, 210, 0.28); margin-bottom: 32px; }
-          .field { display: grid; gap: 8px; margin-bottom: 20px; }
-          .field:last-child { margin-bottom: 0; }
-          label { color: #102149; font-weight: 900; font-size: 14px; }
-          input, select, textarea {
-            border: 1px solid rgba(126, 161, 210, 0.54); border-radius: 11px;
-            background: rgba(255,255,255,0.82); color: #17284f; padding: 10px 14px;
-            font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; outline: none;
-          }
-          input:focus, select:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
-          textarea { min-height: 100px; resize: vertical; line-height: 1.5; }
+          /* Config Sections */
+          .config-card { box-sizing: border-box; border: 1px solid rgba(126, 161, 210, 0.44); border-radius: 20px; background: rgba(255,255,255,0.76); box-shadow: 0 16px 38px rgba(61, 99, 160, 0.1), inset 0 1px 0 rgba(255,255,255,0.94); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+          .config-section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 4px; }
+          .config-section-header span:first-child { display: grid; gap: 4px; }
+          .config-section-header small { color: #2478ff; font-size: 11px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; }
+          .config-section-header strong { color: #102149; font-size: 18px; line-height: 1.2; }
 
-          /* Status & Badges */
-          .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
-          .status-dot.enabled { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
-          .status-dot.broken { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+          /* Form Controls */
+          .form-group { display: flex; flex-direction: column; gap: 6px; }
+          .form-group label { color: #102149; font-weight: 700; font-size: 14px; }
+          .form-group .help-text { color: #63708f; font-size: 12px; margin-bottom: 4px; }
+          .form-input { width: 100%; box-sizing: border-box; min-height: 38px; border: 1px solid rgba(126, 161, 210, 0.54); border-radius: 11px; background: rgba(255,255,255,0.82); color: #17284f; padding: 0 12px; outline: none; }
+          .form-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+          textarea.form-input { padding: 10px 12px; min-height: 80px; resize: vertical; font-family: inherit; }
 
-          .pill {
-            height: 30px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
-            border: 1px solid rgba(126, 161, 210, 0.36); border-radius: 10px; padding: 0 10px;
-            background: rgba(255,255,255,0.68); color: #526483; font-size: 10px; font-weight: 900; white-space: nowrap;
-          }
-          .pill.success { color: #047857; background: rgba(236, 253, 245, 0.86); border-color: rgba(16, 185, 129, 0.28); }
-          .pill.error { color: #b91c1c; background: rgba(254, 242, 242, 0.9); border-color: rgba(248, 113, 113, 0.32); }
+          /* Toggle Row */
+          .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; }
+          .toggle-row-text { display: flex; flex-direction: column; gap: 2px; }
+          .toggle-row-text strong { color: #102149; font-size: 14px; }
+          .toggle-row-text small { color: #63708f; font-size: 12px; }
 
-          /* Layout Utils */
-          .actions { display: flex; flex-wrap: wrap; gap: 12px; }
-          .actions-right { margin-left: auto; }
-          .danger-zone {
-            margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(239, 68, 68, 0.2);
-            display: flex; justify-content: space-between; align-items: center;
-          }
-          .empty-state {
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            padding: 64px 24px; text-align: center; gap: 16px;
-          }
-          .empty-state h3 { margin: 0; color: #102149; }
-          .empty-state p { max-width: 400px; }
+          /* CSS Toggle Switch */
+          .toggle-switch { position: relative; width: 44px; height: 24px; display: inline-block; }
+          .toggle-switch input { opacity: 0; width: 0; height: 0; }
+          .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .2s; border-radius: 24px; }
+          .toggle-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 2px; bottom: 2px; background-color: white; transition: .2s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+          input:checked + .toggle-slider { background-color: #10b981; }
+          input:focus + .toggle-slider { box-shadow: 0 0 1px #10b981; }
+          input:checked + .toggle-slider:before { transform: translateX(20px); }
 
-          /* Toggle Switch */
-          .toggle {
-            position: relative; display: inline-block; width: 44px; height: 24px; min-height: 24px; padding: 0;
-            background: rgba(126, 161, 210, 0.28); border: 1px solid rgba(126, 161, 210, 0.44); border-radius: 999px; cursor: pointer;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
-          }
-          .toggle.enabled { background: #10b981; border-color: #059669; }
-          .toggle::after {
-            content: ''; position: absolute; top: 1px; left: 1px; width: 20px; height: 20px;
-            background: #fff; border-radius: 50%;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-          }
-          .toggle.enabled::after { transform: translateX(20px); }
+          /* Chips / MultiSelect */
+          .chips-container { display: flex; flex-wrap: wrap; gap: 8px; }
+          .chip-label { display: inline-flex; align-items: center; cursor: pointer; }
+          .chip-label input { position: absolute; opacity: 0; width: 0; height: 0; }
+          .chip-text { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid rgba(126, 161, 210, 0.44); background: rgba(255,255,255,0.76); color: #526483; font-size: 13px; font-weight: 600; transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease; user-select: none; }
+          .chip-label input:checked + .chip-text { background: rgba(239, 246, 255, 0.9); border-color: rgba(37, 99, 235, 0.5); color: #176df2; box-shadow: inset 0 1px 0 rgba(255,255,255,0.9); }
 
-          #plugins-status { margin-bottom: 24px; font-size: 14px; color: #63708f; }
-          #plugins-status.error { color: #b91c1c; }
-          @media (prefers-reduced-motion: reduce) { button:hover:not(:disabled), button:active:not(:disabled) { transform: none; } }
+          /* List Editor */
+          .list-editor { display: flex; flex-direction: column; gap: 12px; }
+          .list-item-card { border: 1px solid rgba(126, 161, 210, 0.3); border-radius: 16px; background: rgba(255,255,255,0.5); padding: 16px; position: relative; display: flex; flex-direction: column; gap: 12px; }
+          .list-item-remove { position: absolute; top: 12px; right: 12px; background: none; border: none; box-shadow: none; color: #94a3b8; padding: 4px; min-height: auto; border-radius: 6px; }
+          .list-item-remove:hover { background: rgba(254, 242, 242, 0.8); color: #ef4444; }
+
+          /* Dev Mode Toggle */
+          .dev-toggle-container { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #64748b; margin-top: 24px; justify-content: flex-end; }
+
+          /* Spinner */
+          @keyframes spin { to { transform: rotate(360deg); } }
+          .loading-icon { animation: spin 0.85s linear infinite; }
+
+          /* Messages */
+          .empty-state { text-align: center; padding: 48px; color: #64748b; }
         </style>
       </head>
       <body data-openpets-view="plugins">
@@ -176,26 +149,36 @@ export function createPluginsHtml(definition: PluginsWindowDefinition): string {
               <h1>${escapeHtml(definition.heading)}</h1>
               <p>${escapeHtml(definition.description)}</p>
             </div>
-            <button id="plugins-refresh" type="button">Refresh</button>
+            <button id="plugins-refresh" type="button" class="secondary">Refresh</button>
           </header>
-          <nav class="tabs" aria-label="Plugin sections">
-            <button id="plugins-installed-tab" class="tab active" type="button">Installed</button>
-            <button id="plugins-discover-tab" class="tab" type="button">Discover</button>
-            <button id="plugins-developer-tab" class="tab" type="button">Developer</button>
-          </nav>
+
           <section id="plugins-status" class="muted" aria-live="polite">Loading plugins…</section>
-          <section id="plugins-installed-view" class="layout">
-            <div class="panel"><div id="plugins-list" class="plugin-list"></div></div>
-            <div id="plugins-detail" class="panel empty">Select a plugin to configure it.</div>
-          </section>
-          <section id="plugins-discover-view" class="panel" hidden>
-            <div id="plugins-discover-list" class="plugin-list"></div>
-          </section>
-          <section id="plugins-developer-view" class="panel" hidden>
-            <h2>Developer plugins</h2>
-            <p class="muted">Load a local manifest-only plugin folder for development. OpenPets snapshots only openpets.plugin.json into app data.</p>
-            <button id="plugins-load-local" class="primary" type="button" style="margin-top: 24px;">Load local plugin folder</button>
-          </section>
+
+          <div id="hub-view" class="view-section active">
+            <div class="plugin-grid" id="plugins-grid">
+              <!-- Cards rendered by preload -->
+            </div>
+
+            <div class="dev-toggle-container">
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="dev-mode-toggle" />
+                Developer mode
+              </label>
+            </div>
+
+            <div id="dev-actions" style="display: none; margin-top: 16px; text-align: right;">
+              <button id="plugins-load-local" class="secondary">Load local plugin folder</button>
+            </div>
+          </div>
+
+          <div id="detail-view" class="view-section">
+            <div class="detail-toolbar">
+              <button id="back-to-hub" class="secondary compact">Back to plugins</button>
+            </div>
+            <div class="detail-pane" id="plugin-detail-content">
+              <!-- Detail content rendered by preload -->
+            </div>
+          </div>
         </main>
       </body>
     </html>`;

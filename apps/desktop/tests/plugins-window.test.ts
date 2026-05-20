@@ -8,9 +8,8 @@ assert.match(html, /data-openpets-view="plugins"/);
 assert.match(html, /Content-Security-Policy/);
 assert.doesNotMatch(html, /script-src/);
 assert.doesNotMatch(html, /https:\/\//);
-assert.match(html, /id="plugins-list"/);
-assert.match(html, /id="plugins-detail"/);
-assert.match(html, /id="plugins-discover-tab"/);
-assert.match(html, /id="plugins-discover-view"/);
+assert.match(html, /id="plugins-grid"/);
+assert.match(html, /id="detail-view"/);
+assert.match(html, /id="hub-view"/);
 
 console.error("Plugins window validation passed.");

@@ -63,16 +63,17 @@ if (!gotSingleInstanceLock) {
     }
     refreshTrayMenu();
     void (async () => {
-      const service = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog);
-      await service.start();
       const roots = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_ROOTS);
       const paths = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS);
+      const devPluginMode = roots.length > 0 || paths.length > 0;
+      const service = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode);
+      await service.start();
       for (const path of paths) {
         const result = await service.loadLocalPath(path, { autoApprove: true });
         if (!result.ok) logError("app", "dev plugin path load failed", new Error(result.error));
       }
       if (roots.length > 0) {
-        const results = await service.loadLocalRoots(roots, { autoApprove: true });
+        const results = await service.loadLocalRoots(roots, { autoApprove: true, pruneStale: true });
         for (const result of results) if (!result.ok) logError("app", "dev plugin root load failed", new Error(`${result.path}: ${result.error}`));
       }
     })().catch((error) => logError("app", "plugin service startup failed", error));

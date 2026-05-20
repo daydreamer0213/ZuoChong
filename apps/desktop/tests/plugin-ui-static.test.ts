@@ -30,6 +30,22 @@ assert.doesNotMatch(preloadSource, /plugins-load-local",\s*[^)]/);
 assert.doesNotMatch(preloadSource, /manifestPath/);
 assert.doesNotMatch(preloadSource, /installPath/);
 assert.doesNotMatch(preloadSource, /openpets:plugins-install-catalog",\s*[^)]+,\s*[^)]/);
+
+// Ensure no plugin tabs remain
+assert.doesNotMatch(preloadSource, /plugin-tabs/);
+assert.doesNotMatch(preloadSource, /plugin-tab-content/);
+
+// Ensure developer load button is bound
+assert.match(preloadSource, /loadLocalBtn\.onclick/);
+
+// Ensure option object label/value handling exists
+assert.match(preloadSource, /opt\.value/);
+assert.match(preloadSource, /opt\.label/);
+
+// Ensure list item collection avoids nested data loss
+assert.match(preloadSource, /dataset\.schemaKey/);
+assert.match(preloadSource, /Array\.from\(container\.children\)/);
+
 assert.match(jsHostSource, /OpenPetsPlugin[\s\S]*register/);
 assert.match(jsHostSource, /start\(sdk\)/);
 assert.match(jsHostSource, /__openPetsRegisteredPlugin[\s\S]*stop/);
