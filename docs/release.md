@@ -10,6 +10,148 @@ This guide is for an AI agent creating a new OpenPets desktop release from a loc
 - Root command: `pnpm release:desktop`
 - Update checker expects GitHub release tags like `v2.0.0`.
 
+## Current plugin platform release plan
+
+The next end-user release is a **desktop + web plugin catalog release**, not an npm package release by default.
+
+Release goals:
+
+1. Ship the desktop JavaScript plugin runtime and polished Plugins UI.
+2. Publish the official plugin catalog with exactly these first-party plugins:
+   - Daily Reminders (`openpets.daily-reminders`)
+   - Pomodoro (`openpets.pomodoro`)
+   - GitHub Notifications (`openpets.github-notifications`)
+3. Remove legacy sample plugins from public discovery:
+   - Break Reminder
+   - Eye Rest
+   - Focus Check-in
+   - Hydration Buddy
+   - Pomodoro Buddy
+4. Keep the old v1 plugin catalog available as an empty compatibility catalog.
+5. Release desktop artifacts through GitHub Releases so app update checks see the new version.
+
+Do **not** publish npm packages for this release unless a public npm package changed in a way that must be distributed through npm. Desktop can have a newer version than the npm packages. That is acceptable for desktop-only features like Electron UI, desktop runtime, packaging, and plugin catalog support.
+
+## Release workstreams for the plugin release
+
+### A. Desktop app release
+
+Desktop release includes:
+
+- JavaScript plugin host and SDK preload.
+- Manifest v2/catalog v2 support.
+- Official plugin install/update/uninstall support.
+- Polished Plugins hub/configuration UI.
+- Local dev plugin workflow cleanup.
+- Packaging contract updates for plugin SDK preload.
+
+Required validation before desktop release:
+
+```bash
+pnpm --filter @open-pets/desktop check
+pnpm --filter @open-pets/desktop test
+pnpm --filter @open-pets/desktop package:dir
+```
+
+Manual desktop QA:
+
+1. Run `pnpm dev:desktop:plugins`.
+2. Open tray → Plugins.
+3. Confirm only Daily Reminders, Pomodoro, and GitHub Notifications appear in dev mode.
+4. Confirm old sample plugins do not appear.
+5. Enable/configure Daily Reminders with reminder cards, not JSON.
+6. Run Daily Reminders test command.
+7. Configure Pomodoro timing/messages/reactions and run start/pause/stop commands.
+8. Configure GitHub public repositories; verify no token/OAuth UI exists.
+9. Confirm GitHub plugin only asks for `api.github.com` network approval.
+10. Restart desktop and confirm enabled plugins reload without broken state.
+11. Inspect logs for plugin errors.
+
+### B. Web plugin catalog release
+
+Web release includes:
+
+- `web/plugins/official/**` source plugins.
+- `web/public/plugins/catalog.v2.json` with the three official plugins.
+- `web/public/plugins/catalog.v1.json` with an empty plugin list.
+- Removal of legacy sample plugin manifests.
+- Updated `web/docs/plugin-publishing.md`.
+
+Required validation from `web/`:
+
+```bash
+node scripts/sync-plugins.js --dry-run --skip-r2
+bun run generate
+```
+
+Publishing sequence:
+
+1. From `web/`, upload plugin ZIPs and regenerate catalogs:
+   ```bash
+   bun run sync:plugins
+   ```
+2. Confirm `public/plugins/catalog.v2.json` has only the three official plugins.
+3. Confirm `public/plugins/catalog.v1.json` has `plugins: []`.
+4. Deploy web:
+   ```bash
+   bun run deploy
+   ```
+5. Verify live endpoints:
+   - `https://openpets.dev/plugins/catalog.v2.json`
+   - `https://openpets.dev/plugins/catalog.v1.json`
+   - each `https://zip.openpets.dev/plugins/<plugin-id>.zip`
+
+### C. GitHub Release notes
+
+Suggested release title:
+
+```txt
+OpenPets v<version> — Plugins
+```
+
+Suggested release notes:
+
+```md
+## New: OpenPets Plugins
+
+OpenPets now includes a first-party plugin platform for optional desktop companion behaviors.
+
+### Included plugins
+
+- Daily Reminders — recurring local reminders with custom messages, reactions, days, and intervals.
+- Pomodoro — focus/break sessions with pet feedback and controls.
+- GitHub Notifications — public repository release and failed-workflow notifications. No GitHub login, token, or private repository access is used.
+
+### Plugin management
+
+- New polished Plugins window with install, enable, configure, update, reload, and uninstall actions.
+- Friendly plugin configuration UI; no JSON editing required.
+- Plugin permissions and network hosts are explicit.
+- JavaScript plugins run in a sandboxed renderer with a narrow OpenPets SDK.
+
+### Developer notes
+
+- Local plugin development is available through explicit developer mode and `pnpm dev:desktop:plugins`.
+- Legacy sample plugins were removed from discovery.
+
+### Known limitations
+
+- GitHub Notifications supports public repositories only in this release.
+- Desktop artifacts are currently unsigned, so OS security warnings may appear.
+```
+
+### D. NPM release decision
+
+Default decision for this plugin release: **skip npm publishing**.
+
+Only do an npm release if one of these is true:
+
+- A public npm package under `packages/*` changed and users need the published package update.
+- CLI/MCP/client protocol changes are required by the desktop release and must be distributed to external users.
+- Existing published packages are incompatible with the desktop release in a way that affects normal use.
+
+If npm is needed, publish all public npm packages together using the NPM package release section below. Do not partially publish a subset unless the release tooling and package dependency versions are intentionally changed to support that.
+
 ## What the release script does
 
 `pnpm release:desktop -- --yes` performs these checks/actions:
@@ -89,6 +231,8 @@ Do not use `0.0.0` or prerelease tags unless the release script is intentionally
 ### 2. Bump package versions
 
 For a **desktop-only release** that changes only the Electron app and GitHub desktop artifacts, bump `apps/desktop/package.json` only. Do not bump or publish public npm packages unless their package contents changed.
+
+Desktop-only releases may intentionally use a different version than the root workspace and public npm packages. The GitHub desktop release tag follows `apps/desktop/package.json`, and the app update checker reads GitHub Releases, not npm.
 
 For a full workspace/npm release, update all workspace package versions together so bundled packages and npm packages report the same release version.
 
