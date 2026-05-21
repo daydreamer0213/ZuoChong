@@ -8,6 +8,7 @@ export interface OpenCodeMcpEntry {
   readonly type: "local";
   readonly command: readonly string[];
   readonly enabled: true;
+  readonly environment?: Record<string, string>;
 }
 
 export interface OpenCodePreviewOptions {
@@ -15,6 +16,7 @@ export interface OpenCodePreviewOptions {
   readonly petId?: string;
   readonly commandMode?: OpenCodeCommandMode;
   readonly cliEntryPath?: string;
+  readonly environment?: Record<string, string>;
 }
 
 export function validateOpenPetsPetArg(value: string): string {
@@ -27,11 +29,12 @@ export function validateOpenPetsPetArg(value: string): string {
 export function buildOpenCodeMcpEntry(options: OpenCodePreviewOptions): OpenCodeMcpEntry {
   const petArgs = options.petId === undefined ? [] : ["--pet", validateOpenPetsPetArg(options.petId)];
   const mode = options.commandMode ?? "published";
+  const environment = options.environment && Object.keys(options.environment).length > 0 ? { environment: options.environment } : {};
   if (mode === "local" || mode === "bundled") {
     if (!options.cliEntryPath || !isAbsolute(options.cliEntryPath)) throw new Error("OpenCode local MCP preview requires an absolute CLI entry path.");
-    return { type: "local", command: ["node", options.cliEntryPath, "mcp", ...petArgs], enabled: true };
+    return { type: "local", command: ["node", options.cliEntryPath, "mcp", ...petArgs], enabled: true, ...environment };
   }
-  return { type: "local", command: ["npx", "-y", `${openPetsCliPackageName}@${options.cliVersion}`, "mcp", ...petArgs], enabled: true };
+  return { type: "local", command: ["npx", "-y", `${openPetsCliPackageName}@${options.cliVersion}`, "mcp", ...petArgs], enabled: true, ...environment };
 }
 
 export function buildOpenCodeInstructionPath(scope: "project" | "global", configDir?: string): string {

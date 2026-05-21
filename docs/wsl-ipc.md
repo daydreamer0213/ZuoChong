@@ -58,6 +58,25 @@ export OPENPETS_DISCOVERY_FILE="/mnt/c/Users/<WindowsUser>/AppData/Roaming/OpenP
 npx -y @open-pets/mcp
 ```
 
+If you use OpenCode, prefer putting the discovery-file override directly in the OpenCode MCP entry. OpenCode uses the `environment` key for per-MCP environment variables:
+
+```jsonc
+{
+  "mcp": {
+    "openpets": {
+      "type": "local",
+      "command": ["npx", "-y", "@open-pets/cli@latest", "mcp"],
+      "enabled": true,
+      "environment": {
+        "OPENPETS_DISCOVERY_FILE": "/mnt/c/Users/<WindowsUser>/AppData/Roaming/OpenPets/runtime/ipc.json"
+      }
+    }
+  }
+}
+```
+
+This avoids relying on OpenCode inheriting the shell environment that launched it.
+
 ## Environment variables reference
 
 | Variable | Purpose | Example |
@@ -116,3 +135,13 @@ npx -y @open-pets/mcp
 ```
 
 Then use your MCP client's `openpets_status` tool to confirm the desktop app is reachable.
+
+For NAT mode, check raw TCP reachability from WSL before testing MCP:
+
+```bash
+cat "$OPENPETS_DISCOVERY_FILE"
+nc -vz $(jq -r '.endpoint | sub("^tcp://"; "") | split(":")[0]' "$OPENPETS_DISCOVERY_FILE") \
+  $(jq -r '.endpoint | split(":")[-1]' "$OPENPETS_DISCOVERY_FILE")
+```
+
+If `cat` works but `openpets_status` still says IPC is unavailable, confirm the OpenCode MCP entry has `environment.OPENPETS_DISCOVERY_FILE` set and restart OpenCode.

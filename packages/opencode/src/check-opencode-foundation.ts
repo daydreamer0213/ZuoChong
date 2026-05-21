@@ -32,6 +32,7 @@ try {
 
   assert.deepEqual(formatOpenCodeMcpConfig({ cliVersion: "0.0.0", petId: "fixer" }), { mcp: { openpets: { type: "local", command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp", "--pet", "fixer"], enabled: true } } });
   assert.deepEqual(buildOpenCodeMcpEntry({ cliVersion: "0.0.0" }), { type: "local", command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp"], enabled: true });
+  assert.deepEqual(buildOpenCodeMcpEntry({ cliVersion: "0.0.0", environment: { OPENPETS_DISCOVERY_FILE: "/mnt/c/Users/alvin/AppData/Roaming/OpenPets/runtime/ipc.json" } }), { type: "local", command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp"], enabled: true, environment: { OPENPETS_DISCOVERY_FILE: "/mnt/c/Users/alvin/AppData/Roaming/OpenPets/runtime/ipc.json" } });
   assert.deepEqual(buildOpenCodeMcpEntry({ cliVersion: "0.0.0", commandMode: "local", cliEntryPath: join(root, "cli.js"), petId: "fixer" }), { type: "local", command: ["node", join(root, "cli.js"), "mcp", "--pet", "fixer"], enabled: true });
   assert.throws(() => buildOpenCodeMcpEntry({ cliVersion: "0.0.0", commandMode: "local", cliEntryPath: "relative.js" }));
   assert.throws(() => buildOpenCodeMcpEntry({ cliVersion: "0.0.0", petId: "bad/pet" }));
@@ -63,6 +64,7 @@ try {
   const expected = { cliVersion: "0.0.0", petId: "fixer" };
   assert.equal(classifyOpenCodeMcpStatus([], expected).status, "not_installed");
   assert.equal(classifyOpenCodeMcpStatus([{ mcp: { openpets: buildOpenCodeMcpEntry(expected) } }], expected).status, "installed");
+  assert.equal(classifyOpenCodeMcpStatus([{ mcp: { openpets: { ...buildOpenCodeMcpEntry(expected), environment: { OPENPETS_DISCOVERY_FILE: "/mnt/c/Users/alvin/AppData/Roaming/OpenPets/runtime/ipc.json" } } } }], expected).status, "installed");
   assert.equal(classifyOpenCodeMcpStatus([{ mcp: { openpets: { command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp", "--pet", "fixer"], enabled: true, type: "local" } } }], expected).status, "installed");
   assert.equal(classifyOpenCodeMcpStatus([{ mcp: { openpets: buildOpenCodeMcpEntry({ cliVersion: "0.0.0", petId: "helper" }) } }], expected).status, "needs_update");
   assert.equal(classifyOpenCodeMcpStatus([{ mcp: { openpets: buildOpenCodeMcpEntry({ cliVersion: "0.0.0", commandMode: "local", cliEntryPath: join(root, "cli.js"), petId: "helper" }) } }], { cliVersion: "0.0.0", commandMode: "local", cliEntryPath: join(root, "cli.js"), petId: "fixer" }).status, "needs_update");
@@ -243,10 +245,10 @@ try {
   assert.throws(() => prepareOpenCodeGlobalSetup({ configDir: globalCustom, petId: "fixer", cliVersion: "0.0.0" }));
   assert.throws(() => prepareOpenCodeGlobalRemove(globalCustom));
 
-  const globalCustomMcpFields = join(root, "global-custom-mcp-fields");
-  mkdirSync(globalCustomMcpFields);
-  writeFileSync(join(globalCustomMcpFields, "opencode.jsonc"), JSON.stringify({ mcp: { openpets: { type: "local", command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp", "--pet", "fixer"], enabled: true, environment: { OPENPETS_DEBUG: "1" } } } }), "utf8");
-  assert.throws(() => prepareOpenCodeGlobalSetup({ configDir: globalCustomMcpFields, petId: "fixer", cliVersion: "0.0.0" }));
+  const globalManagedMcpEnvironment = join(root, "global-managed-mcp-environment");
+  mkdirSync(globalManagedMcpEnvironment);
+  writeFileSync(join(globalManagedMcpEnvironment, "opencode.jsonc"), JSON.stringify({ mcp: { openpets: { type: "local", command: ["npx", "-y", "@open-pets/cli@0.0.0", "mcp", "--pet", "fixer"], enabled: true, environment: { OPENPETS_DEBUG: "1" } } } }), "utf8");
+  assert.doesNotThrow(() => prepareOpenCodeGlobalSetup({ configDir: globalManagedMcpEnvironment, petId: "fixer", cliVersion: "0.0.0" }));
 
   const globalSymlink = join(root, "global-symlink");
   const globalOutside = join(root, "global-outside");

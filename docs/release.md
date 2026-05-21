@@ -10,30 +10,63 @@ This guide is for an AI agent creating a new OpenPets desktop release from a loc
 - Root command: `pnpm release:desktop`
 - Update checker expects GitHub release tags like `v2.0.0`.
 
-## Current desktop patch release plan
+## Current WSL/NPM patch release plan
 
-The next end-user release is a **desktop-only macOS packaging patch** for issue #30. Do **not** publish npm packages for this patch.
+The next end-user release is a **public npm package patch** for issue #3. Desktop `v2.1.1` already advertises WSL NAT TCP endpoints correctly, but WSL/OpenCode uses `npx @open-pets/cli`, and npm `latest` was still `2.0.7`, whose client rejects non-loopback TCP discovery endpoints.
 
 Release goals:
 
-1. Ship a new desktop GitHub Release with `apps/desktop/package.json` bumped to the next patch version.
-2. Build with optional desktop artifacts included via `pnpm release:desktop -- --yes --include-optional`.
-3. Keep npm packages unchanged because this is an Electron packaging/release artifact fix only.
-4. Confirm the macOS app bundle passes local `codesign --verify --deep --strict` before publishing.
+1. Publish all public npm packages at `2.1.1` so `npx -y @open-pets/cli@latest` includes the WSL NAT client fix.
+2. Keep the existing desktop GitHub Release `v2.1.1`; do not create another desktop release for this npm-only patch unless desktop code changes again.
+3. Preserve desktop package version `2.1.1` and align public package versions to `2.1.1`.
+4. Document OpenCode's per-MCP `environment` key for setting `OPENPETS_DISCOVERY_FILE` explicitly.
+5. Verify from a Windows + WSL lab that a WSL client can read the Windows discovery file and reach the advertised TCP endpoint.
 
-Suggested patch release notes:
+Suggested issue response:
 
 ```md
-## Fixed
+I reproduced the remaining failure. Windows OpenPets is advertising the TCP endpoint correctly and WSL can read `ipc.json`, but `npx -y @open-pets/cli@latest` was still resolving to npm `2.0.7`, whose client rejected private WSL NAT endpoints like `tcp://172.x.x.x:<port>` before connecting.
 
-- Fixed macOS release packaging so app bundles are ad-hoc signed when a Developer ID certificate is unavailable.
-- This addresses the misleading macOS Gatekeeper dialog that can say OpenPets is damaged and can't be opened on Apple Silicon/Sequoia.
-- Rebuilt desktop artifacts with optional packages included: macOS ZIP, Windows portable, Linux DEB/RPM, and Linux tar.gz.
+The fix is to publish the public npm packages at `2.1.1`, matching the desktop release. After npm updates, restart OpenCode or clear any npx cache and use the OpenCode MCP `environment` field for `OPENPETS_DISCOVERY_FILE`.
+```
 
-## Known limitations
+Required validation:
 
-- macOS artifacts are ad-hoc signed but not Developer ID notarized yet, so Gatekeeper may still require a first-open confirmation.
-- Windows artifacts are unsigned, so SmartScreen warnings may appear.
+```bash
+pnpm install
+pnpm build
+pnpm check
+pnpm release:npm -- --dry-run
+```
+
+Publish command:
+
+```bash
+pnpm release:npm -- --yes
+```
+
+Post-publish verification:
+
+```bash
+npm view @open-pets/client@2.1.1 version
+npm view @open-pets/cli@2.1.1 version
+npx -y @open-pets/cli@2.1.1 --help
+```
+
+WSL lab verification should include a discovery file with a private Windows endpoint such as:
+
+```json
+{
+  "endpoint": "tcp://10.211.55.3:37645",
+  "platform": "win32"
+}
+```
+
+and then:
+
+```bash
+OPENPETS_DISCOVERY_FILE=/mnt/c/Users/<WindowsUser>/AppData/Roaming/OpenPets/runtime/ipc.json \
+  npx -y @open-pets/cli@2.1.1 status
 ```
 
 ## Previous plugin platform release plan

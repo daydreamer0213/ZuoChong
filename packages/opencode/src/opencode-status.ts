@@ -51,7 +51,7 @@ export function classifyOpenCodePluginStatus(configs: readonly Record<string, un
 export function isManagedOpenPetsMcpEntry(value: unknown, expectedCommand?: readonly string[]): boolean {
   if (!isRecord(value) || value.type !== "local" || value.enabled !== true || !Array.isArray(value.command)) return false;
   const keys = Object.keys(value).sort();
-  if (keys.length !== 3 || keys[0] !== "command" || keys[1] !== "enabled" || keys[2] !== "type") return false;
+  if (!hasManagedMcpKeys(keys) || !hasValidMcpEnvironment(value.environment)) return false;
   return isManagedOpenPetsMcpCommand(value.command, expectedCommand);
 }
 
@@ -113,8 +113,19 @@ function isPetPluginOptions(value: unknown): boolean {
 function isSameMcpEntry(value: unknown, expected: { readonly type: "local"; readonly command: readonly string[]; readonly enabled: true }): boolean {
   if (!isRecord(value) || value.type !== expected.type || value.enabled !== expected.enabled || !Array.isArray(value.command)) return false;
   const keys = Object.keys(value).sort();
-  if (keys.length !== 3 || keys[0] !== "command" || keys[1] !== "enabled" || keys[2] !== "type") return false;
+  if (!hasManagedMcpKeys(keys) || !hasValidMcpEnvironment(value.environment)) return false;
   return value.command.length === expected.command.length && value.command.every((part, index) => part === expected.command[index]);
+}
+
+function hasManagedMcpKeys(keys: readonly string[]): boolean {
+  return keys.length === 3 && keys[0] === "command" && keys[1] === "enabled" && keys[2] === "type"
+    || keys.length === 4 && keys[0] === "command" && keys[1] === "enabled" && keys[2] === "environment" && keys[3] === "type";
+}
+
+function hasValidMcpEnvironment(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(([key, envValue]) => /^[A-Z_][A-Z0-9_]*$/.test(key) && typeof envValue === "string");
 }
 
 function isSamePluginOptions(value: unknown, expected: { readonly pet?: string }): boolean {
