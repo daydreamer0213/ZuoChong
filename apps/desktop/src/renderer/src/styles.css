@@ -90,7 +90,7 @@
   .settings-container { @apply grid grid-cols-[280px_1fr] gap-6 min-h-0 flex-1; }
   .settings-sidebar { @apply flex flex-col gap-2; }
   .settings-content { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8; overscroll-behavior: contain; }
-  .settings-nav-item { @apply flex items-center gap-3 px-4 py-3 rounded-2xl border border-transparent text-sm font-bold text-slatecopy transition-all duration-150 cursor-pointer select-none; }
+  .settings-nav-item { @apply flex items-center gap-3 px-4 py-3 rounded-2xl border border-transparent text-sm font-bold text-slatecopy transition-[transform,background-color,border-color,box-shadow,color] duration-150 cursor-pointer select-none; }
   .settings-nav-item:hover { @apply bg-white/50 text-brand border-blue-100/50; }
   .settings-nav-item.active { @apply bg-white text-brand border-blue-200 shadow-sm ring-4 ring-blue-100/30; }
   .settings-nav-icon { @apply w-4 h-4 opacity-70; }
@@ -204,4 +204,10 @@
   .plugin-actions-section .btn-danger { @apply min-w-[112px]; }
   @media (max-width: 900px) { .plugins-layout, .plugins-hub, .plugin-grid { @apply overflow-visible; } .plugin-actions-section { @apply grid-cols-1; } }
 
+  .integration-grid { @apply grid grid-cols-2 gap-4 max-[850px]:grid-cols-1; }
+  .integration-card { @apply flex min-h-[190px] flex-col justify-between rounded-3xl border border-blue-100/70 bg-white/70 p-4 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] active:scale-[0.96]; }
+  .integration-card:hover { @apply border-brand/45 bg-white/90 shadow-md; }
+  .integration-icon { @apply grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
+  .integration-logo { @apply h-9 w-9 object-contain; }
+  .integration-icon svg { @apply w-8 h-8; }
 }

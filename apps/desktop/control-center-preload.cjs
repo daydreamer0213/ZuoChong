@@ -29,6 +29,9 @@ const api = {
   installPet: (petId) => ipcRenderer.invoke("openpets:install-pet", petId),
   importCodexPet: (petId) => ipcRenderer.invoke("openpets:import-codex-pet", petId),
   removePet: (petId) => ipcRenderer.invoke("openpets:remove-pet", petId),
+  getIntegrationsState: (selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-snapshot", selectedPetId, commandMode),
+  runIntegrationAction: (action, selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-action", action, selectedPetId, commandMode),
+  updateIntegrationCommandPaths: (patch) => ipcRenderer.invoke("openpets:agent-setup-command-paths", patch),
 };
 
 contextBridge.exposeInMainWorld("openPetsControlCenter", api);

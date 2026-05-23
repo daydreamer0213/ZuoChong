@@ -331,12 +331,12 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:agent-setup-snapshot", async (event, selectedPetId: unknown, commandMode: unknown) => {
-    assertAllowedSender(event, ["agent-setup"]);
+    assertAllowedSender(event, ["agent-setup", "control-center"]);
     return getAgentSetupSnapshot(selectedPetId, commandMode);
   });
 
   ipcMain.handle("openpets:agent-setup-action", async (event, action: unknown, selectedPetId: unknown, commandMode: unknown) => {
-    assertAllowedSender(event, ["agent-setup"]);
+    assertAllowedSender(event, ["agent-setup", "control-center"]);
     if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove") {
       throw new Error("Invalid agent setup action.");
     }
@@ -345,7 +345,7 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:agent-setup-command-paths", (event, patch: unknown) => {
-    assertAllowedSender(event, ["agent-setup"]);
+    assertAllowedSender(event, ["agent-setup", "control-center"]);
     return updateAgentSetupCommandPaths(patch);
   });
 }

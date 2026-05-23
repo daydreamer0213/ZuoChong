@@ -4,6 +4,14 @@ import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 
+import claudeLogoUrl from "../../../assets/integrations/claude.svg";
+import opencodeLogoUrl from "../../../assets/integrations/opencode.svg";
+import cursorLogoUrl from "../../../assets/integrations/cursor.svg";
+import piLogoUrl from "../../../assets/integrations/pi.svg";
+import vscodeLogoUrl from "../../../assets/integrations/vscode.svg";
+import windsurfLogoUrl from "../../../assets/integrations/windsurf.svg";
+import zedLogoUrl from "../../../assets/integrations/zed.svg";
+
 type Filter = "all" | "installed" | "featured" | "originals" | "western" | "asian" | "codex";
 type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; source?: { kind?: "catalog"; preview?: string } | { kind: "codex"; path: string } };
 type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
@@ -61,7 +69,24 @@ type ControlCenterApi = {
   installPet(petId: string): Promise<unknown>;
   importCodexPet(petId: string): Promise<unknown>;
   removePet(petId: string): Promise<StateSnapshot>;
+  getIntegrationsState(selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
+  runIntegrationAction(action: AgentSetupAction, selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
+  updateIntegrationCommandPaths(patch: Partial<AgentSetupCommandPaths>): Promise<AgentSetupCommandPaths>;
 };
+
+type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+type AgentSetupPetOption = { id: string; displayName: string; default: boolean };
+type ClaudeCodeStatus = { state: "detected" | "not_detected" | "configured" | "needs_setup" | "error"; label: string; details: string; claudeCommand?: string; version?: string; mcpListWorks: boolean; openPetsEntry: { present: boolean; verified: boolean; matchesExpected: boolean }; canConfigure: boolean; canReplace: boolean; canRemove: boolean };
+type ClaudeHookDoctorResult = { status: "installed" | "needs_setup" | "error" | "custom" | "conflict"; settingsPath: string; exists: boolean; valid: boolean; message: string; preview: Record<string, unknown>; asyncSupported: boolean; backupPath?: string };
+type ClaudeOpenPetsMemoryStatus = { state: "installed" | "needs_setup" | "error"; label: string; details: string; claudeMdPath: string; openPetsMemoryPath: string; canInstall: boolean };
+type OpenCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error"; label: string; details: string; configDir: string; canInstall: boolean; canRemove: boolean };
+type OpenCodeSetupPreview = { global: true; configDir: string; configPath: string; cleanupConfigPaths: string[]; mcpCommand: string[]; plugin: unknown[] | string; instructionPath: string; configPreview: Record<string, unknown> };
+type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
+type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
+type AgentSetupCommandPaths = { claude: string; node: string; opencode: string };
+type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
+type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
+type StatusTone = keyof typeof statusPillToneClass;
 
 const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
 
@@ -87,6 +112,29 @@ const ImportIcon = () => (
 const SetDefaultIcon = () => (
   <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const ReplaceIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+    <path d="M21 21v-5h-5" />
+  </svg>
+);
+
+const HookIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m18 15-6-6-6 6" />
+  </svg>
+);
+
+const MemoryIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 10v6" />
+    <path d="M9 13h6" />
+    <rect width="18" height="18" x="3" y="3" rx="2" />
   </svg>
 );
 
@@ -302,16 +350,13 @@ const routeMetadata: Record<Route, { title: string; description: string }> = {
   },
 };
 
-function PlaceholderView({ route }: { route: Exclude<Route, "pets"> }) {
+function PlaceholderView({ route }: { route: Exclude<Route, "pets" | "settings" | "plugins" | "integrations"> }) {
   const meta = routeMetadata[route];
   return (
     <div className="grid grid-cols-1 w-full">
       <GlassCard className="flex flex-col items-center justify-center text-center py-16 px-8 h-full min-h-[420px]">
         <div className="p-4 rounded-3xl bg-blue-50/80 border border-blue-100/50 mb-6 text-brand">
           {route === "dashboard" && <DashboardIcon />}
-          {route === "settings" && <SettingsIcon />}
-          {route === "plugins" && <PluginsIcon />}
-          {route === "integrations" && <IntegrationsIcon />}
           {route === "onboarding" && <OnboardingIcon />}
         </div>
         <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{meta.title}</h2>
@@ -857,6 +902,432 @@ function ConfigFieldEditor({ fieldKey, field, value, onChange }: { fieldKey: str
   </label>;
 }
 
+function PathField({ label, value, placeholder, onSave, disabled }: { label: string; value: string; placeholder: string; onSave: (v: string) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider">{label}</label>
+      <div className="flex gap-2">
+        <input
+          className="plugin-input flex-1"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+        <Button variant="secondary" size="compact" icon={<SaveIcon />} disabled={disabled || draft === value} onClick={() => onSave(draft)}>Save</Button>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationIcon({ id }: { id: string }) {
+  const logos: Record<string, string> = {
+    claude: claudeLogoUrl,
+    opencode: opencodeLogoUrl,
+    cursor: cursorLogoUrl,
+    pi: piLogoUrl,
+    vscode: vscodeLogoUrl,
+    windsurf: windsurfLogoUrl,
+    zed: zedLogoUrl,
+  };
+  const src = logos[id];
+  if (src) return <img src={src} className="integration-logo" alt="" draggable="false" />;
+  return <PluginGlyph />;
+}
+
+function claudeStatusTone(state: ClaudeCodeStatus["state"]): StatusTone {
+  if (state === "configured") return "green";
+  if (state === "error") return "red";
+  if (state === "needs_setup" || state === "detected") return "blue";
+  return "slate";
+}
+
+function opencodeStatusTone(state: OpenCodeSetupStatus["state"]): StatusTone {
+  if (state === "configured") return "green";
+  if (state === "error") return "red";
+  if (state === "needs_setup") return "blue";
+  return "slate";
+}
+
+function cursorStatusTone(state: CursorSetupStatus["state"]): StatusTone {
+  if (state === "configured") return "green";
+  if (state === "error" || state === "conflict") return "red";
+  if (state === "needs_update") return "orange";
+  if (state === "needs_setup") return "blue";
+  return "slate";
+}
+
+function IntegrationsView() {
+  const [snapshot, setSnapshot] = useState<AgentSetupSnapshot | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = async (selectedPetId?: string) => {
+    try {
+      const petId = selectedPetId === undefined ? snapshot?.selectedPetId : selectedPetId;
+      const next = await api.getIntegrationsState(petId, snapshot?.commandMode);
+      setSnapshot(next);
+      setError("");
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(() => setMessage(""), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  const run = async (label: string, action: AgentSetupAction) => {
+    try {
+      setBusy(label);
+      setError("");
+      setMessage("");
+      const next = await api.runIntegrationAction(action, snapshot?.selectedPetId, snapshot?.commandMode);
+      setSnapshot(next);
+      if (next.lastAction) {
+        if (next.lastAction.ok) setMessage(next.lastAction.message);
+        else setError(next.lastAction.message);
+      }
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const updatePath = async (key: keyof AgentSetupCommandPaths, value: string) => {
+    try {
+      setBusy("Saving path");
+      await api.updateIntegrationCommandPaths({ [key]: value });
+      await load();
+      setMessage("Path saved.");
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  if (!snapshot) {
+    return (
+      <GlassCard className="flex h-64 flex-col items-center justify-center gap-4 text-center">
+        <p className="text-sm font-semibold text-slatecopy">{error || "Loading integrations…"}</p>
+        {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>Retry</Button>}
+      </GlassCard>
+    );
+  }
+
+  const isBusy = Boolean(busy) || snapshot.busy;
+  const integrationDialogTitleId = selectedId ? `integration-detail-title-${selectedId}` : undefined;
+
+  const integrations = [
+    { id: "claude", name: "Claude Code", icon: "claude", status: snapshot.status.label, tone: claudeStatusTone(snapshot.status.state), description: "Connect Claude Code to your OpenPets companion." },
+    { id: "opencode", name: "OpenCode", icon: "opencode", status: snapshot.opencodeStatus.label, tone: opencodeStatusTone(snapshot.opencodeStatus.state), description: "Connect OpenCode globally to your OpenPets companion." },
+    { id: "cursor", name: "Cursor", icon: "cursor", status: snapshot.cursorStatus.label, tone: cursorStatusTone(snapshot.cursorStatus.state), description: "Connect Cursor to your OpenPets companion via global MCP config." },
+    { id: "pi", name: "Pi", icon: "pi", status: "Manual", tone: "blue" satisfies StatusTone, description: "Connect Pi coding-agent activity through the OpenPets Pi extension package." },
+  ] as const;
+
+  const soon = [
+    { name: "VS Code", icon: "vscode" },
+    { name: "Windsurf", icon: "windsurf" },
+    { name: "Zed", icon: "zed" },
+  ];
+
+  const selectedIntegrationName = selectedId === "pi" ? "Pi" : integrations.find((item) => item.id === selectedId)?.name;
+
+  return (
+    <div className="flex flex-col gap-6 h-full overflow-y-auto pr-2">
+      {error && <div className="error">{error}</div>}
+      {message && <div className="settings-success settings-message">{message}</div>}
+
+      <div className="integration-grid">
+        {integrations.map((item) => (
+          <article key={item.id} className={`integration-card ${selectedId === item.id ? "border-brand ring-4 ring-brand/15" : ""}`}>
+            <div className="plugin-card-body">
+              <div className="integration-icon">
+                <IntegrationIcon id={item.icon} />
+              </div>
+              <div className="plugin-card-content">
+                <div className="flex items-center justify-between">
+                  <strong>{item.name}</strong>
+                  <StatusPill tone={item.tone}>{item.status}</StatusPill>
+                </div>
+                <small>{item.description}</small>
+              </div>
+            </div>
+            <div className="plugin-card-footer">
+              <div className="flex gap-2 w-full">
+                {item.id === "claude" && snapshot.status.canConfigure && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "configure")}>Install</Button>}
+                {item.id === "opencode" && snapshot.opencodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "opencode-install")}>Install</Button>}
+                {item.id === "cursor" && snapshot.cursorStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "cursor-install")}>Install</Button>}
+                <Button variant="secondary" size="compact" icon={<ConfigureIcon />} fullWidth={item.id === "pi"} onClick={() => setSelectedId(item.id)}>{item.id === "pi" ? "View Setup" : "Configure"}</Button>
+              </div>
+            </div>
+          </article>
+        ))}
+        {soon.map((item) => (
+          <article key={item.name} className="integration-card opacity-60">
+            <div className="plugin-card-body">
+              <div className="integration-icon grayscale">
+                <IntegrationIcon id={item.icon} />
+              </div>
+              <div className="plugin-card-content">
+                <div className="flex items-center justify-between">
+                  <strong>{item.name}</strong>
+                  <StatusPill tone="slate">Soon</StatusPill>
+                </div>
+                <small>Coming soon.</small>
+              </div>
+            </div>
+            <div className="plugin-card-footer">
+              <Button variant="secondary" size="compact" fullWidth disabled>Coming soon</Button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {selectedId && (
+        <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-labelledby={integrationDialogTitleId}>
+          <button className="plugin-config-backdrop" type="button" aria-label="Close integration detail" onClick={() => setSelectedId(null)} />
+          <GlassCard className="plugin-inspector">
+            <div className="plugin-inspector-head">
+              <div className="plugin-inspector-icon">
+                <IntegrationIcon id={selectedId} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="eyebrow">Integration Detail</p>
+                <h2 id={integrationDialogTitleId}>{selectedIntegrationName}</h2>
+              </div>
+              <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId(null)}>Close</Button>
+            </div>
+
+            <div className="flex flex-col gap-5 mt-4">
+              {selectedId === "claude" && (
+                <>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Connection</small><strong>Status & Routing</strong></div>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                      <div className="flex flex-col">
+                        <strong className="text-sm text-navy">{snapshot.status.label}</strong>
+                        <small className="text-xs text-slatecopy">{snapshot.status.details}</small>
+                      </div>
+                      <StatusPill tone={claudeStatusTone(snapshot.status.state)}>{snapshot.status.state}</StatusPill>
+                    </div>
+                    <div className="mt-2">
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <select
+                        className="settings-select w-full"
+                        value={snapshot.selectedPetId || ""}
+                        onChange={(e) => void load(e.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">Default Pet</option>
+                        {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+                      </select>
+                    </div>
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Configuration</small><strong>Command Paths</strong></div>
+                    <div className="flex flex-col gap-3">
+                      <PathField label="Claude Command" value={snapshot.commandPaths.claude} placeholder="claude" onSave={(v) => updatePath("claude", v)} disabled={isBusy} />
+                      <PathField label="Node.js Command" value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
+                    </div>
+                  </section>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <section className="plugin-section">
+                      <div className="plugin-section-title"><small>Optional</small><strong>Claude Hooks</strong></div>
+                      <div className="flex items-center justify-between mb-2">
+                        <StatusPill tone={snapshot.hookStatus.status === "installed" ? "green" : "blue"}>{snapshot.hookStatus.status}</StatusPill>
+                      </div>
+                    <div className="flex flex-col gap-2">
+                      <Button variant="primary" size="compact" icon={<HookIcon />} disabled={isBusy} onClick={() => run("Installing hooks", "install-hooks")}>Install Hooks</Button>
+                      <Button variant="danger" size="compact" icon={<RemoveIcon />} disabled={isBusy || snapshot.hookStatus.status === "needs_setup"} onClick={() => run("Removing hooks", "uninstall-hooks")}>Remove Hooks</Button>
+                    </div>
+                  </section>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Included</small><strong>Instructions</strong></div>
+                    <div className="flex items-center justify-between mb-2">
+                      <StatusPill tone={snapshot.memoryStatus.state === "installed" ? "green" : "blue"}>{snapshot.memoryStatus.state}</StatusPill>
+                    </div>
+                    <Button variant="secondary" size="compact" icon={<MemoryIcon />} disabled={isBusy} onClick={() => run("Updating instructions", "install-memory")}>Update Instructions</Button>
+                  </section>
+                </div>
+
+                <section className="plugin-section">
+                  <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {snapshot.status.canConfigure && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "configure")}>Install MCP</Button>}
+                    {snapshot.status.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run("Replacing", "replace")}>Replace MCP</Button>}
+                    {snapshot.status.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "remove")}>Remove MCP</Button>}
+                    <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                  </div>
+                </section>
+
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>Advanced</small><strong>MCP JSON Preview</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      {JSON.stringify(snapshot.preview.mcpJson, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              )}
+
+              {selectedId === "opencode" && (
+                <>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Connection</small><strong>Global Setup</strong></div>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                      <div className="flex flex-col">
+                        <strong className="text-sm text-navy">{snapshot.opencodeStatus.label}</strong>
+                        <small className="text-xs text-slatecopy">{snapshot.opencodeStatus.details}</small>
+                      </div>
+                      <StatusPill tone={opencodeStatusTone(snapshot.opencodeStatus.state)}>{snapshot.opencodeStatus.state}</StatusPill>
+                    </div>
+                    <div className="mt-2">
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <select
+                        className="settings-select w-full"
+                        value={snapshot.selectedPetId || ""}
+                        onChange={(e) => void load(e.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">Default Pet</option>
+                        {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+                      </select>
+                    </div>
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Configuration</small><strong>Command Paths</strong></div>
+                    <div className="flex flex-col gap-3">
+                      <PathField label="OpenCode Command" value={snapshot.commandPaths.opencode} placeholder="opencode" onSave={(v) => updatePath("opencode", v)} disabled={isBusy} />
+                      <PathField label="Node.js Command" value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
+                    </div>
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {snapshot.opencodeStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "opencode-install")}>Install Global</Button>}
+                      {snapshot.opencodeStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "opencode-remove")}>Remove Global</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                    </div>
+                  </section>
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>Advanced</small><strong>Config Preview</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      {JSON.stringify(snapshot.opencodePreview.configPreview, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              )}
+
+              {selectedId === "cursor" && (
+                <>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Connection</small><strong>Global MCP</strong></div>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                      <div className="flex flex-col">
+                        <strong className="text-sm text-navy">{snapshot.cursorStatus.label}</strong>
+                        <small className="text-xs text-slatecopy">{snapshot.cursorStatus.details}</small>
+                      </div>
+                      <StatusPill tone={cursorStatusTone(snapshot.cursorStatus.state)}>{snapshot.cursorStatus.state}</StatusPill>
+                    </div>
+                    <div className="mt-2">
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <select
+                        className="settings-select w-full"
+                        value={snapshot.selectedPetId || ""}
+                        onChange={(e) => void load(e.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">Default Pet</option>
+                        {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+                      </select>
+                    </div>
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {snapshot.cursorStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "cursor-install")}>Install MCP</Button>}
+                      {snapshot.cursorStatus.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run("Replacing", "cursor-replace")}>Replace MCP</Button>}
+                      {snapshot.cursorStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "cursor-remove")}>Remove MCP</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                    </div>
+                  </section>
+
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>Advanced</small><strong>MCP Entry Preview</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      {JSON.stringify({ mcpServers: snapshot.cursorPreview.mcpEntry }, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              )}
+
+              {selectedId === "pi" && (
+                <section className="plugin-section">
+                  <div className="plugin-section-title"><small>Manual Setup</small><strong>Pi Extension</strong></div>
+                  <p className="text-sm text-slatecopy leading-relaxed">
+                    Install the OpenPets Pi extension from Pi, then use the slash commands inside a Pi session.
+                  </p>
+                  <div className="mt-3 p-4 rounded-2xl bg-navy/5 border border-navy/5 flex flex-col gap-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Global install</span>
+                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install npm:@open-pets/pi</code>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Project install</span>
+                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install -l npm:@open-pets/pi</code>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Remove</span>
+                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi remove npm:@open-pets/pi</code>
+                    </div>
+                  </div>
+                  <div className="mt-3 p-4 rounded-2xl bg-blue-50/50 border border-blue-100/60 flex flex-col gap-2">
+                    <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Slash commands</span>
+                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets status</code>
+                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets test</code>
+                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets react &lt;reaction&gt;</code>
+                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets say &lt;message&gt;</code>
+                  </div>
+                  <p className="text-xs text-slatecopy mt-2">
+                    Use global install for all Pi workspaces, or project install when you only want OpenPets in the current project.
+                  </p>
+                </section>
+              )}
+            </div>
+          </GlassCard>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PluginsView() {
   const [snapshot, setSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [catalog, setCatalog] = useState<PluginCatalogSnapshot | null>(null);
@@ -937,127 +1408,129 @@ function PluginsView() {
     setMessage(updatedPlugin && updatedPlugin.version !== previousVersion ? "Plugin updated." : "No plugin update applied.");
   }
 
-  return <div className="plugins-layout">
-    {error && <div className="error settings-message">{error}</div>}
-    {message && <div className="settings-success settings-message">{message}</div>}
-    <GlassCard className="plugins-hub">
-      <div className="filters">
-        {(["all", "installed", "catalog", "local", "broken"] as PluginFilter[]).map((nextFilter) => (
-          <button key={nextFilter} className={`filter ${filter === nextFilter ? "active" : ""}`} onClick={() => setFilter(nextFilter)}>{pluginFilterLabels[nextFilter]}</button>
-        ))}
-      </div>
-      <div className="plugin-grid">
-        {filteredEntries.map((entry) => (
-          <article key={entry.id} className={`plugin-card ${entry.installed?.brokenReason ? "broken" : ""}`}>
-            <div className="plugin-card-body">
-              <span className="plugin-card-icon"><PluginGlyph /></span>
-              <div className="plugin-card-content">
-                <strong>{pluginName(entry)}</strong>
-                <small>{pluginDescription(entry)}</small>
-                <div className="badges mt-1">
-                  <StatusPill tone={pluginPrimaryTone(entry)}>{pluginPrimaryLabel(entry)}</StatusPill>
-                  {entry.installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
-                  {entry.installed?.runtime === "javascript" || entry.catalog?.runtime === "javascript" ? <StatusPill tone="purple">JS</StatusPill> : <StatusPill tone="slate">Declarative</StatusPill>}
+  return (
+    <div className="plugins-layout">
+      {error && <div className="error settings-message">{error}</div>}
+      {message && <div className="settings-success settings-message">{message}</div>}
+      <GlassCard className="plugins-hub">
+        <div className="filters">
+          {(["all", "installed", "catalog", "local", "broken"] as PluginFilter[]).map((nextFilter) => (
+            <button key={nextFilter} className={`filter ${filter === nextFilter ? "active" : ""}`} onClick={() => setFilter(nextFilter)}>{pluginFilterLabels[nextFilter]}</button>
+          ))}
+        </div>
+        <div className="plugin-grid">
+          {filteredEntries.map((entry) => (
+            <article key={entry.id} className={`plugin-card ${entry.installed?.brokenReason ? "broken" : ""}`}>
+              <div className="plugin-card-body">
+                <span className="plugin-card-icon"><PluginGlyph /></span>
+                <div className="plugin-card-content">
+                  <strong>{pluginName(entry)}</strong>
+                  <small>{pluginDescription(entry)}</small>
+                  <div className="badges mt-1">
+                    <StatusPill tone={pluginPrimaryTone(entry)}>{pluginPrimaryLabel(entry)}</StatusPill>
+                    {entry.installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
+                    {entry.installed?.runtime === "javascript" || entry.catalog?.runtime === "javascript" ? <StatusPill tone="purple">JS</StatusPill> : <StatusPill tone="slate">Declarative</StatusPill>}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="plugin-card-footer">
-              <div className="plugin-card-meta">
-                <span className="text-[10px] font-bold text-slatecopy/50 uppercase tracking-tight">v{entry.installed?.version || entry.catalog?.version}</span>
+              <div className="plugin-card-footer">
+                <div className="plugin-card-meta">
+                  <span className="text-[10px] font-bold text-slatecopy/50 uppercase tracking-tight">v{entry.installed?.version || entry.catalog?.version}</span>
+                </div>
+
+                <div className="plugin-card-actions">
+                  {entry.installed && (
+                    <div className="plugin-card-toggle-zone">
+                      <span className="plugin-card-toggle-label">{entry.installed.enabled ? "Active" : "Off"}</span>
+                      <input
+                        className="settings-toggle plugin-card-toggle"
+                        type="checkbox"
+                        checked={entry.installed.enabled}
+                        disabled={!!busy || entry.installed.catalogDisabled || Boolean(entry.installed.brokenReason)}
+                        onChange={(event) => void run("Saving", async () => {
+                          applyResult(await api.setPluginEnabled(entry.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled.");
+                        })}
+                      />
+                    </div>
+                  )}
+
+                  {entry.installed ? (
+                    <Button variant="secondary" size="compact" icon={<ConfigureIcon />} disabled={!!busy} onClick={() => setSelectedId(entry.id)}>Configure</Button>
+                  ) : (
+                    <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={!!busy || entry.catalog?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(entry); })}>Install Plugin</Button>
+                  )}
+                </div>
               </div>
-
-              <div className="plugin-card-actions">
-                {entry.installed && (
-                  <div className="plugin-card-toggle-zone">
-                    <span className="plugin-card-toggle-label">{entry.installed.enabled ? "Active" : "Off"}</span>
-                    <input
-                      className="settings-toggle plugin-card-toggle"
-                      type="checkbox"
-                      checked={entry.installed.enabled}
-                      disabled={!!busy || entry.installed.catalogDisabled || Boolean(entry.installed.brokenReason)}
-                      onChange={(event) => void run("Saving", async () => {
-                        applyResult(await api.setPluginEnabled(entry.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled.");
-                      })}
-                    />
-                  </div>
-                )}
-
-                {entry.installed ? (
-                  <Button variant="secondary" size="compact" icon={<ConfigureIcon />} disabled={!!busy} onClick={() => setSelectedId(entry.id)}>Configure</Button>
-                ) : (
-                  <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={!!busy || entry.catalog?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(entry); })}>Install Plugin</Button>
-                )}
-              </div>
-            </div>
-          </article>
-        ))}
-        {!filteredEntries.length && <div className="plugin-empty"><PluginGlyph /><strong>No plugins found</strong><small>Try a different filter, refresh the catalog, or load a local plugin folder.</small></div>}
-      </div>
-      <div className="plugin-hub-footer">
-        <span><strong>{snapshot?.plugins.length ?? 0}</strong> installed · <strong>{catalog?.plugins.length ?? 0}</strong> catalog</span>
-        <span className="plugin-hub-actions">
-          <Button variant="secondary" size="compact" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Refreshing", async () => { await load(true); setMessage("Plugin catalog refreshed."); })}>Refresh</Button>
-          <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void run("Loading", async () => {
-            const beforeIds = new Set(snapshot?.plugins.map((plugin) => plugin.id) ?? []);
-            const result = await api.loadLocalPlugin();
-            if (!applyResult(result)) return;
-            const loadedPlugin = result.snapshot.plugins.find((plugin) => plugin.source === "local" && !beforeIds.has(plugin.id));
-            setMessage(loadedPlugin ? "Local plugin loaded." : "No local plugin loaded.");
-          })}>Load Local Plugin</Button>
-        </span>
-      </div>
-    </GlassCard>
-    {selected && <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={`${pluginName(selected)} configuration`}>
-      <button className="plugin-config-backdrop" type="button" aria-label="Close plugin configuration" onClick={() => setSelectedId("")} />
-      <GlassCard className="plugin-inspector">
-      {selected ? <>
-        <div className="plugin-inspector-head">
-          <span className="plugin-inspector-icon"><PluginGlyph /></span>
-          <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Configuration</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
-          <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
+            </article>
+          ))}
+          {!filteredEntries.length && <div className="plugin-empty"><PluginGlyph /><strong>No plugins found</strong><small>Try a different filter, refresh the catalog, or load a local plugin folder.</small></div>}
         </div>
-        <div className="meta">
-          <StatusPill tone={pluginPrimaryTone(selected)}>{pluginPrimaryLabel(selected)}</StatusPill>
-          <StatusPill tone="slate">v{installed?.version ?? catalogPlugin?.version}</StatusPill>
-          {installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
-          {(installed?.catalogDeprecated || catalogPlugin?.deprecated) && <StatusPill tone="orange">Deprecated</StatusPill>}
+        <div className="plugin-hub-footer">
+          <span><strong>{snapshot?.plugins.length ?? 0}</strong> installed · <strong>{catalog?.plugins.length ?? 0}</strong> catalog</span>
+          <span className="plugin-hub-actions">
+            <Button variant="secondary" size="compact" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Refreshing", async () => { await load(true); setMessage("Plugin catalog refreshed."); })}>Refresh</Button>
+            <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void run("Loading", async () => {
+              const beforeIds = new Set(snapshot?.plugins.map((plugin) => plugin.id) ?? []);
+              const result = await api.loadLocalPlugin();
+              if (!applyResult(result)) return;
+              const loadedPlugin = result.snapshot.plugins.find((plugin) => plugin.source === "local" && !beforeIds.has(plugin.id));
+              setMessage(loadedPlugin ? "Local plugin loaded." : "No local plugin loaded.");
+            })}>Load Local Plugin</Button>
+          </span>
         </div>
-        {(installed?.catalogStatusReason || catalogPlugin?.statusReason || installed?.status?.text) && <div className="plugin-status-strip">
-          {installed?.status?.text && <StatusPill tone={installed.status.tone ? pluginStatusTone[installed.status.tone] : "blue"}>{installed.status.text}</StatusPill>}
-          <span>{installed?.catalogStatusReason || catalogPlugin?.statusReason}</span>
-        </div>}
-        {installed ? <>
-          <section className="plugin-section">
-            <div className="plugin-section-title"><small>Runtime</small><strong>State & permissions</strong></div>
-            <label className="settings-row plugin-toggle-row">
-              <div className="settings-row-info"><strong>{installed.enabled ? "Enabled" : "Disabled"}</strong><small>{installed.brokenReason || (installed.catalogDisabled ? "This plugin is disabled by the catalog." : "Toggle this plugin without leaving the Control Center.")}</small></div>
-              <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled} onChange={(event) => void run("Saving", async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled."); })} />
-            </label>
-            <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>) : <StatusPill tone="slate">No permissions</StatusPill>}</div>
-          </section>
-          {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>Configuration</small><strong>Needs attention</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
-          {installed.configSchema && <section className="plugin-section">
-            <div className="plugin-section-title"><small>Settings</small><strong>Configuration</strong></div>
-            <div className="plugin-config-form">{Object.entries(installed.configSchema).map(([key, field]) => <ConfigFieldEditor key={key} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
-            <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run("Saving", async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), "Plugin configuration saved."); })}>Save Configuration</Button>
-          </section>}
-          {!!installed.commands?.length && <section className="plugin-section"><div className="plugin-section-title"><small>Commands</small><strong>Quick actions</strong></div><div className="plugin-command-list">{installed.commands.map((command) => <Button key={command.id} variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Running", async () => { applyResult(await api.executePluginCommand(installed.id, command.id), "Plugin command ran."); })}>{command.title}</Button>)}</div></section>}
-          <section className="plugin-section plugin-actions-section">
-            <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Reloading", async () => { applyResult(await api.reloadPlugin(installed.id), "Plugin reloaded."); })}>Reload</Button>
-            {installed.source === "catalog" && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}
-            <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(`Uninstall ${pluginName(selected)}?`)) void run("Uninstalling", async () => { if (applyResult(await api.uninstallPlugin(installed.id), "Plugin uninstalled.")) setSelectedId(""); }); }}>Uninstall</Button>
-          </section>
-        </> : <section className="plugin-section">
-          <div className="plugin-section-title"><small>Catalog</small><strong>Ready to install</strong></div>
-          <p className="desc">Install this plugin to approve its permissions and make it available in your desktop companion.</p>
-          <div className="badges plugin-permissions">{catalogPlugin?.permissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>)}</div>
-          <Button variant="primary" fullWidth icon={<InstallIcon />} disabled={!!busy || catalogPlugin?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(selected); })}>Install Plugin</Button>
-        </section>}
-      </> : <div className="plugin-empty plugin-empty-detail"><PluginGlyph /><strong>No plugin selected</strong><small>Install a catalog plugin or load a local folder to begin.</small></div>}
       </GlassCard>
-    </div>}
-  </div>;
+      {selected && <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={`${pluginName(selected)} configuration`}>
+        <button className="plugin-config-backdrop" type="button" aria-label="Close plugin configuration" onClick={() => setSelectedId("")} />
+        <GlassCard className="plugin-inspector">
+        {selected ? <>
+          <div className="plugin-inspector-head">
+            <span className="plugin-inspector-icon"><PluginGlyph /></span>
+            <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Configuration</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
+            <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
+          </div>
+          <div className="meta">
+            <StatusPill tone={pluginPrimaryTone(selected)}>{pluginPrimaryLabel(selected)}</StatusPill>
+            <StatusPill tone="slate">v{installed?.version ?? catalogPlugin?.version}</StatusPill>
+            {installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
+            {(installed?.catalogDeprecated || catalogPlugin?.deprecated) && <StatusPill tone="orange">Deprecated</StatusPill>}
+          </div>
+          {(installed?.catalogStatusReason || catalogPlugin?.statusReason || installed?.status?.text) && <div className="plugin-status-strip">
+            {installed?.status?.text && <StatusPill tone={installed.status.tone ? pluginStatusTone[installed.status.tone] : "blue"}>{installed.status.text}</StatusPill>}
+            <span>{installed?.catalogStatusReason || catalogPlugin?.statusReason}</span>
+          </div>}
+          {installed ? <>
+            <section className="plugin-section">
+              <div className="plugin-section-title"><small>Runtime</small><strong>State & permissions</strong></div>
+              <label className="settings-row plugin-toggle-row">
+                <div className="settings-row-info"><strong>{installed.enabled ? "Enabled" : "Disabled"}</strong><small>{installed.brokenReason || (installed.catalogDisabled ? "This plugin is disabled by the catalog." : "Toggle this plugin without leaving the Control Center.")}</small></div>
+                <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled} onChange={(event) => void run("Saving", async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled."); })} />
+              </label>
+              <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>) : <StatusPill tone="slate">No permissions</StatusPill>}</div>
+            </section>
+            {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>Configuration</small><strong>Needs attention</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
+            {installed.configSchema && <section className="plugin-section">
+              <div className="plugin-section-title"><small>Settings</small><strong>Configuration</strong></div>
+              <div className="plugin-config-form">{Object.entries(installed.configSchema).map(([key, field]) => <ConfigFieldEditor key={key} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
+              <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run("Saving", async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), "Plugin configuration saved."); })}>Save Configuration</Button>
+            </section>}
+            {!!installed.commands?.length && <section className="plugin-section"><div className="plugin-section-title"><small>Commands</small><strong>Quick actions</strong></div><div className="plugin-command-list">{installed.commands.map((command) => <Button key={command.id} variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Running", async () => { applyResult(await api.executePluginCommand(installed.id, command.id), "Plugin command ran."); })}>{command.title}</Button>)}</div></section>}
+            <section className="plugin-section plugin-actions-section">
+              <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Reloading", async () => { applyResult(await api.reloadPlugin(installed.id), "Plugin reloaded."); })}>Reload</Button>
+              {installed.source === "catalog" && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}
+              <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(`Uninstall ${pluginName(selected)}?`)) void run("Uninstalling", async () => { if (applyResult(await api.uninstallPlugin(installed.id), "Plugin uninstalled.")) setSelectedId(""); }); }}>Uninstall</Button>
+            </section>
+          </> : <section className="plugin-section">
+            <div className="plugin-section-title"><small>Catalog</small><strong>Ready to install</strong></div>
+            <p className="desc">Install this plugin to approve its permissions and make it available in your desktop companion.</p>
+            <div className="badges plugin-permissions">{catalogPlugin?.permissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>)}</div>
+            <Button variant="primary" fullWidth icon={<InstallIcon />} disabled={!!busy || catalogPlugin?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(selected); })}>Install Plugin</Button>
+          </section>}
+        </> : <div className="plugin-empty plugin-empty-detail"><PluginGlyph /><strong>No plugin selected</strong><small>Install a catalog plugin or load a local folder to begin.</small></div>}
+        </GlassCard>
+      </div>}
+    </div>
+  );
 }
 
 function App() {
@@ -1241,205 +1714,209 @@ function App() {
 
   const currentMeta = routeMetadata[currentRoute];
 
-  return <main className="app-shell">
-    <header className="hero">
-      <div className="hero-content">
-        <p className="eyebrow">Control Center Preview</p>
-        <h1>{currentMeta.title}</h1>
-        <p className="hero-desc">{currentMeta.description}</p>
-      </div>
-      <div className="hero-logo-container">
-        <img src={openPetsLogoUrl} className="hero-brand-logo" alt="OpenPets" />
-      </div>
-    </header>
+  return (
+    <main className="app-shell">
+      <header className="hero">
+        <div className="hero-content">
+          <p className="eyebrow">Control Center Preview</p>
+          <h1>{currentMeta.title}</h1>
+          <p className="hero-desc">{currentMeta.description}</p>
+        </div>
+        <div className="hero-logo-container">
+          <img src={openPetsLogoUrl} className="hero-brand-logo" alt="OpenPets" />
+        </div>
+      </header>
 
-    <nav className="nav-bar">
-      {navTabs.map((tab) => (
-        <button
-          key={tab.id}
-          className={`nav-tab ${currentRoute === tab.id ? "active" : ""}`}
-          onClick={() => setCurrentRoute(tab.id)}
-        >
-          {tab.icon}
-          <span>{tab.label}</span>
-        </button>
-      ))}
-    </nav>
+      <nav className="nav-bar">
+        {navTabs.map((tab) => (
+          <button
+            key={tab.id}
+            className={`nav-tab ${currentRoute === tab.id ? "active" : ""}`}
+            onClick={() => setCurrentRoute(tab.id)}
+          >
+            {tab.icon}
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </nav>
 
-    {error && <div className="error">{error}</div>}
+      {error && <div className="error">{error}</div>}
 
-    {currentRoute === "settings" ? (
-      <SettingsView />
-    ) : currentRoute === "plugins" ? (
-      <PluginsView />
-    ) : currentRoute !== "pets" ? (
-      <PlaceholderView route={currentRoute} />
-    ) : (
-      <div className="layout">
-        <GlassCard className="gallery">
-          <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-          <div className="filters">
-            {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
-              <button
-                key={f}
-                className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-                <span className="filter-text">{filterLabels[f]}</span>
-              </button>
-            ))}
-          </div>
-          <div className="pets-grid">{pets.map((pet) => {
-            const isBuiltIn = pet.builtIn;
-            const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
-            const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
-            return (
-              <button key={`${pet.sourceKind}-${pet.id}`} className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`} onClick={() => setSelectedId(pet.id)}>
-                <span className="thumb">
-                  {useSpritesheetFrame ? (
-                    <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
-                  ) : (
-                    <PetImage src={pet.preview} debugLabel={`${pet.id}:card`} />
-                  )}
-                </span>
-                <div className="card-content">
-                  <span className="card-title-row">
-                    <b className="card-title">{pet.displayName}</b>
+      {currentRoute === "settings" ? (
+        <SettingsView />
+      ) : currentRoute === "plugins" ? (
+        <PluginsView />
+      ) : currentRoute === "integrations" ? (
+        <IntegrationsView />
+      ) : currentRoute !== "pets" ? (
+        <PlaceholderView route={currentRoute} />
+      ) : (
+        <div className="layout">
+          <GlassCard className="gallery">
+            <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+            <div className="filters">
+              {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
+                <button
+                  key={f}
+                  className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
+                  onClick={() => setFilter(f)}
+                >
+                  <span className="filter-icon-wrapper">{filterIcons[f]}</span>
+                  <span className="filter-text">{filterLabels[f]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="pets-grid">{pets.map((pet) => {
+              const isBuiltIn = pet.builtIn;
+              const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
+              const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
+              return (
+                <button key={`${pet.sourceKind}-${pet.id}`} className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`} onClick={() => setSelectedId(pet.id)}>
+                  <span className="thumb">
+                    {useSpritesheetFrame ? (
+                      <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
+                    ) : (
+                      <PetImage src={pet.preview} debugLabel={`${pet.id}:card`} />
+                    )}
                   </span>
-                  <p className="card-desc">{pet.description || pet.id}</p>
-                  <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
-                </div>
-              </button>
-            );
-          })}</div>
-          <div className="pager">
-            {!!catalog?.pageCount && catalog.pageCount > 1 ? (
-              <Button
-                variant="secondary"
-                size="compact"
-                icon={<PrevIcon />}
-                disabled={!!busy || catalogPage <= 0}
-                onClick={() => void loadCatalogPage(catalogPage - 1)}
-              >
-                Prev
-              </Button>
-            ) : <span />}
-            <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
-            {!!catalog?.pageCount && catalog.pageCount > 1 ? (
-              <Button
-                variant="secondary"
-                size="compact"
-                icon={<NextIcon />}
-                iconPosition="right"
-                disabled={!!busy || catalogPage >= catalog.pageCount - 1}
-                onClick={() => void loadCatalogPage(catalogPage + 1)}
-              >
-                Next
-              </Button>
-            ) : <span />}
-          </div>
-        </GlassCard>
-        <GlassCard className="detail">
-          {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
-            <div className="stage">
-              {safePetImage(selected.spritesheet) ? (
-                <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
-              ) : (
-                <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
-              )}
-            </div>
-            <div className="meta">
-              {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
-              {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
-              {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
-              {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
-              {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
-              {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
-              {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
-            </div>
-            {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
-            
-            {safePetImage(selected.spritesheet) && (
-              <>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
-                <div className="grid grid-cols-3 gap-3 mb-2">
-                  {[
-                    { label: "Thinking", state: "thinking" as const },
-                    { label: "Happy", state: "happy" as const },
-                    { label: "Wave", state: "wave" as const }
-                  ].map((preview) => (
-                    <div key={preview.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm">
-                      <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${preview.label} preview`} state={preview.state} size="mini" />
-                      <span className="text-xs font-bold text-slatecopy">{preview.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            <div className="actions-container mt-6 flex flex-col gap-3">
-              {/* Main Action (Install, Import, Set Default) */}
-              {!selected.installed && selected.sourceKind === "catalog" && (
-                <Button
-                  variant="primary"
-                  fullWidth
-                  icon={<InstallIcon />}
-                  disabled={!!busy}
-                  onClick={() => act("Installing", () => api.installPet(selected.id))}
-                >
-                  {busy || "Install Pet"}
-                </Button>
-              )}
-              {!selected.installed && selected.sourceKind === "codex" && (
-                <Button
-                  variant="warning"
-                  fullWidth
-                  icon={<ImportIcon />}
-                  disabled={!!busy}
-                  onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
-                >
-                  {busy || "Import Codex Pet"}
-                </Button>
-              )}
-              {selected.installed && selected.id !== defaultId && !selected.broken && (
-                <Button
-                  variant="primary"
-                  fullWidth
-                  icon={<SetDefaultIcon />}
-                  disabled={!!busy}
-                  onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
-                >
-                  {busy || "Set Default Pet"}
-                </Button>
-              )}
-
-              {/* Secondary Actions (Remove, Refresh) */}
-              <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
-                {selected.installed && !selected.builtIn && !selected.protected && (
-                  <Button
-                    variant="danger"
-                    icon={<RemoveIcon />}
-                    disabled={!!busy}
-                    onClick={() => act("Removing", () => api.removePet(selected.id))}
-                  >
-                    Remove
-                  </Button>
-                )}
+                  <div className="card-content">
+                    <span className="card-title-row">
+                      <b className="card-title">{pet.displayName}</b>
+                    </span>
+                    <p className="card-desc">{pet.description || pet.id}</p>
+                    <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                  </div>
+                </button>
+              );
+            })}</div>
+            <div className="pager">
+              {!!catalog?.pageCount && catalog.pageCount > 1 ? (
                 <Button
                   variant="secondary"
-                  icon={<RefreshIcon />}
-                  disabled={!!busy}
-                  onClick={() => void load()}
+                  size="compact"
+                  icon={<PrevIcon />}
+                  disabled={!!busy || catalogPage <= 0}
+                  onClick={() => void loadCatalogPage(catalogPage - 1)}
                 >
-                  Refresh
+                  Prev
                 </Button>
+              ) : <span />}
+              <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
+              {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+                <Button
+                  variant="secondary"
+                  size="compact"
+                  icon={<NextIcon />}
+                  iconPosition="right"
+                  disabled={!!busy || catalogPage >= catalog.pageCount - 1}
+                  onClick={() => void loadCatalogPage(catalogPage + 1)}
+                >
+                  Next
+                </Button>
+              ) : <span />}
+            </div>
+          </GlassCard>
+          <GlassCard className="detail">
+            {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
+              <div className="stage">
+                {safePetImage(selected.spritesheet) ? (
+                  <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
+                ) : (
+                  <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
+                )}
               </div>
-            </div></> : <p>No pets available.</p>}
-        </GlassCard>
-      </div>
-    )}
-  </main>;
+              <div className="meta">
+                {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
+                {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
+                {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
+                {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
+                {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+                {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
+                {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
+              </div>
+              {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
+
+              {safePetImage(selected.spritesheet) && (
+                <>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
+                  <div className="grid grid-cols-3 gap-3 mb-2">
+                    {[
+                      { label: "Thinking", state: "thinking" as const },
+                      { label: "Happy", state: "happy" as const },
+                      { label: "Wave", state: "wave" as const }
+                    ].map((preview) => (
+                      <div key={preview.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm">
+                        <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${preview.label} preview`} state={preview.state} size="mini" />
+                        <span className="text-xs font-bold text-slatecopy">{preview.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <div className="actions-container mt-6 flex flex-col gap-3">
+                {/* Main Action (Install, Import, Set Default) */}
+                {!selected.installed && selected.sourceKind === "catalog" && (
+                  <Button
+                    variant="primary"
+                    fullWidth
+                    icon={<InstallIcon />}
+                    disabled={!!busy}
+                    onClick={() => act("Installing", () => api.installPet(selected.id))}
+                  >
+                    {busy || "Install Pet"}
+                  </Button>
+                )}
+                {!selected.installed && selected.sourceKind === "codex" && (
+                  <Button
+                    variant="warning"
+                    fullWidth
+                    icon={<ImportIcon />}
+                    disabled={!!busy}
+                    onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
+                  >
+                    {busy || "Import Codex Pet"}
+                  </Button>
+                )}
+                {selected.installed && selected.id !== defaultId && !selected.broken && (
+                  <Button
+                    variant="primary"
+                    fullWidth
+                    icon={<SetDefaultIcon />}
+                    disabled={!!busy}
+                    onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
+                  >
+                    {busy || "Set Default Pet"}
+                  </Button>
+                )}
+
+                {/* Secondary Actions (Remove, Refresh) */}
+                <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
+                  {selected.installed && !selected.builtIn && !selected.protected && (
+                    <Button
+                      variant="danger"
+                      icon={<RemoveIcon />}
+                      disabled={!!busy}
+                      onClick={() => act("Removing", () => api.removePet(selected.id))}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    icon={<RefreshIcon />}
+                    disabled={!!busy}
+                    onClick={() => void load()}
+                  >
+                    Refresh
+                  </Button>
+                </div>
+              </div></> : <p>No pets available.</p>}
+          </GlassCard>
+        </div>
+      )}
+    </main>
+  );
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

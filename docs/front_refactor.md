@@ -16,9 +16,10 @@ The desktop app currently has two UI systems:
 
 2. **New React/Tailwind Control Center preview**
    - Added as a separate preview path.
-   - Only the Pets page has been migrated so far.
+   - Pets, Settings, Plugins, and Integrations have been migrated so far.
+   - The Control Center shell/navigation is in place, with route slots for Dashboard, Integrations, and Onboarding.
    - Opened from the tray via `Control Center Preview...`.
-   - Does not replace the old `Manage Pets...` window yet.
+   - Does not replace the old task-window entries yet.
 
 This means the refactor is intentionally incremental: the new UI can be reviewed without risking the existing desktop workflow.
 
@@ -80,7 +81,7 @@ Implemented as a reviewable prototype behind a separate tray entry:
 - Existing `Manage Pets...` remains unchanged.
 - Renderer lives under `apps/desktop/src/renderer/`.
 - Vite outputs packaged assets to `apps/desktop/dist/renderer/`.
-- `control-center-preload.cjs` exposes a narrow Pets-only API.
+- `control-center-preload.cjs` exposes narrow page-specific APIs.
 
 The Pets page includes:
 
@@ -160,7 +161,9 @@ Added:
 apps/desktop/control-center-preload.cjs
 ```
 
-It exposes only Pets-related methods to the React renderer:
+It exposes narrow, page-specific methods to the React renderer. It now covers Pets, Settings, Plugins, and Integrations without exposing `ipcRenderer` directly.
+
+Pets methods include:
 
 - `getPetsState`
 - `getCatalog`
@@ -172,16 +175,30 @@ It exposes only Pets-related methods to the React renderer:
 - `importCodexPet`
 - `removePet`
 
+Settings methods include startup preferences, launch-at-login, pet scale, reaction animation mapping, update checks, and default pet position reset.
+
+Plugins methods include plugin snapshots, catalog snapshots, enable/disable, config save, reload, command execution, local plugin loading, catalog install/update, and uninstall.
+
+Integrations methods include agent setup snapshots, setup actions, and command path updates for Claude Code, OpenCode, and Cursor.
+
 It does not expose `ipcRenderer` directly.
 
-### Pets-only state
+### Narrow page state
 
-The Control Center does not receive the full app state. It receives a narrowed pets snapshot only:
+The Control Center does not receive the full app state. It receives narrowed page snapshots only.
+
+The Pets page receives:
 
 - default pet id
 - installed pets
 
-This avoids exposing unrelated settings/integration state to the new renderer.
+The Settings page receives only settings preferences/options needed by the route.
+
+The Plugins page receives safe plugin and catalog records from `PluginService`, intentionally excluding raw install paths and manifest paths.
+
+The Integrations page receives the existing narrowed agent setup snapshot used by the legacy task window: status/details for Claude Code, OpenCode, Cursor, Pi guidance, command paths, pet routing choices, and safe previews.
+
+This avoids exposing unrelated state to the new renderer.
 
 ### Pets page UI
 
@@ -199,6 +216,53 @@ The new Pets page now supports:
 - remove pet
 - detail panel
 - animated sprite-frame preview
+
+### Settings page UI
+
+The Control Center Settings page now supports:
+
+- show-pet-on-launch preference
+- launch-at-login preference
+- pet scale selection
+- reaction-to-animation mapping
+- default pet position reset
+- compact system/update status
+- default-pet reaction previews using the `openpets-pet-preview:` protocol
+- bottom-center floating notifications that do not shift layout
+
+The legacy Settings task window remains available as fallback during migration.
+
+### Plugins page UI
+
+The Control Center Plugins page now supports:
+
+- gallery-first plugin hub
+- installed/catalog/local/broken filters
+- catalog refresh and local plugin loading in the bottom utility row
+- plugin install from catalog
+- enable/disable directly from plugin cards
+- on-demand configuration modal instead of a persistent split inspector
+- dynamic config forms for supported plugin schema fields
+- command execution when plugins expose commands
+- reload, update, and uninstall actions
+- safe no-op/cancel feedback for install/update/local-load flows
+
+The legacy Plugins task window remains available as fallback during migration.
+
+### Integrations page UI
+
+The Control Center Integrations page now supports:
+
+- grid-first integration hub with icons and status pills
+- direct install/connect actions from Claude Code, OpenCode, and Cursor cards
+- detail inspector opened by Configure/View setup buttons
+- Claude MCP setup, replace/remove, hooks, instructions, pet routing, command paths, and advanced previews
+- OpenCode global setup, remove, pet routing, command paths, and config preview
+- Cursor MCP setup, replace/remove, pet routing, and MCP preview
+- Pi manual setup guidance
+- polished disabled cards for future editor integrations
+
+The legacy Integrations task window remains available as fallback during migration.
 
 ### Build/test integration
 
@@ -246,64 +310,31 @@ Reuse the current polished desktop visual language:
 - no direct `ipcRenderer` exposure
 - deny navigation, redirects, and `window.open`
 - dev renderer URL allowed only for loopback hosts in non-packaged builds
-- Control Center receives pets-only state, not full app state
+- Control Center receives narrow page snapshots, not full app state
 
-## Future Migration Order
+## Migration Status and Next Order
 
-Suggested next phases after Pets UI review:
+Completed phases:
 
-1. **Manual UI review**
-   - Launch the app.
-   - Open `Control Center Preview...` from the tray.
-   - Compare it against the old `Manage Pets...` window.
-   - Confirm the visual direction: spacing, cards, colors, buttons, details, preview behavior.
+- Manual Pets review and refinement
+- Control Center routing/shell
+- Settings migration
+- Plugins migration
+- Integrations migration
 
-2. **Refine Pets page**
-   - Polish anything that feels off before migrating more pages.
-   - Possible areas:
-     - better sprite preview states
-     - richer pet detail layout
-     - improved empty/loading/error states
-     - more exact parity with old Pet Manager behavior
-     - responsive layout polish
+Suggested next phases:
 
-3. **Add Control Center routing/shell**
-   - Add a real sidebar/top navigation.
-   - Keep Pets as the first route.
-   - Prepare route slots for Settings, Plugins, Integrations, and Onboarding.
-
-4. **Migrate Settings**
-   - Startup behavior
-   - launch at login
-   - pet scale
-   - reaction animation mapping
-   - update checker
-
-5. **Migrate Plugins**
-   - plugin hub
-   - catalog/install/update
-   - config forms
-   - local developer plugin loading
-
-6. **Migrate Integrations**
-   - Claude Code
-   - OpenCode
-   - Cursor
-   - Pi manual setup
-   - command path configuration
-   - preview/advanced sections
-
-7. **Migrate Onboarding**
+1. **Migrate Onboarding**
    - Make onboarding an overlay or route inside the Control Center.
    - Stop opening separate setup windows during onboarding.
 
-8. **Switch tray actions to Control Center routes**
+2. **Switch tray actions to Control Center routes**
    - `Manage Pets...` opens Control Center `/pets`.
    - `Settings...` opens `/settings`.
    - `Plugins...` opens `/plugins`.
    - `Integrations...` opens `/integrations`.
 
-9. **Remove legacy UI code**
+3. **Remove legacy UI code**
    - Remove generated task-window HTML/CSS.
    - Remove DOM-rendering logic from `preload.cjs`.
    - Keep preloads as narrow API bridges only.
