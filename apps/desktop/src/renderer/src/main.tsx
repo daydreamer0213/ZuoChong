@@ -25,10 +25,10 @@ const InstallIcon = () => (
 
 const ImportIcon = () => (
   <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-    <line x1="12" y1="18" x2="12" y2="12" />
-    <polyline points="9 15 12 12 15 15" />
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M12 18v-6" />
+    <path d="m9 15 3 3 3-3" />
   </svg>
 );
 
@@ -40,69 +40,83 @@ const SetDefaultIcon = () => (
 
 const RemoveIcon = () => (
   <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="3 6 5 6 21 6" />
-    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M3 6h18" />
+    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
   </svg>
 );
 
 const RefreshIcon = () => (
   <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+    <path d="M21 3v5h-5" />
+    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+    <path d="M3 21v-5h5" />
   </svg>
 );
 
 const PrevIcon = () => (
   <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="15 18 9 12 15 6" />
+    <path d="m15 18-6-6 6-6" />
   </svg>
 );
 
 const NextIcon = () => (
   <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="9 18 15 12 9 6" />
+    <path d="m9 18 6-6-6-6" />
   </svg>
 );
 
 const FilterAllIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="7" height="7" />
-    <rect x="14" y="3" width="7" height="7" />
-    <rect x="14" y="14" width="7" height="7" />
-    <rect x="3" y="14" width="7" height="7" />
+    <rect width="7" height="7" x="3" y="3" rx="1" />
+    <rect width="7" height="7" x="14" y="3" rx="1" />
+    <rect width="7" height="7" x="14" y="14" rx="1" />
+    <rect width="7" height="7" x="3" y="14" rx="1" />
   </svg>
 );
 
 const FilterInstalledIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-    <polyline points="22 4 12 14.01 9 11.01" />
+    <circle cx="12" cy="12" r="10" />
+    <path d="m9 12 2 2 4-4" />
   </svg>
 );
 
 const FilterOriginalIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 8v8M8 12h8" />
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z" />
   </svg>
 );
 
 const FilterWesternIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+    <path d="M2 12h20" />
   </svg>
 );
 
 const FilterAsianIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z" />
-    <path d="M12 6v12M6 12h12" />
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2" />
+    <path d="M12 20v2" />
+    <path d="m4.93 4.93 1.41 1.41" />
+    <path d="m17.66 17.66 1.41 1.41" />
+    <path d="M2 12h2" />
+    <path d="M20 12h2" />
+    <path d="m6.34 17.66-1.41 1.41" />
+    <path d="m19.07 4.93-1.41 1.41" />
   </svg>
 );
 
 const FilterCodexIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
   </svg>
 );
 
@@ -134,6 +148,7 @@ const statusPillToneClass = {
 function Button({
   children,
   variant = "primary",
+  size = "normal",
   onClick,
   disabled,
   icon,
@@ -142,6 +157,7 @@ function Button({
 }: {
   children: React.ReactNode;
   variant?: "primary" | "secondary" | "danger" | "success" | "warning";
+  size?: "normal" | "compact";
   onClick?: () => void;
   disabled?: boolean;
   icon?: React.ReactNode;
@@ -150,13 +166,13 @@ function Button({
 }) {
   return (
     <button
-      className={`btn ${buttonVariantClass[variant]} ${fullWidth ? "w-full" : ""} ${icon ? "has-icon" : ""}`}
+      className={`btn ${buttonVariantClass[variant]} ${size === "compact" ? "btn-compact" : ""} ${fullWidth ? "w-full" : ""} ${icon ? "has-icon" : ""}`}
       onClick={onClick}
       disabled={disabled}
     >
-      {icon && iconPosition === "left" && <span className="btn-icon-wrapper mr-2 inline-flex items-center justify-center">{icon}</span>}
+      {icon && iconPosition === "left" && <span className="btn-icon-wrapper mr-1.5 inline-flex items-center justify-center">{icon}</span>}
       <span className="btn-text">{children}</span>
-      {icon && iconPosition === "right" && <span className="btn-icon-wrapper ml-2 inline-flex items-center justify-center">{icon}</span>}
+      {icon && iconPosition === "right" && <span className="btn-icon-wrapper ml-1.5 inline-flex items-center justify-center">{icon}</span>}
     </button>
   );
 }
@@ -425,7 +441,7 @@ function App() {
     {error && <div className="error">{error}</div>}
     <div className="layout">
       <GlassCard className="gallery">
-        <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /><StatusPill tone="slate">{pets.length} pets</StatusPill></div>
+        <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
         <div className="filters">
           {(["all", "installed", "original", "western", "asian", "codex"] as Filter[]).map((f) => (
             <button
@@ -438,28 +454,6 @@ function App() {
             </button>
           ))}
         </div>
-        {!!catalog?.pageCount && catalog.pageCount > 1 && (
-          <div className="pager">
-            <Button
-              variant="secondary"
-              icon={<PrevIcon />}
-              disabled={!!busy || catalogPage <= 0}
-              onClick={() => void loadCatalogPage(catalogPage - 1)}
-            >
-              Prev
-            </Button>
-            <span className="pager-text">Page {catalogPage + 1} of {catalog.pageCount}</span>
-            <Button
-              variant="secondary"
-              icon={<NextIcon />}
-              iconPosition="right"
-              disabled={!!busy || catalogPage >= catalog.pageCount - 1}
-              onClick={() => void loadCatalogPage(catalogPage + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        )}
         <div className="pets-grid">{pets.map((pet) => {
           const isBuiltIn = pet.builtIn;
           const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
@@ -483,6 +477,32 @@ function App() {
             </button>
           );
         })}</div>
+        <div className="pager">
+          {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+            <Button
+              variant="secondary"
+              size="compact"
+              icon={<PrevIcon />}
+              disabled={!!busy || catalogPage <= 0}
+              onClick={() => void loadCatalogPage(catalogPage - 1)}
+            >
+              Prev
+            </Button>
+          ) : <span />}
+          <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
+          {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+            <Button
+              variant="secondary"
+              size="compact"
+              icon={<NextIcon />}
+              iconPosition="right"
+              disabled={!!busy || catalogPage >= catalog.pageCount - 1}
+              onClick={() => void loadCatalogPage(catalogPage + 1)}
+            >
+              Next
+            </Button>
+          ) : <span />}
+        </div>
       </GlassCard>
       <GlassCard className="detail">
         {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
@@ -545,7 +565,7 @@ function App() {
             )}
             {selected.installed && selected.id !== defaultId && !selected.broken && (
               <Button
-                variant="success"
+                variant="primary"
                 fullWidth
                 icon={<SetDefaultIcon />}
                 disabled={!!busy}
