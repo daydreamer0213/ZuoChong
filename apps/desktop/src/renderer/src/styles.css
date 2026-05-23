@@ -14,7 +14,7 @@
   .hero { @apply mb-6 flex items-center justify-between gap-6; }
   .hero-content { @apply flex flex-col justify-center; }
   .hero h1 { @apply m-0 font-monoDisplay text-5xl font-black tracking-tight text-navy leading-none; }
-  .hero-desc { @apply m-0 mt-1.5 text-sm text-slatecopy max-w-md font-medium; }
+  .hero-desc { @apply m-0 mt-1.5 min-h-10 max-w-md text-sm font-medium leading-5 text-slatecopy; }
   .hero-logo-container { @apply flex shrink-0 items-center justify-end; }
   .hero-brand-logo { @apply h-28 w-auto max-w-[480px] object-contain select-none; filter: drop-shadow(0 6px 12px rgba(61, 99, 160, 0.10)); }
   .eyebrow { @apply mb-1.5 font-monoDisplay text-xs font-black uppercase tracking-[.18em] text-brand; }
@@ -77,4 +77,12 @@
   .btn-icon { @apply h-4 w-4 stroke-[2.5]; }
   .pager-text { @apply text-xs font-bold uppercase tracking-wider text-slatecopy/80; }
   .error { @apply mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700; }
+  
+  .nav-bar { @apply mb-5 flex items-center gap-1.5 border-b border-blue-200/30 pb-3.5 flex-wrap; }
+  .nav-tab { @apply rounded-xl border px-3.5 py-2 font-monoDisplay text-xs font-black uppercase tracking-wider text-slate-600 active:scale-[0.96] transition-[transform,background-color,border-color,box-shadow] duration-150 flex items-center gap-2 cursor-pointer select-none h-9 shadow-sm; border-color: rgba(126, 161, 210, 0.25); background: linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(241, 245, 249, 0.8) 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,1), 0 2px 4px rgba(61,99,160,0.04); }
+  .nav-tab:hover:not(.active) { @apply text-brand; border-color: rgba(37, 99, 235, 0.3); background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(239, 246, 255, 0.8) 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,1), 0 2px 4px rgba(61,99,160,0.06); }
+  .nav-tab.active { @apply text-white; border-color: rgba(29, 78, 216, 0.5); background: linear-gradient(180deg, #3b96ff 0%, #176df2 100%); box-shadow: inset 0 1.5px 0 rgba(255,255,255,0.35), 0 2px 4px rgba(61,99,160,0.10); }
+  .nav-tab.active:hover { background: linear-gradient(180deg, #55a6ff 0%, #176df2 100%); }
+  .nav-icon { @apply h-3.5 w-3.5 stroke-[2.5] opacity-75 shrink-0; }
+  .nav-tab.active .nav-icon { @apply opacity-100; }
 }

@@ -126,6 +126,115 @@ const FilterCodexIcon = () => (
   </svg>
 );
 
+// Navigation Shell Types and Icons
+type Route = "dashboard" | "pets" | "settings" | "plugins" | "integrations" | "onboarding";
+
+const DashboardIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect fill="currentColor" width="7" height="9" x="3" y="3" rx="1" />
+    <rect fill="currentColor" width="7" height="5" x="14" y="3" rx="1" />
+    <rect fill="currentColor" width="7" height="9" x="14" y="12" rx="1" />
+    <rect fill="currentColor" width="7" height="5" x="3" y="16" rx="1" />
+  </svg>
+);
+
+const PetsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle fill="currentColor" cx="11" cy="4" r="2" />
+    <circle fill="currentColor" cx="18" cy="8" r="2" />
+    <circle fill="currentColor" cx="20" cy="16" r="2" />
+    <path fill="currentColor" d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045q-.64-2.065-2.7-2.705A3.5 3.5 0 0 1 5.5 10Z" />
+  </svg>
+);
+
+const SettingsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path fill="currentColor" d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+    <circle fill="currentColor" cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const PluginsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path fill="currentColor" d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2" />
+    <rect fill="currentColor" width="8" height="8" x="14" y="2" rx="1" />
+  </svg>
+);
+
+const IntegrationsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path fill="currentColor" d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1zm0 2v-2" />
+    <path fill="currentColor" d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10m16 11v-2M3 5V3" />
+    <path fill="currentColor" d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2zm3-5V3" />
+  </svg>
+);
+
+const OnboardingIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path fill="currentColor" d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" />
+    <path fill="currentColor" d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" />
+    <path fill="currentColor" d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" />
+  </svg>
+);
+
+const navTabs = [
+  { id: "dashboard" as const, label: "Dashboard", icon: <DashboardIcon /> },
+  { id: "pets" as const, label: "Pets", icon: <PetsIcon /> },
+  { id: "settings" as const, label: "Settings", icon: <SettingsIcon /> },
+  { id: "plugins" as const, label: "Plugins", icon: <PluginsIcon /> },
+  { id: "integrations" as const, label: "Integrations", icon: <IntegrationsIcon /> },
+  { id: "onboarding" as const, label: "Onboarding", icon: <OnboardingIcon /> },
+];
+
+const routeMetadata: Record<Route, { title: string; description: string }> = {
+  dashboard: {
+    title: "Dashboard",
+    description: "Overview of your active companions, status, and system metrics.",
+  },
+  pets: {
+    title: "Pets",
+    description: "Install, import, preview, and choose your default desktop companion.",
+  },
+  settings: {
+    title: "Settings",
+    description: "Configure startup behaviors, scale preferences, and animation settings.",
+  },
+  plugins: {
+    title: "Plugins",
+    description: "Extend your desktop experience with custom tools and behaviors.",
+  },
+  integrations: {
+    title: "Integrations",
+    description: "Connect your companions to Claude Code, VS Code, Cursor, and more.",
+  },
+  onboarding: {
+    title: "Onboarding",
+    description: "A quick walkthrough to configure and personalize your first pet.",
+  },
+};
+
+function PlaceholderView({ route }: { route: Exclude<Route, "pets"> }) {
+  const meta = routeMetadata[route];
+  return (
+    <div className="grid grid-cols-1 w-full">
+      <GlassCard className="flex flex-col items-center justify-center text-center py-16 px-8 h-full min-h-[420px]">
+        <div className="p-4 rounded-3xl bg-blue-50/80 border border-blue-100/50 mb-6 text-brand">
+          {route === "dashboard" && <DashboardIcon />}
+          {route === "settings" && <SettingsIcon />}
+          {route === "plugins" && <PluginsIcon />}
+          {route === "integrations" && <IntegrationsIcon />}
+          {route === "onboarding" && <OnboardingIcon />}
+        </div>
+        <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{meta.title}</h2>
+        <p className="text-sm text-slatecopy max-w-md mb-6">{meta.description}</p>
+        <span className="inline-flex items-center rounded-full bg-blue-50/80 px-4 py-1.5 text-xs font-bold text-brand border border-blue-200/50">
+          Coming Soon • Next Migration Target
+        </span>
+      </GlassCard>
+    </div>
+  );
+}
+
 const filterIcons: Record<Filter, React.ReactNode> = {
   all: <FilterAllIcon />,
   installed: <FilterInstalledIcon />,
@@ -279,6 +388,7 @@ function PetImage({ src, alt = "", debugLabel }: { src?: string; alt?: string; d
 }
 
 function App() {
+  const [currentRoute, setCurrentRoute] = useState<Route>("pets");
   const [state, setState] = useState<StateSnapshot | null>(null);
   const [catalog, setCatalog] = useState<CatalogState | null>(null);
   const [catalogPages, setCatalogPages] = useState<Record<number, PetEntry[]>>({});
@@ -456,181 +566,202 @@ function App() {
     finally { setBusy(""); }
   }
 
+  const currentMeta = routeMetadata[currentRoute];
+
   return <main className="app-shell">
     <header className="hero">
       <div className="hero-content">
         <p className="eyebrow">Control Center Preview</p>
-        <h1>Pets</h1>
-        <p className="hero-desc">Install, import, preview, and choose your default desktop companion.</p>
+        <h1>{currentMeta.title}</h1>
+        <p className="hero-desc">{currentMeta.description}</p>
       </div>
       <div className="hero-logo-container">
         <img src={openPetsLogoUrl} className="hero-brand-logo" alt="OpenPets" />
       </div>
     </header>
+
+    <nav className="nav-bar">
+      {navTabs.map((tab) => (
+        <button
+          key={tab.id}
+          className={`nav-tab ${currentRoute === tab.id ? "active" : ""}`}
+          onClick={() => setCurrentRoute(tab.id)}
+        >
+          {tab.icon}
+          <span>{tab.label}</span>
+        </button>
+      ))}
+    </nav>
+
     {error && <div className="error">{error}</div>}
-    <div className="layout">
-      <GlassCard className="gallery">
-        <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-        <div className="filters">
-          {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
-            <button
-              key={f}
-              className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
-              onClick={() => setFilter(f)}
-            >
-              <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-              <span className="filter-text">{filterLabels[f]}</span>
-            </button>
-          ))}
-        </div>
-        <div className="pets-grid">{pets.map((pet) => {
-          const isBuiltIn = pet.builtIn;
-          const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
-          const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
-          return (
-            <button key={`${pet.sourceKind}-${pet.id}`} className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`} onClick={() => setSelectedId(pet.id)}>
-              <span className="thumb">
-                {useSpritesheetFrame ? (
-                  <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
-                ) : (
-                  <PetImage src={pet.preview} debugLabel={`${pet.id}:card`} />
-                )}
-              </span>
-              <div className="card-content">
-                <span className="card-title-row">
-                  <b className="card-title">{pet.displayName}</b>
+
+    {currentRoute !== "pets" ? (
+      <PlaceholderView route={currentRoute} />
+    ) : (
+      <div className="layout">
+        <GlassCard className="gallery">
+          <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+          <div className="filters">
+            {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
+              <button
+                key={f}
+                className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
+                onClick={() => setFilter(f)}
+              >
+                <span className="filter-icon-wrapper">{filterIcons[f]}</span>
+                <span className="filter-text">{filterLabels[f]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="pets-grid">{pets.map((pet) => {
+            const isBuiltIn = pet.builtIn;
+            const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
+            const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
+            return (
+              <button key={`${pet.sourceKind}-${pet.id}`} className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`} onClick={() => setSelectedId(pet.id)}>
+                <span className="thumb">
+                  {useSpritesheetFrame ? (
+                    <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
+                  ) : (
+                    <PetImage src={pet.preview} debugLabel={`${pet.id}:card`} />
+                  )}
                 </span>
-                <p className="card-desc">{pet.description || pet.id}</p>
-                <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
-              </div>
-            </button>
-          );
-        })}</div>
-        <div className="pager">
-          {!!catalog?.pageCount && catalog.pageCount > 1 ? (
-            <Button
-              variant="secondary"
-              size="compact"
-              icon={<PrevIcon />}
-              disabled={!!busy || catalogPage <= 0}
-              onClick={() => void loadCatalogPage(catalogPage - 1)}
-            >
-              Prev
-            </Button>
-          ) : <span />}
-          <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
-          {!!catalog?.pageCount && catalog.pageCount > 1 ? (
-            <Button
-              variant="secondary"
-              size="compact"
-              icon={<NextIcon />}
-              iconPosition="right"
-              disabled={!!busy || catalogPage >= catalog.pageCount - 1}
-              onClick={() => void loadCatalogPage(catalogPage + 1)}
-            >
-              Next
-            </Button>
-          ) : <span />}
-        </div>
-      </GlassCard>
-      <GlassCard className="detail">
-        {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
-          <div className="stage">
-            {safePetImage(selected.spritesheet) ? (
-              <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
-            ) : (
-              <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
-            )}
-          </div>
-          <div className="meta">
-            {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
-            {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
-            {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
-            {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
-            {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
-            {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
-            {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
-          </div>
-          {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
-          
-          {safePetImage(selected.spritesheet) && (
-            <>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
-              <div className="grid grid-cols-3 gap-3 mb-2">
-                {[
-                  { label: "Thinking", state: "thinking" as const },
-                  { label: "Happy", state: "happy" as const },
-                  { label: "Wave", state: "wave" as const }
-                ].map((preview) => (
-                  <div key={preview.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm">
-                    <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${preview.label} preview`} state={preview.state} size="mini" />
-                    <span className="text-xs font-bold text-slatecopy">{preview.label}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          <div className="actions-container mt-6 flex flex-col gap-3">
-            {/* Main Action (Install, Import, Set Default) */}
-            {!selected.installed && selected.sourceKind === "catalog" && (
-              <Button
-                variant="primary"
-                fullWidth
-                icon={<InstallIcon />}
-                disabled={!!busy}
-                onClick={() => act("Installing", () => api.installPet(selected.id))}
-              >
-                {busy || "Install Pet"}
-              </Button>
-            )}
-            {!selected.installed && selected.sourceKind === "codex" && (
-              <Button
-                variant="warning"
-                fullWidth
-                icon={<ImportIcon />}
-                disabled={!!busy}
-                onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
-              >
-                {busy || "Import Codex Pet"}
-              </Button>
-            )}
-            {selected.installed && selected.id !== defaultId && !selected.broken && (
-              <Button
-                variant="primary"
-                fullWidth
-                icon={<SetDefaultIcon />}
-                disabled={!!busy}
-                onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
-              >
-                {busy || "Set Default Pet"}
-              </Button>
-            )}
-
-            {/* Secondary Actions (Remove, Refresh) */}
-            <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
-              {selected.installed && !selected.builtIn && !selected.protected && (
-                <Button
-                  variant="danger"
-                  icon={<RemoveIcon />}
-                  disabled={!!busy}
-                  onClick={() => act("Removing", () => api.removePet(selected.id))}
-                >
-                  Remove
-                </Button>
-              )}
+                <div className="card-content">
+                  <span className="card-title-row">
+                    <b className="card-title">{pet.displayName}</b>
+                  </span>
+                  <p className="card-desc">{pet.description || pet.id}</p>
+                  <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                </div>
+              </button>
+            );
+          })}</div>
+          <div className="pager">
+            {!!catalog?.pageCount && catalog.pageCount > 1 ? (
               <Button
                 variant="secondary"
-                icon={<RefreshIcon />}
-                disabled={!!busy}
-                onClick={() => void load()}
+                size="compact"
+                icon={<PrevIcon />}
+                disabled={!!busy || catalogPage <= 0}
+                onClick={() => void loadCatalogPage(catalogPage - 1)}
               >
-                Refresh
+                Prev
               </Button>
+            ) : <span />}
+            <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
+            {!!catalog?.pageCount && catalog.pageCount > 1 ? (
+              <Button
+                variant="secondary"
+                size="compact"
+                icon={<NextIcon />}
+                iconPosition="right"
+                disabled={!!busy || catalogPage >= catalog.pageCount - 1}
+                onClick={() => void loadCatalogPage(catalogPage + 1)}
+              >
+                Next
+              </Button>
+            ) : <span />}
+          </div>
+        </GlassCard>
+        <GlassCard className="detail">
+          {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
+            <div className="stage">
+              {safePetImage(selected.spritesheet) ? (
+                <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
+              ) : (
+                <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
+              )}
             </div>
-          </div></> : <p>No pets available.</p>}
-      </GlassCard>
-    </div>
+            <div className="meta">
+              {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
+              {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
+              {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
+              {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
+              {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+              {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
+              {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
+            </div>
+            {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
+            
+            {safePetImage(selected.spritesheet) && (
+              <>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
+                <div className="grid grid-cols-3 gap-3 mb-2">
+                  {[
+                    { label: "Thinking", state: "thinking" as const },
+                    { label: "Happy", state: "happy" as const },
+                    { label: "Wave", state: "wave" as const }
+                  ].map((preview) => (
+                    <div key={preview.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm">
+                      <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${preview.label} preview`} state={preview.state} size="mini" />
+                      <span className="text-xs font-bold text-slatecopy">{preview.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="actions-container mt-6 flex flex-col gap-3">
+              {/* Main Action (Install, Import, Set Default) */}
+              {!selected.installed && selected.sourceKind === "catalog" && (
+                <Button
+                  variant="primary"
+                  fullWidth
+                  icon={<InstallIcon />}
+                  disabled={!!busy}
+                  onClick={() => act("Installing", () => api.installPet(selected.id))}
+                >
+                  {busy || "Install Pet"}
+                </Button>
+              )}
+              {!selected.installed && selected.sourceKind === "codex" && (
+                <Button
+                  variant="warning"
+                  fullWidth
+                  icon={<ImportIcon />}
+                  disabled={!!busy}
+                  onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
+                >
+                  {busy || "Import Codex Pet"}
+                </Button>
+              )}
+              {selected.installed && selected.id !== defaultId && !selected.broken && (
+                <Button
+                  variant="primary"
+                  fullWidth
+                  icon={<SetDefaultIcon />}
+                  disabled={!!busy}
+                  onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
+                >
+                  {busy || "Set Default Pet"}
+                </Button>
+              )}
+
+              {/* Secondary Actions (Remove, Refresh) */}
+              <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
+                {selected.installed && !selected.builtIn && !selected.protected && (
+                  <Button
+                    variant="danger"
+                    icon={<RemoveIcon />}
+                    disabled={!!busy}
+                    onClick={() => act("Removing", () => api.removePet(selected.id))}
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  icon={<RefreshIcon />}
+                  disabled={!!busy}
+                  onClick={() => void load()}
+                >
+                  Refresh
+                </Button>
+              </div>
+            </div></> : <p>No pets available.</p>}
+        </GlassCard>
+      </div>
+    )}
   </main>;
 }
 
