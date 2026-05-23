@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 
-const api = (window as unknown as { openPetsControlCenter: { getPetsState(): Promise<StateSnapshot>; getCatalog(): Promise<CatalogState>; getCatalogPage(page: number): Promise<CatalogState>; getCatalogSearch(): Promise<{ pets: SearchPetEntry[]; error?: string }>; getCodexPets(): Promise<CodexState>; setDefaultPet(petId: string): Promise<StateSnapshot>; installPet(petId: string): Promise<unknown>; importCodexPet(petId: string): Promise<unknown>; removePet(petId: string): Promise<StateSnapshot> } }).openPetsControlCenter;
 type Filter = "all" | "installed" | "featured" | "originals" | "western" | "asian" | "codex";
 type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; source?: { kind?: "catalog"; preview?: string } | { kind: "codex"; path: string } };
 type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
@@ -12,6 +11,35 @@ type SearchPetEntry = Pick<PetEntry, "id" | "displayName" | "category" | "origin
 type StateSnapshot = { preferences: { defaultPetId: string }; pets: { installed: InstalledPet[] } };
 type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: number; pageCount?: number; total?: number; categories?: { id: "western" | "asian"; label: string; count: number }[]; originalsCount?: number; featuredCount?: number };
 type CodexState = { pets: PetEntry[]; error?: string };
+type PetScaleOption = { label: string; value: number };
+type UserSelectableAnimationState = "idle" | "review" | "running" | "waiting" | "waving" | "jumping" | "failed";
+type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides }; petScaleOptions: PetScaleOption[] };
+type LaunchAtLoginState = { supported: boolean; enabled: boolean };
+type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
+type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: { frameWidth: number; frameHeight: number; columns: number; rows: number; states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string };
+type ControlCenterApi = {
+  getPetsState(): Promise<StateSnapshot>;
+  getSettingsState(): Promise<SettingsState>;
+  updatePreferences(patch: Partial<SettingsState["preferences"]>): Promise<SettingsState>;
+  getReactionAnimationSettings(): Promise<ReactionAnimationSettings>;
+  getLaunchAtLogin(): Promise<LaunchAtLoginState>;
+  setLaunchAtLogin(enabled: boolean): Promise<LaunchAtLoginState>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  checkForUpdates(): Promise<UpdateStatus>;
+  openUpdateReleasePage(): Promise<void>;
+  resetDefaultPetPosition(): Promise<SettingsState>;
+  getCatalog(): Promise<CatalogState>;
+  getCatalogPage(page: number): Promise<CatalogState>;
+  getCatalogSearch(): Promise<{ pets: SearchPetEntry[]; error?: string }>;
+  getCodexPets(): Promise<CodexState>;
+  setDefaultPet(petId: string): Promise<StateSnapshot>;
+  installPet(petId: string): Promise<unknown>;
+  importCodexPet(petId: string): Promise<unknown>;
+  removePet(petId: string): Promise<StateSnapshot>;
+};
+
+const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
 
 
 // Inline SVG Icons for actions, pagination, and filters
@@ -387,6 +415,231 @@ function PetImage({ src, alt = "", debugLabel }: { src?: string; alt?: string; d
   return <img src={safeSrc} alt={alt} draggable="false" onError={() => logPetsError("image-failed", { label: debugLabel, src: imageDebug(safeSrc) })} />;
 }
 
+function ToggleRow({ title, description, checked, disabled, onChange }: { title: string; description: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  return <label className={`settings-row ${disabled ? "opacity-60" : ""}`}>
+    <div className="settings-row-info"><strong>{title}</strong><small>{description}</small></div>
+    <input className="settings-toggle" type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+  </label>;
+}
+
+function formatUpdateStatus(status: UpdateStatus | null): string {
+  if (!status) return "Update status has not loaded yet.";
+  if (status.state === "checking") return "Checking for updates…";
+  if (status.state === "available") return `Version ${status.latestVersion ?? "latest"} is available.`;
+  if (status.state === "current") return `Up to date.`;
+  if (status.state === "error") return status.error || "Update check failed.";
+  return `Version: ${status.currentVersion}.`;
+}
+
+function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimationSettings; state: UserSelectableAnimationState }) {
+  const frame = { width: settings.sprite.frameWidth, height: settings.sprite.frameHeight };
+  const sprite = settings.sprite.states[state] ?? settings.sprite.states.idle;
+  const xValues = Array.from({ length: sprite.frames }, (_, index) => String(-index * frame.width)).join(";");
+  const y = -sprite.row * frame.height;
+
+  return (
+    <div className="reaction-preview-sprite-shell">
+      <svg className="reaction-preview-sprite" width={frame.width} height={frame.height} viewBox={`0 0 ${frame.width} ${frame.height}`} role="img" aria-label={`Animation: ${state}`}>
+        <image href={settings.previewSpriteUrl} x="0" y={y} width={frame.width * settings.sprite.columns} height={frame.height * settings.sprite.rows} preserveAspectRatio="none">
+          <animate attributeName="x" values={xValues} dur={`${sprite.durationMs}ms`} repeatCount="indefinite" calcMode="discrete" />
+        </image>
+      </svg>
+    </div>
+  );
+}
+
+function SettingsView() {
+  const [settings, setSettings] = useState<SettingsState | null>(null);
+  const [reactionSettings, setReactionSettings] = useState<ReactionAnimationSettings | null>(null);
+  const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [activeTab, setActiveTab] = useState<"general" | "reactions">("general");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const reactionSaveQueue = useRef(Promise.resolve());
+
+  async function loadSettings() {
+    setError("");
+    const [nextSettings, nextReactions, nextLaunch, nextUpdate] = await Promise.all([
+      api.getSettingsState(),
+      api.getReactionAnimationSettings(),
+      api.getLaunchAtLogin(),
+      api.getUpdateStatus(),
+    ]);
+    setSettings(nextSettings);
+    setReactionSettings(nextReactions);
+    setLaunchAtLogin(nextLaunch);
+    setUpdateStatus(nextUpdate);
+    if (nextUpdate.state === "checking") {
+      void api.checkForUpdates().then(setUpdateStatus).catch((err) => setError(String(err?.message ?? err)));
+    }
+  }
+
+  useEffect(() => { void loadSettings().catch((err) => setError(String(err?.message ?? err))); }, []);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(() => setMessage(""), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  async function run(label: string, fn: () => Promise<void>) {
+    try { setBusy(label); setError(""); setMessage(""); await fn(); }
+    catch (err) { setError(String((err as Error)?.message ?? err)); }
+    finally { setBusy(""); }
+  }
+
+  function patchPreferences(patch: Partial<SettingsState["preferences"]>, success: string) {
+    void run("Saving", async () => {
+      const next = await api.updatePreferences(patch);
+      setSettings(next);
+      if ("reactionAnimationOverrides" in patch) {
+        setReactionSettings((current) => current ? { ...current, overrides: next.preferences.reactionAnimationOverrides ?? {} } : current);
+      }
+      setMessage(success);
+    });
+  }
+
+  function updateReactionOverride(reaction: ReactionAnimationSettings["reactions"][number], value: UserSelectableAnimationState) {
+    const queuedSave = reactionSaveQueue.current.catch(() => undefined).then(() => run("Saving", async () => {
+      const latestReactions = await api.getReactionAnimationSettings();
+      const nextOverrides = { ...(latestReactions.overrides ?? {}) };
+      if (value === reaction.defaultAnimation) delete nextOverrides[reaction.id];
+      else nextOverrides[reaction.id] = value;
+      const nextSettings = await api.updatePreferences({ reactionAnimationOverrides: nextOverrides });
+      setSettings(nextSettings);
+      setReactionSettings({ ...latestReactions, overrides: nextSettings.preferences.reactionAnimationOverrides ?? {} });
+      setMessage("Reaction animation saved.");
+    }));
+    reactionSaveQueue.current = queuedSave;
+    void queuedSave;
+  }
+
+  const overrides = settings?.preferences.reactionAnimationOverrides ?? {};
+
+  return <div className="settings-layout">
+    {error && <div className="error settings-message">{error}</div>}
+    {message && <div className="settings-success settings-message">{message}</div>}
+
+    <div className="settings-container">
+      <aside className="settings-sidebar">
+        <button className={`settings-nav-item ${activeTab === "general" ? "active" : ""}`} onClick={() => setActiveTab("general")}>
+          <SettingsIcon />
+          <span>General</span>
+        </button>
+        <button className={`settings-nav-item ${activeTab === "reactions" ? "active" : ""}`} onClick={() => setActiveTab("reactions")}>
+          <PetsIcon />
+          <span>Reaction Mapping</span>
+        </button>
+      </aside>
+
+      <main className="settings-content">
+        {activeTab === "general" && (
+          <div className="settings-section">
+            <p className="eyebrow">Environment</p>
+            <h2 className="settings-section-title">General Settings</h2>
+
+            <div className="settings-group">
+              <ToggleRow
+                title="Show pet on launch"
+                description="Keep OpenPets in the tray but hide the pet until requested."
+                checked={settings?.preferences.openDefaultPetOnLaunch ?? false}
+                disabled={!settings || !!busy}
+                onChange={(checked) => patchPreferences({ openDefaultPetOnLaunch: checked }, "Startup preference saved.")}
+              />
+              <ToggleRow
+                title="Launch at login"
+                description={launchAtLogin?.supported ? "Start OpenPets automatically when your computer starts." : "Not supported on this platform."}
+                checked={launchAtLogin?.enabled ?? false}
+                disabled={!launchAtLogin?.supported || !!busy}
+                onChange={(checked) => void run("Saving", async () => { setLaunchAtLogin(await api.setLaunchAtLogin(checked)); setMessage("Login startup preference saved."); })}
+              />
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <strong>Pet scale</strong>
+                  <small>Adjust how large the default desktop pet appears.</small>
+                </div>
+                <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, "Pet scale saved.")}>
+                  {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="settings-actions">
+              <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Resetting", async () => { setSettings(await api.resetDefaultPetPosition()); setMessage("Default pet position reset."); })}>Reset Pet Position</Button>
+            </div>
+
+            <div className="settings-system-footer">
+              <div className="settings-system-info">
+                <RefreshIcon />
+                <span>System Status</span>
+                <span className="settings-system-version">{updateStatus?.currentVersion}</span>
+                <span className="opacity-60">{formatUpdateStatus(updateStatus)}</span>
+              </div>
+              <div className="flex gap-2">
+                {updateStatus?.state === "available" && (
+                  <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run("Opening", async () => { await api.openUpdateReleasePage(); })}>Update Available</Button>
+                )}
+                <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run("Checking", async () => { setUpdateStatus(await api.checkForUpdates()); })}>
+                  {busy === "Checking" ? "Checking…" : "Check for Updates"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "reactions" && (
+          <div className="settings-section">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="eyebrow">Behavior</p>
+                <h2 className="settings-section-title">Reaction Mapping</h2>
+              </div>
+              <Button variant="secondary" size="compact" disabled={!settings || !!busy || !Object.keys(overrides).length} onClick={() => patchPreferences({ reactionAnimationOverrides: {} }, "Reaction animations reset.")}>Reset to Defaults</Button>
+            </div>
+            <p className="text-sm text-slatecopy -mt-2 mb-2">Customize which animation plays for each agent reaction. Previews use the default pet.</p>
+
+            <div className="settings-group">
+              <div className="reaction-grid">
+                {(reactionSettings?.reactions ?? []).map((reaction) => {
+                  const currentAnimation = overrides[reaction.id] ?? reaction.defaultAnimation;
+                  return (
+                    <div className="reaction-row" key={reaction.id}>
+                      <div className="reaction-preview-box">
+                        {reactionSettings?.previewSpriteUrl && (
+                          <ReactionPreviewSprite settings={reactionSettings} state={currentAnimation} />
+                        )}
+                      </div>
+                      <div className="reaction-info">
+                        <strong>{reaction.label}</strong>
+                        <small>{reaction.description}</small>
+                      </div>
+                      <select
+                        className="settings-select"
+                        value={currentAnimation}
+                        disabled={!reactionSettings || !settings || !!busy}
+                        onChange={(event) => {
+                          const value = event.target.value as UserSelectableAnimationState;
+                          updateReactionOverride(reaction, value);
+                        }}
+                      >
+                        {(reactionSettings?.animations ?? []).map((animation) => (
+                          <option key={animation.id} value={animation.id}>{animation.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  </div>;
+}
+
 function App() {
   const [currentRoute, setCurrentRoute] = useState<Route>("pets");
   const [state, setState] = useState<StateSnapshot | null>(null);
@@ -595,7 +848,9 @@ function App() {
 
     {error && <div className="error">{error}</div>}
 
-    {currentRoute !== "pets" ? (
+    {currentRoute === "settings" ? (
+      <SettingsView />
+    ) : currentRoute !== "pets" ? (
       <PlaceholderView route={currentRoute} />
     ) : (
       <div className="layout">

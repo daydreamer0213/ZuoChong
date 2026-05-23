@@ -87,6 +87,21 @@ function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: 
   return { preferences: { defaultPetId: state.preferences.defaultPetId }, pets: state.pets };
 }
 
+function getSettingsStateSnapshot(): {
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides">;
+  petScaleOptions: typeof petScaleOptions;
+} {
+  const state = getAppStateSnapshot();
+  return {
+    preferences: {
+      openDefaultPetOnLaunch: state.preferences.openDefaultPetOnLaunch,
+      petScale: state.preferences.petScale,
+      reactionAnimationOverrides: state.preferences.reactionAnimationOverrides,
+    },
+    petScaleOptions,
+  };
+}
+
 export function installInternalUiHandlers(): void {
   if (internalUiHandlersInstalled) {
     return;
@@ -104,8 +119,13 @@ export function installInternalUiHandlers(): void {
     return getPetsStateSnapshot();
   });
 
+  ipcMain.handle("openpets:get-settings-state", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getSettingsStateSnapshot();
+  });
+
   ipcMain.handle("openpets:get-reaction-animation-settings", async (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     return getReactionAnimationSettingsSnapshot();
   });
 
@@ -217,7 +237,7 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:update-preferences", (event, patch: unknown) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     const previousScale = getAppStateSnapshot().preferences.petScale;
     const previousOverrides = JSON.stringify(getAppStateSnapshot().preferences.reactionAnimationOverrides ?? {});
     const state = updatePreferences(validatePreferencePatch(patch));
@@ -226,16 +246,16 @@ export function installInternalUiHandlers(): void {
       refreshDefaultPetContent();
       refreshAgentPetContent();
     }
-    return state;
+    return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getSettingsStateSnapshot() : state;
   });
 
   ipcMain.handle("openpets:get-launch-at-login", (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     return getLaunchAtLoginState();
   });
 
   ipcMain.handle("openpets:set-launch-at-login", (event, enabled: unknown) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     if (typeof enabled !== "boolean") throw new Error("Invalid launch-at-login value.");
     if (!isLaunchAtLoginSupported()) return getLaunchAtLoginState();
     app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
@@ -243,12 +263,12 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:get-update-status", (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     return getUpdateStatus();
   });
 
   ipcMain.handle("openpets:check-for-updates", async (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     const status = await checkForGitHubReleaseUpdate();
     const { refreshTrayMenu } = await import("./tray.js");
     refreshTrayMenu();
@@ -256,7 +276,7 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:open-update-release-page", async (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     await openUpdateReleasePage();
   });
 
@@ -305,9 +325,9 @@ export function installInternalUiHandlers(): void {
   });
 
   ipcMain.handle("openpets:reset-default-pet-position", (event) => {
-    assertAllowedSender(event, ["settings"]);
+    assertAllowedSender(event, ["settings", "control-center"]);
     resetDefaultPetToInitialPosition();
-    return getAppStateSnapshot();
+    return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getSettingsStateSnapshot() : getAppStateSnapshot();
   });
 
   ipcMain.handle("openpets:agent-setup-snapshot", async (event, selectedPetId: unknown, commandMode: unknown) => {
