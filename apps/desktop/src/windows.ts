@@ -12,6 +12,7 @@ import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
 import { getInstalledPetDir } from "./pet-paths.js";
+import { debug, error as logError, warn } from "./logger.js";
 import { getPluginService, type PluginServiceResult } from "./plugin-service.js";
 import { createPluginsHtml } from "./plugins-window.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
@@ -452,9 +453,17 @@ export function openControlCenterWindow(): void {
   window.webContents.on("will-redirect", (event) => event.preventDefault());
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
     console.error("Failed to load Control Center renderer.", { errorCode, errorDescription });
+    logError("ui", "control center load failed", { errorCode, errorDescription });
+  });
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const fields = { level, line, sourceId, message };
+    if (level >= 3) logError("ui", "control center console", fields);
+    else if (level === 2) warn("ui", "control center console", fields);
+    else debug("ui", "control center console", fields);
   });
   window.webContents.on("render-process-gone", (_event, details) => {
     console.error("Control Center renderer process gone.", details);
+    logError("ui", "control center renderer gone", details);
   });
   window.on("closed", () => { controlCenterWindow = null; });
   window.once("ready-to-show", () => { window.show(); window.focus(); });
