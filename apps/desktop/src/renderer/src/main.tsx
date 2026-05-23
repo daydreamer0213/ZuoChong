@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import logoUrl from "../../../assets/onboarding-logo.webp";
+import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 
 const api = (window as unknown as { openPetsControlCenter: { getPetsState(): Promise<StateSnapshot>; getCatalog(): Promise<CatalogState>; getCatalogPage(page: number): Promise<CatalogState>; getCatalogSearch(): Promise<{ pets: SearchPetEntry[]; error?: string }>; getCodexPets(): Promise<CodexState>; setDefaultPet(petId: string): Promise<StateSnapshot>; installPet(petId: string): Promise<unknown>; importCodexPet(petId: string): Promise<unknown>; removePet(petId: string): Promise<StateSnapshot> } }).openPetsControlCenter;
-type Filter = "all" | "installed" | "original" | "western" | "asian" | "codex";
+type Filter = "all" | "installed" | "featured" | "originals" | "western" | "asian" | "codex";
 type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; source?: { kind?: "catalog"; preview?: string } | { kind: "codex"; path: string } };
 type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
 type SearchPetEntry = Pick<PetEntry, "id" | "displayName" | "category" | "original" | "featured"> & { searchText?: string; catalogPage?: number };
 type StateSnapshot = { preferences: { defaultPetId: string }; pets: { installed: InstalledPet[] } };
-type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: number; pageCount?: number; total?: number; categories?: { id: "western" | "asian"; label: string; count: number }[]; originalsCount?: number };
+type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: number; pageCount?: number; total?: number; categories?: { id: "western" | "asian"; label: string; count: number }[]; originalsCount?: number; featuredCount?: number };
 type CodexState = { pets: PetEntry[]; error?: string };
 
 
@@ -85,6 +85,12 @@ const FilterInstalledIcon = () => (
   </svg>
 );
 
+const FilterFeaturedIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3q1 4 4 6.5t3 5.5a7 7 0 0 1-14 0 5 5 0 0 1 1-3 3 3 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4" />
+  </svg>
+);
+
 const FilterOriginalIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z" />
@@ -123,10 +129,21 @@ const FilterCodexIcon = () => (
 const filterIcons: Record<Filter, React.ReactNode> = {
   all: <FilterAllIcon />,
   installed: <FilterInstalledIcon />,
-  original: <FilterOriginalIcon />,
+  featured: <FilterFeaturedIcon />,
+  originals: <FilterOriginalIcon />,
   western: <FilterWesternIcon />,
   asian: <FilterAsianIcon />,
   codex: <FilterCodexIcon />,
+};
+
+const filterLabels: Record<Filter, string> = {
+  all: "All",
+  installed: "Installed",
+  featured: "Featured",
+  originals: "Originals",
+  western: "Western",
+  asian: "Asian",
+  codex: "Codex",
 };
 
 const buttonVariantClass = {
@@ -141,6 +158,8 @@ const statusPillToneClass = {
   blue: "pill-blue",
   green: "pill-green",
   orange: "pill-orange",
+  purple: "pill-purple",
+  yellow: "pill-yellow",
   red: "pill-red",
   slate: "pill-slate",
 } as const;
@@ -177,7 +196,7 @@ function Button({
   );
 }
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <section className={`glass ${className}`}>{children}</section>; }
-function StatusPill({ children, tone = "blue" }: { children: React.ReactNode; tone?: "blue" | "green" | "orange" | "red" | "slate" }) { return <span className={`pill ${statusPillToneClass[tone]}`}>{children}</span>; }
+function StatusPill({ children, tone = "blue" }: { children: React.ReactNode; tone?: keyof typeof statusPillToneClass }) { return <span className={`pill ${statusPillToneClass[tone]}`}>{children}</span>; }
 function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) { return <input className="search" placeholder="Search pets..." {...props} />; }
 
 function isAllowedCatalogPreview(value: string | undefined): value is string {
@@ -300,12 +319,14 @@ function App() {
       const preview = safePetImage(codexPet?.preview) || safePetImage(catalogPet?.preview) || safePetImage(catalogPet?.thumbnail) || safePetImage(p.source && "preview" in p.source ? (p.source as { preview?: string }).preview : undefined) || defaultThumbUrl;
       const category = catalogPet?.category;
       const original = catalogPet?.original;
+      const featured = catalogPet?.featured;
       return {
         ...p,
         spritesheet,
         preview,
         category,
         original,
+        featured,
         sourceKind: "installed" as const,
         installed: true,
       };
@@ -338,8 +359,9 @@ function App() {
     return rows.filter((p) => {
       if (filter === "installed" && !p.installed) return false;
       if (filter === "codex" && p.sourceKind !== "codex" && !(installed.get(p.id)?.source?.kind === "codex")) return false;
-      if (filter === "original" && !p.original && !p.builtIn) return false;
-      if ((filter === "western" || filter === "asian") && p.category !== filter) return false;
+      if (filter === "originals" && !p.original && !p.builtIn) return false;
+      if (filter === "featured" && (!p.featured || p.original)) return false;
+      if ((filter === "western" || filter === "asian") && (p.category !== filter || p.featured || p.original)) return false;
       const q = query.trim().toLowerCase();
       return !q || `${p.displayName} ${p.description ?? ""} ${p.searchText ?? ""} ${p.id}`.toLowerCase().includes(q);
     });
@@ -385,7 +407,7 @@ function App() {
   useEffect(() => {
     if (!catalogSearch) return;
     const q = query.trim().toLowerCase();
-    const needsRemotePages = !!q || filter === "original" || filter === "western" || filter === "asian";
+    const needsRemotePages = !!q || filter === "featured" || filter === "originals" || filter === "western" || filter === "asian";
     
     const pages = new Set<number>();
     
@@ -401,8 +423,9 @@ function App() {
     if (needsRemotePages) {
       for (const pet of catalogSearch) {
         if (pages.size >= 12) break;
-        if ((filter === "western" || filter === "asian") && pet.category !== filter) continue;
-        if (filter === "original" && !pet.original) continue;
+        if ((filter === "western" || filter === "asian") && (pet.category !== filter || pet.featured || pet.original)) continue;
+        if (filter === "originals" && !pet.original) continue;
+        if (filter === "featured" && (!pet.featured || pet.original)) continue;
         if (q && !`${pet.displayName} ${pet.searchText ?? ""} ${pet.id}`.toLowerCase().includes(q)) continue;
         if (typeof pet.catalogPage === "number" && !catalogPages[pet.catalogPage]) pages.add(pet.catalogPage);
       }
@@ -435,22 +458,28 @@ function App() {
 
   return <main className="app-shell">
     <header className="hero">
-      <img src={logoUrl} alt="OpenPets" />
-      <div><p className="eyebrow">Control Center Preview</p><h1>Pets</h1><p>Install, import, preview, and choose your default desktop companion.</p></div>
+      <div className="hero-content">
+        <p className="eyebrow">Control Center Preview</p>
+        <h1>Pets</h1>
+        <p className="hero-desc">Install, import, preview, and choose your default desktop companion.</p>
+      </div>
+      <div className="hero-logo-container">
+        <img src={openPetsLogoUrl} className="hero-brand-logo" alt="OpenPets" />
+      </div>
     </header>
     {error && <div className="error">{error}</div>}
     <div className="layout">
       <GlassCard className="gallery">
         <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
         <div className="filters">
-          {(["all", "installed", "original", "western", "asian", "codex"] as Filter[]).map((f) => (
+          {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
             <button
               key={f}
-              className={`filter ${filter === f ? "active" : ""} ${f === "original" ? "original" : ""}`}
+              className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
               onClick={() => setFilter(f)}
             >
               <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-              <span className="filter-text">{f}</span>
+              <span className="filter-text">{filterLabels[f]}</span>
             </button>
           ))}
         </div>
@@ -472,7 +501,7 @@ function App() {
                   <b className="card-title">{pet.displayName}</b>
                 </span>
                 <p className="card-desc">{pet.description || pet.id}</p>
-                <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
               </div>
             </button>
           );
@@ -514,10 +543,13 @@ function App() {
             )}
           </div>
           <div className="meta">
-            <StatusPill tone={selected.broken ? "red" : selected.installed ? "green" : "blue"}>
-              {selected.broken ? "Broken" : selected.installed ? "Ready" : "Available"}
-            </StatusPill>
+            {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
+            {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
             {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
+            {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
+            {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+            {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
+            {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
           </div>
           {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
           

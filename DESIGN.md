@@ -43,7 +43,7 @@ Surfaces are layered to establish clear spatial hierarchy and keep the interface
 The desktop shell is designed to be self-contained, fitting exactly within the viewport height without scrolling the entire window.
 
 - **Page Shell**: Max-width of `1160px` centered, utilizing a full-height flexbox column (`h-screen p-6`).
-- **Hero Header**: Consists of a high-fidelity app icon (`rounded-3xl shadow-glass h-16 w-16`) paired with a tight, high-contrast typographic stack.
+- **Hero Header**: A balanced layout placing title text and description on the left (`.hero-content`) and the wider brand artwork (`openpets.webp`) on the right (`.hero-logo-container`). Keep artwork large enough to feel intentional, use `object-contain`, and avoid rounded wrappers or distortion.
 - **Layout Split**: A clean grid split, typically:
   - **Left Gallery/List Panel**: `1.25fr` — for browsing, searching, and filtering.
   - **Right Detail/Action Panel**: `0.75fr` — for contextual inspection and heavy operations.
