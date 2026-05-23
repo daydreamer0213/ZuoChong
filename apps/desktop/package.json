@@ -14,6 +14,8 @@
   "main": "dist/main.js",
   "scripts": {
     "dev": "pnpm build && electron .",
+    "dev:electron": "pnpm build:main && electron .",
+    "dev:control-center": "concurrently -k -n renderer,electron -c cyan,magenta \"pnpm dev:renderer\" \"wait-on http://127.0.0.1:5173 && cross-env OPENPETS_RENDERER_URL=http://127.0.0.1:5173 pnpm dev:electron\"",
     "dev:plugins": "OPENPETS_DISABLE_PLUGIN_CATALOG=1 OPENPETS_DEV_PLUGIN_ROOTS=../../web/plugins/official pnpm dev",
     "dev:debug": "OPENPETS_LOG_LEVEL=debug OPENPETS_LOG_CONSOLE=1 pnpm dev",
     "package": "pnpm build && node scripts/clean-package-output.cjs && electron-builder",
@@ -35,12 +37,15 @@
     "@types/yauzl": "2.10.3",
     "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.5.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "electron": "^42.0.0",
     "electron-builder": "^26.10.0",
     "postcss": "^8.5.15",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14"
+    "vite": "^8.0.14",
+    "wait-on": "^9.0.10"
   },
   "dependencies": {
     "@open-pets/agent-events": "workspace:*",

@@ -14,11 +14,154 @@ type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: n
 type CodexState = { pets: PetEntry[]; error?: string };
 
 
-function Button({ children, variant = "primary", onClick, disabled }: { children: React.ReactNode; variant?: "primary" | "secondary" | "danger"; onClick?: () => void; disabled?: boolean }) {
-  return <button className={`btn btn-${variant}`} onClick={onClick} disabled={disabled}>{children}</button>;
+// Inline SVG Icons for actions, pagination, and filters
+const InstallIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
+const ImportIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="12" y1="18" x2="12" y2="12" />
+    <polyline points="9 15 12 12 15 15" />
+  </svg>
+);
+
+const SetDefaultIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const RemoveIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+const RefreshIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+  </svg>
+);
+
+const PrevIcon = () => (
+  <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+const NextIcon = () => (
+  <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+const FilterAllIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" />
+    <rect x="14" y="3" width="7" height="7" />
+    <rect x="14" y="14" width="7" height="7" />
+    <rect x="3" y="14" width="7" height="7" />
+  </svg>
+);
+
+const FilterInstalledIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+    <polyline points="22 4 12 14.01 9 11.01" />
+  </svg>
+);
+
+const FilterOriginalIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 8v8M8 12h8" />
+  </svg>
+);
+
+const FilterWesternIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+const FilterAsianIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z" />
+    <path d="M12 6v12M6 12h12" />
+  </svg>
+);
+
+const FilterCodexIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+);
+
+const filterIcons: Record<Filter, React.ReactNode> = {
+  all: <FilterAllIcon />,
+  installed: <FilterInstalledIcon />,
+  original: <FilterOriginalIcon />,
+  western: <FilterWesternIcon />,
+  asian: <FilterAsianIcon />,
+  codex: <FilterCodexIcon />,
+};
+
+const buttonVariantClass = {
+  primary: "btn-primary",
+  secondary: "btn-secondary",
+  danger: "btn-danger",
+  success: "btn-success",
+  warning: "btn-warning",
+} as const;
+
+const statusPillToneClass = {
+  blue: "pill-blue",
+  green: "pill-green",
+  orange: "pill-orange",
+  red: "pill-red",
+  slate: "pill-slate",
+} as const;
+
+function Button({
+  children,
+  variant = "primary",
+  onClick,
+  disabled,
+  icon,
+  iconPosition = "left",
+  fullWidth
+}: {
+  children: React.ReactNode;
+  variant?: "primary" | "secondary" | "danger" | "success" | "warning";
+  onClick?: () => void;
+  disabled?: boolean;
+  icon?: React.ReactNode;
+  iconPosition?: "left" | "right";
+  fullWidth?: boolean;
+}) {
+  return (
+    <button
+      className={`btn ${buttonVariantClass[variant]} ${fullWidth ? "w-full" : ""} ${icon ? "has-icon" : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {icon && iconPosition === "left" && <span className="btn-icon-wrapper mr-2 inline-flex items-center justify-center">{icon}</span>}
+      <span className="btn-text">{children}</span>
+      {icon && iconPosition === "right" && <span className="btn-icon-wrapper ml-2 inline-flex items-center justify-center">{icon}</span>}
+    </button>
+  );
 }
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <section className={`glass ${className}`}>{children}</section>; }
-function StatusPill({ children, tone = "blue" }: { children: React.ReactNode; tone?: "blue" | "green" | "orange" | "red" | "slate" }) { return <span className={`pill pill-${tone}`}>{children}</span>; }
+function StatusPill({ children, tone = "blue" }: { children: React.ReactNode; tone?: "blue" | "green" | "orange" | "red" | "slate" }) { return <span className={`pill ${statusPillToneClass[tone]}`}>{children}</span>; }
 function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) { return <input className="search" placeholder="Search pets..." {...props} />; }
 
 function isAllowedCatalogPreview(value: string | undefined): value is string {
@@ -283,8 +426,40 @@ function App() {
     <div className="layout">
       <GlassCard className="gallery">
         <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /><StatusPill tone="slate">{pets.length} pets</StatusPill></div>
-        <div className="filters">{(["all", "installed", "original", "western", "asian", "codex"] as Filter[]).map((f) => <button key={f} className={`filter ${filter === f ? "active" : ""} ${f === "original" ? "original" : ""}`} onClick={() => setFilter(f)}>{f}</button>)}</div>
-        {!!catalog?.pageCount && catalog.pageCount > 1 && <div className="pager"><Button variant="secondary" disabled={!!busy || catalogPage <= 0} onClick={() => void loadCatalogPage(catalogPage - 1)}>Prev</Button><span>Catalog page {catalogPage + 1} of {catalog.pageCount}</span><Button variant="secondary" disabled={!!busy || catalogPage >= catalog.pageCount - 1} onClick={() => void loadCatalogPage(catalogPage + 1)}>Next</Button></div>}
+        <div className="filters">
+          {(["all", "installed", "original", "western", "asian", "codex"] as Filter[]).map((f) => (
+            <button
+              key={f}
+              className={`filter ${filter === f ? "active" : ""} ${f === "original" ? "original" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              <span className="filter-icon-wrapper">{filterIcons[f]}</span>
+              <span className="filter-text">{f}</span>
+            </button>
+          ))}
+        </div>
+        {!!catalog?.pageCount && catalog.pageCount > 1 && (
+          <div className="pager">
+            <Button
+              variant="secondary"
+              icon={<PrevIcon />}
+              disabled={!!busy || catalogPage <= 0}
+              onClick={() => void loadCatalogPage(catalogPage - 1)}
+            >
+              Prev
+            </Button>
+            <span className="pager-text">Page {catalogPage + 1} of {catalog.pageCount}</span>
+            <Button
+              variant="secondary"
+              icon={<NextIcon />}
+              iconPosition="right"
+              disabled={!!busy || catalogPage >= catalog.pageCount - 1}
+              onClick={() => void loadCatalogPage(catalogPage + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        )}
         <div className="pets-grid">{pets.map((pet) => {
           const isBuiltIn = pet.builtIn;
           const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
@@ -344,12 +519,63 @@ function App() {
             </>
           )}
 
-          <div className="actions">
-            {!selected.installed && selected.sourceKind === "catalog" && <Button disabled={!!busy} onClick={() => act("Installing", () => api.installPet(selected.id))}>{busy || "Install pet"}</Button>}
-            {!selected.installed && selected.sourceKind === "codex" && <Button disabled={!!busy} onClick={() => act("Importing", () => api.importCodexPet(selected.id))}>{busy || "Import Codex pet"}</Button>}
-            {selected.installed && selected.id !== defaultId && !selected.broken && <Button disabled={!!busy} onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}>Set default</Button>}
-            {selected.installed && !selected.builtIn && !selected.protected && <Button variant="danger" disabled={!!busy} onClick={() => act("Removing", () => api.removePet(selected.id))}>Remove</Button>}
-            <Button variant="secondary" disabled={!!busy} onClick={() => void load()}>Refresh</Button>
+          <div className="actions-container mt-6 flex flex-col gap-3">
+            {/* Main Action (Install, Import, Set Default) */}
+            {!selected.installed && selected.sourceKind === "catalog" && (
+              <Button
+                variant="primary"
+                fullWidth
+                icon={<InstallIcon />}
+                disabled={!!busy}
+                onClick={() => act("Installing", () => api.installPet(selected.id))}
+              >
+                {busy || "Install Pet"}
+              </Button>
+            )}
+            {!selected.installed && selected.sourceKind === "codex" && (
+              <Button
+                variant="warning"
+                fullWidth
+                icon={<ImportIcon />}
+                disabled={!!busy}
+                onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
+              >
+                {busy || "Import Codex Pet"}
+              </Button>
+            )}
+            {selected.installed && selected.id !== defaultId && !selected.broken && (
+              <Button
+                variant="success"
+                fullWidth
+                icon={<SetDefaultIcon />}
+                disabled={!!busy}
+                onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
+              >
+                {busy || "Set Default Pet"}
+              </Button>
+            )}
+
+            {/* Secondary Actions (Remove, Refresh) */}
+            <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
+              {selected.installed && !selected.builtIn && !selected.protected && (
+                <Button
+                  variant="danger"
+                  icon={<RemoveIcon />}
+                  disabled={!!busy}
+                  onClick={() => act("Removing", () => api.removePet(selected.id))}
+                >
+                  Remove
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                icon={<RefreshIcon />}
+                disabled={!!busy}
+                onClick={() => void load()}
+              >
+                Refresh
+              </Button>
+            </div>
           </div></> : <p>No pets available.</p>}
       </GlassCard>
     </div>

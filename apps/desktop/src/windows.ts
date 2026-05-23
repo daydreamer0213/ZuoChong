@@ -66,6 +66,22 @@ const agentSetupWindowWidth = 1160;
 const agentSetupWindowHeight = 780;
 const assetDataUrlCache = new Map<string, string>();
 
+function hasOpenInternalUiWindows(): boolean {
+  if (controlCenterWindow && !controlCenterWindow.isDestroyed()) return true;
+  for (const window of taskWindows.values()) {
+    if (!window.isDestroyed()) return true;
+  }
+  return false;
+}
+
+function syncDockVisibilityForInternalUi(): void {
+  if (process.platform !== "darwin") return;
+  const dock = app.dock;
+  if (!dock) return;
+  if (hasOpenInternalUiWindows()) dock.show();
+  else dock.hide();
+}
+
 function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: ReturnType<typeof getAppStateSnapshot>["pets"] } {
   const state = getAppStateSnapshot();
   return { preferences: { defaultPetId: state.preferences.defaultPetId }, pets: state.pets };
@@ -359,6 +375,7 @@ export function openTaskWindow(kind: TaskWindowKind): void {
   const existingWindow = taskWindows.get(kind);
 
   if (existingWindow && !existingWindow.isDestroyed()) {
+    syncDockVisibilityForInternalUi();
     if (existingWindow.isMinimized()) {
       existingWindow.restore();
     }
@@ -389,6 +406,7 @@ export function openTaskWindow(kind: TaskWindowKind): void {
   });
 
   taskWindows.set(kind, window);
+  syncDockVisibilityForInternalUi();
   window.setMenu(null);
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -407,6 +425,7 @@ export function openTaskWindow(kind: TaskWindowKind): void {
 
   window.on("closed", () => {
     taskWindows.delete(kind);
+    syncDockVisibilityForInternalUi();
     console.log(`Closed ${kind} window.`);
   });
 
@@ -424,6 +443,7 @@ export function openTaskWindow(kind: TaskWindowKind): void {
 
 export function openControlCenterWindow(): void {
   if (controlCenterWindow && !controlCenterWindow.isDestroyed()) {
+    syncDockVisibilityForInternalUi();
     if (controlCenterWindow.isMinimized()) controlCenterWindow.restore();
     controlCenterWindow.show();
     controlCenterWindow.focus();
@@ -447,6 +467,7 @@ export function openControlCenterWindow(): void {
   });
 
   controlCenterWindow = window;
+  syncDockVisibilityForInternalUi();
   window.setMenu(null);
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -465,7 +486,7 @@ export function openControlCenterWindow(): void {
     console.error("Control Center renderer process gone.", details);
     logError("ui", "control center renderer gone", details);
   });
-  window.on("closed", () => { controlCenterWindow = null; });
+  window.on("closed", () => { controlCenterWindow = null; syncDockVisibilityForInternalUi(); });
   window.once("ready-to-show", () => { window.show(); window.focus(); });
 
   const devUrl = getSafeControlCenterDevUrl();
@@ -481,6 +502,7 @@ export function closeTaskWindow(kind: TaskWindowKind): void {
 }
 
 export function focusOpenTaskWindows(): void {
+  syncDockVisibilityForInternalUi();
   for (const window of taskWindows.values()) {
     if (window.isDestroyed()) {
       continue;
