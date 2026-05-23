@@ -77,6 +77,8 @@ All colors are mapped to functional roles to ensure consistency across themes.
 | **Slate Copy** | `#5c6e91` | `text-slatecopy` | Subtitles, helper text, inactive buttons, labels |
 | **Success / Ready** | `#059669` / `#34d399` | `emerald` | Active indicators, successfully installed badges |
 | **Warning / Import** | `#d97706` / `#fbbf24` | `amber` | Codex source indicators, imports, attention states |
+| **Featured** | `#7e22ce` / `#a855f7` | `purple` | Featured catalog filters and badges |
+| **Originals** | `#ca8a04` / `#facc15` | `yellow` | Original OpenPets catalog filters and badges |
 | **Danger / Remove** | `#dc2626` / `#ff6b6b` | `red` | Destructive actions, broken states, error messages |
 
 ---
@@ -122,7 +124,20 @@ Buttons are the core interactive elements. They reject flat modern trends in fav
 ### Filters (`.filter`)
 - Instead of simple pill badges, filters are structured as miniature tactile buttons.
 - Inactive filters use a soft white-to-slate gradient with a light blue-grey border.
-- Active filters swap to full brand gradients (e.g., blue for all, orange for original) with only subtle grounded depth.
+- Active filters swap to semantic gradients with only subtle grounded depth:
+  - Brand blue for general filters (`All`, `Installed`, `Western`, `Asian`, `Codex`)
+  - Purple for `Featured`
+  - Amber/yellow-orange for `Originals`
+- Match catalog v3/web gallery taxonomy where possible: `Featured` excludes originals, and category filters like `Western`/`Asian` exclude featured and originals.
+
+### Pet Cards & Badges
+- Card grids need inner padding so selected rings and focus states are not clipped by the scroll container.
+- Use badges to expose catalog identity, not just install state:
+  - `Original` for original/OpenPets pets
+  - `Featured` for featured non-original catalog pets
+  - `Western` / `Asian` for standard category pets
+  - `Default`, `Installed`, and `Codex` for local state/source
+- Avoid low-value detail badges such as `Available`; reserve detail badges for meaningful state or catalog identity.
 
 ### Search Inputs (`.search`)
 - Rendered as soft, inset text boxes.
