@@ -2,26 +2,9 @@
 
 ## Current Situation
 
-The desktop app currently has two UI systems:
+The desktop app now uses the React Control Center as the production management UI. Pets, Settings, Plugins, and Integrations are routed inside the singleton Control Center window, and tray actions target those routes directly.
 
-1. **Existing production task windows**
-   - Built from TypeScript-generated HTML/CSS strings in `apps/desktop/src/windows.ts` and `apps/desktop/src/plugins-window.ts`.
-   - Rendered with manual DOM logic inside `apps/desktop/preload.cjs`.
-   - Still used for the current production windows:
-     - Pet Manager
-     - Integrations
-     - Plugins
-     - Settings
-     - Onboarding
-
-2. **New React/Tailwind Control Center preview**
-   - Added as a separate preview path.
-   - Pets, Settings, Plugins, and Integrations have been migrated so far.
-   - The Control Center shell/navigation is in place, with route slots for Dashboard, Integrations, and Onboarding.
-   - Opened from the tray via `Control Center Preview...`.
-   - Does not replace the old task-window entries yet.
-
-This means the refactor is intentionally incremental: the new UI can be reviewed without risking the existing desktop workflow.
+The legacy generated task-window UI has been removed: `apps/desktop/preload.cjs`, `apps/desktop/src/plugins-window.ts`, and the legacy plugins-window test are gone. Transparent pet windows and plugin SDK windows remain separate lightweight renderers.
 
 ## Goal
 
@@ -39,8 +22,7 @@ Tray app
        ├─ Pets
        ├─ Integrations
        ├─ Plugins
-       ├─ Settings
-       └─ Onboarding
+       └─ Settings
 ```
 
 The Control Center should become the one place where users manage everything:
@@ -49,7 +31,6 @@ The Control Center should become the one place where users manage everything:
 - configure coding-agent integrations
 - manage plugins
 - tune settings
-- complete onboarding
 - inspect status/errors/update prompts
 
 The old separate task windows should eventually disappear. The tray should still exist, but tray actions should route into the Control Center instead of opening independent windows.
@@ -69,16 +50,16 @@ From a product perspective, the end state should feel like a clean native-qualit
 
 - Keep the app tray-first.
 - Keep existing transparent pet windows outside React.
-- Preserve old task windows during migration as fallback.
-- Introduce a single Control Center window for management UI.
-- Migrate one page at a time, starting with Pets.
+- Use a single Control Center window for management UI.
+- Route tray actions into Control Center pages instead of independent task windows.
+- Keep transparent pet windows separate from React.
 
 ## Phase 1: Pets Preview
 
-Implemented as a reviewable prototype behind a separate tray entry:
+Implemented first as a reviewable prototype and now promoted into the primary management shell:
 
-- `Control Center Preview...` opens the new React renderer.
-- Existing `Manage Pets...` remains unchanged.
+- `Control Center...` opens the React renderer.
+- Pet management opens through the Control Center Pets route.
 - Renderer lives under `apps/desktop/src/renderer/`.
 - Vite outputs packaged assets to `apps/desktop/dist/renderer/`.
 - `control-center-preload.cjs` exposes narrow page-specific APIs.
@@ -139,19 +120,11 @@ Important details:
 
 ### Tray integration
 
-Added a new tray item:
+Tray items now route to the Control Center singleton:
 
-```text
-Control Center Preview...
-```
-
-The old item remains:
-
-```text
-Manage Pets...
-```
-
-So you can compare old and new UIs side-by-side.
+- `Control Center...`
+- `Manage Pets...` → Pets route
+- Plugins, Integrations, and Settings → matching Control Center routes
 
 ### Narrow preload bridge
 
@@ -230,7 +203,7 @@ The Control Center Settings page now supports:
 - default-pet reaction previews using the `openpets-pet-preview:` protocol
 - bottom-center floating notifications that do not shift layout
 
-The legacy Settings task window remains available as fallback during migration.
+Settings is now served by the Control Center route.
 
 ### Plugins page UI
 
@@ -247,7 +220,7 @@ The Control Center Plugins page now supports:
 - reload, update, and uninstall actions
 - safe no-op/cancel feedback for install/update/local-load flows
 
-The legacy Plugins task window remains available as fallback during migration.
+Plugins is now served by the Control Center route; broken plugins cannot be re-enabled until fixed.
 
 ### Integrations page UI
 
@@ -258,11 +231,11 @@ The Control Center Integrations page now supports:
 - detail inspector opened by Configure/View setup buttons
 - Claude MCP setup, replace/remove, hooks, instructions, pet routing, command paths, and advanced previews
 - OpenCode global setup, remove, pet routing, command paths, and config preview
-- Cursor MCP setup, replace/remove, pet routing, and MCP preview
+- Cursor MCP setup, replace/remove, pet routing, MCP preview, and Cursor rules preview
 - Pi manual setup guidance
 - polished disabled cards for future editor integrations
 
-The legacy Integrations task window remains available as fallback during migration.
+Integrations is now served by the Control Center route, including command-source selection for published, bundled, or local development CLI modes.
 
 ### Build/test integration
 
@@ -321,23 +294,13 @@ Completed phases:
 - Settings migration
 - Plugins migration
 - Integrations migration
+- Tray route switch to Control Center
+- Legacy generated task-window UI removal
 
-Suggested next phases:
+Remaining follow-up:
 
-1. **Migrate Onboarding**
-   - Make onboarding an overlay or route inside the Control Center.
-   - Stop opening separate setup windows during onboarding.
-
-2. **Switch tray actions to Control Center routes**
-   - `Manage Pets...` opens Control Center `/pets`.
-   - `Settings...` opens `/settings`.
-   - `Plugins...` opens `/plugins`.
-   - `Integrations...` opens `/integrations`.
-
-3. **Remove legacy UI code**
-   - Remove generated task-window HTML/CSS.
-   - Remove DOM-rendering logic from `preload.cjs`.
-   - Keep preloads as narrow API bridges only.
+- Replace the placeholder Dashboard route with a real overview before using it as a default landing page.
+- Continue manual smoke coverage for tray route retargeting, plugin workflows, and integration setup flows.
 
 ## Validation Commands
 

@@ -69,10 +69,12 @@ type ControlCenterApi = {
   installPet(petId: string): Promise<unknown>;
   importCodexPet(petId: string): Promise<unknown>;
   removePet(petId: string): Promise<StateSnapshot>;
+  onRouteChange(callback: (route: Route) => void): () => void;
   getIntegrationsState(selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
   runIntegrationAction(action: AgentSetupAction, selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
   updateIntegrationCommandPaths(patch: Partial<AgentSetupCommandPaths>): Promise<AgentSetupCommandPaths>;
 };
+
 
 type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
 type AgentSetupPetOption = { id: string; displayName: string; default: boolean };
@@ -264,7 +266,7 @@ const FilterCodexIcon = () => (
 );
 
 // Navigation Shell Types and Icons
-type Route = "dashboard" | "pets" | "settings" | "plugins" | "integrations" | "onboarding";
+type Route = "dashboard" | "pets" | "settings" | "plugins" | "integrations";
 
 const DashboardIcon = () => (
   <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -306,21 +308,12 @@ const IntegrationsIcon = () => (
   </svg>
 );
 
-const OnboardingIcon = () => (
-  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path fill="currentColor" d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09" />
-    <path fill="currentColor" d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z" />
-    <path fill="currentColor" d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05" />
-  </svg>
-);
-
 const navTabs = [
   { id: "dashboard" as const, label: "Dashboard", icon: <DashboardIcon /> },
   { id: "pets" as const, label: "Pets", icon: <PetsIcon /> },
   { id: "settings" as const, label: "Settings", icon: <SettingsIcon /> },
   { id: "plugins" as const, label: "Plugins", icon: <PluginsIcon /> },
   { id: "integrations" as const, label: "Integrations", icon: <IntegrationsIcon /> },
-  { id: "onboarding" as const, label: "Onboarding", icon: <OnboardingIcon /> },
 ];
 
 const routeMetadata: Record<Route, { title: string; description: string }> = {
@@ -344,20 +337,15 @@ const routeMetadata: Record<Route, { title: string; description: string }> = {
     title: "Integrations",
     description: "Connect your companions to Claude Code, VS Code, Cursor, and more.",
   },
-  onboarding: {
-    title: "Onboarding",
-    description: "A quick walkthrough to configure and personalize your first pet.",
-  },
 };
 
-function PlaceholderView({ route }: { route: Exclude<Route, "pets" | "settings" | "plugins" | "integrations"> }) {
+function PlaceholderView({ route }: { route: "dashboard" }) {
   const meta = routeMetadata[route];
   return (
     <div className="grid grid-cols-1 w-full">
       <GlassCard className="flex flex-col items-center justify-center text-center py-16 px-8 h-full min-h-[420px]">
         <div className="p-4 rounded-3xl bg-blue-50/80 border border-blue-100/50 mb-6 text-brand">
           {route === "dashboard" && <DashboardIcon />}
-          {route === "onboarding" && <OnboardingIcon />}
         </div>
         <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{meta.title}</h2>
         <p className="text-sm text-slatecopy max-w-md mb-6">{meta.description}</p>
@@ -406,6 +394,26 @@ const statusPillToneClass = {
   red: "pill-red",
   slate: "pill-slate",
 } as const;
+
+function isRoute(value: string | null | undefined): value is Route {
+  return value === "dashboard" || value === "pets" || value === "settings" || value === "plugins" || value === "integrations";
+}
+
+function initialControlCenterRoute(): Route {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const route = params.get("route");
+    return isRoute(route) ? route : "pets";
+  } catch {
+    return "pets";
+  }
+}
+
+const commandModeLabels: Record<AgentSetupSnapshot["commandMode"], string> = {
+  published: "Published package",
+  bundled: "Bundled desktop CLI",
+  local: "Local development",
+};
 
 function Button({
   children,
@@ -966,10 +974,11 @@ function IntegrationsView() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const load = async (selectedPetId?: string) => {
+  const load = async (selectedPetId?: string, commandMode?: AgentSetupSnapshot["commandMode"]) => {
     try {
       const petId = selectedPetId === undefined ? snapshot?.selectedPetId : selectedPetId;
-      const next = await api.getIntegrationsState(petId, snapshot?.commandMode);
+      const mode = commandMode === undefined ? snapshot?.commandMode : commandMode;
+      const next = await api.getIntegrationsState(petId, mode);
       setSnapshot(next);
       setError("");
     } catch (err) {
@@ -1014,6 +1023,10 @@ function IntegrationsView() {
     } finally {
       setBusy("");
     }
+  };
+
+  const changeCommandMode = (mode: AgentSetupSnapshot["commandMode"]) => {
+    void load(snapshot?.selectedPetId, mode);
   };
 
   if (!snapshot) {
@@ -1110,6 +1123,18 @@ function IntegrationsView() {
             </div>
 
             <div className="flex flex-col gap-5 mt-4">
+              {selectedId !== "pi" && (
+                <section className="plugin-section">
+                  <div className="plugin-section-title"><small>Command Source</small><strong>CLI mode</strong></div>
+                  <select className="settings-select w-full" value={snapshot.commandMode} disabled={isBusy} onChange={(event) => changeCommandMode(event.target.value as AgentSetupSnapshot["commandMode"])}>
+                    <option value="published">{commandModeLabels.published}</option>
+                    <option value="bundled">{commandModeLabels.bundled}</option>
+                    <option value="local" disabled={!snapshot.localDevAvailable}>{commandModeLabels.local}{snapshot.localDevAvailable ? "" : " unavailable"}</option>
+                  </select>
+                  <p className="text-xs text-slatecopy mt-2">Use the published package for normal setup, bundled for the desktop app build, or local while developing OpenPets.</p>
+                </section>
+              )}
+
               {selectedId === "claude" && (
                 <>
                   <section className="plugin-section">
@@ -1183,6 +1208,7 @@ function IntegrationsView() {
                       {JSON.stringify(snapshot.preview.mcpJson, null, 2)}
                     </pre>
                   </details>
+
                 </>
               )}
 
@@ -1283,6 +1309,17 @@ function IntegrationsView() {
                     </summary>
                     <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
                       {JSON.stringify({ mcpServers: snapshot.cursorPreview.mcpEntry }, null, 2)}
+                    </pre>
+                  </details>
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>Advanced</small><strong>Rules Preview</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <p className="mt-3 text-xs text-slatecopy">{snapshot.cursorPreview.rulesPath}</p>
+                    <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      {snapshot.cursorPreview.rulesContent}
                     </pre>
                   </details>
                 </>
@@ -1504,7 +1541,7 @@ function PluginsView() {
               <div className="plugin-section-title"><small>Runtime</small><strong>State & permissions</strong></div>
               <label className="settings-row plugin-toggle-row">
                 <div className="settings-row-info"><strong>{installed.enabled ? "Enabled" : "Disabled"}</strong><small>{installed.brokenReason || (installed.catalogDisabled ? "This plugin is disabled by the catalog." : "Toggle this plugin without leaving the Control Center.")}</small></div>
-                <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled} onChange={(event) => void run("Saving", async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled."); })} />
+                <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled || Boolean(installed.brokenReason)} onChange={(event) => void run("Saving", async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled."); })} />
               </label>
               <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>) : <StatusPill tone="slate">No permissions</StatusPill>}</div>
             </section>
@@ -1534,7 +1571,7 @@ function PluginsView() {
 }
 
 function App() {
-  const [currentRoute, setCurrentRoute] = useState<Route>("pets");
+  const [currentRoute, setCurrentRoute] = useState<Route>(() => initialControlCenterRoute());
   const [state, setState] = useState<StateSnapshot | null>(null);
   const [catalog, setCatalog] = useState<CatalogState | null>(null);
   const [catalogPages, setCatalogPages] = useState<Record<number, PetEntry[]>>({});
@@ -1546,6 +1583,10 @@ function App() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => api.onRouteChange((route) => {
+    if (isRoute(route)) setCurrentRoute(route);
+  }), []);
 
   async function load() {
     setError("");
@@ -1718,7 +1759,7 @@ function App() {
     <main className="app-shell">
       <header className="hero">
         <div className="hero-content">
-          <p className="eyebrow">Control Center Preview</p>
+          <p className="eyebrow">Control Center</p>
           <h1>{currentMeta.title}</h1>
           <p className="hero-desc">{currentMeta.description}</p>
         </div>

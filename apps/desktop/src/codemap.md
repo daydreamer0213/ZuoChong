@@ -87,8 +87,8 @@ main.ts → initializePluginService(userData, defaultPluginPetApi).start()
 ├── plugin-service.ts orchestrates UI actions, permission confirmation, config validation, install/update/uninstall/load-local, and runtime reloads
 └── lifecycle.ts → stopPluginService() on quit
 
-Plugins window:
-tray.ts → openTaskWindow("plugins") → windows.ts → plugins-window.ts
+Control Center plugins route:
+tray.ts → openControlCenterWindow("plugins") → windows.ts → renderer React app
 └── openpets:plugins-* IPC handlers call PluginService methods
 
 Catalog install/update:
@@ -105,7 +105,7 @@ plugin-local-loader.ts validates selected folder manifest and snapshots only ope
   - `main.ts` → all modules (orchestrator)
   - `local-ipc.ts` ↔ `lease-manager.ts` ↔ `agent-pet-controller.ts`
   - `windows.ts` ↔ `app-state.ts`, `agent-setup.ts`, `catalog.ts`, `codex-pets.ts`
-  - `windows.ts` ↔ `plugin-service.ts`, `plugins-window.ts` for plugin UI IPC and HTML
+  - `windows.ts` ↔ `plugin-service.ts` for Control Center plugin UI IPC
   - `pet-window.ts` ↔ `default-pet-controller.ts`, `agent-pet-controller.ts`
   - `pet-installation.ts` ↔ `app-state.ts`, `catalog.ts`, `zip-safety.ts`
   - `plugin-service.ts` ↔ `plugin-state.ts`, `plugin-runtime.ts`, `plugin-catalog.ts`, `plugin-package.ts`, `plugin-local-loader.ts`
@@ -133,10 +133,10 @@ plugin-local-loader.ts validates selected folder manifest and snapshots only ope
 
 **UI**:
 - `tray.ts`: Tray icon (nativeImage), context menu builder, update status integration, plugins entry, logs folder
-- `windows.ts`: BrowserWindow factory, IPC handler registration, HTML generators for task windows, reaction animation settings, plugin UI IPC endpoints
+- `windows.ts`: Control Center BrowserWindow factory, IPC handler registration, route targeting, reaction animation settings, plugin UI IPC endpoints, and scoped internal protocols
 - `assets.ts`: Tray icon loading with generated fallback
 - `display.ts`: Screen geometry helpers, pet window positioning
-- `plugins-window.ts`: Sandboxed data-URL HTML/CSS shell for Installed/Discover/Developer plugin management.
+- `renderer/`: React Control Center shell for Pets, Integrations, Plugins, and Settings.
 
 **Pets**:
 - `pet-window.ts`: Window creation (transparent, frameless, always-on-top), HTML/CSS generation, sprite animation states, speech bubbles, status badges, transient displays

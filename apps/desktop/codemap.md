@@ -6,7 +6,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Design
 
-- **Tray-First UX**: No main window; all interaction via tray menu or task windows (pet-manager, agent-setup, settings, onboarding)
+- **Tray-First UX**: No default main window; tray actions open the React Control Center routes for pets, integrations, plugins, and settings.
 - **Single Instance**: Uses `app.requestSingleInstanceLock()` with second-instance focusing
 - **Security Model**: 
   - Sandboxed renderers with contextIsolation
@@ -27,7 +27,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Flow
 
-**Startup**: `main.ts` → `installAppLifecycle()` → `initializeAppState()` → `initializeLogger()` → `createAppTray()` → `startLocalIpcServer()` → optionally `showDefaultPet()`/`openTaskWindow("onboarding")`
+**Startup**: `main.ts` → `installAppLifecycle()` → `initializeAppState()` → `initializeLogger()` → `createAppTray()` → `startLocalIpcServer()` → initialize plugin service → optionally `showDefaultPet()`
 
 **Pet Display**: IPC Request → `local-ipc.ts` → `LeaseManager.acquire()` → `agent-pet-controller.ts` → `pet-window.ts` → HTML/CSS spritesheet animation with reaction-to-animation mapping
 
@@ -35,7 +35,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 **Agent Setup**: UI → `agent-setup.ts` → Claude/OpenCode/Cursor CLI detection → MCP config modification → hooks installation → memory file management
 
-**Plugins**: Plugins window → `plugin-service.ts` → catalog or local manifest loader → permission approval/state update → `plugin-runtime.ts` schedules declarative timers → `plugin-pet-api.ts` applies speech/reactions to the default pet
+**Plugins**: Control Center plugins route → `plugin-service.ts` → catalog or local manifest loader → permission approval/state update → `plugin-runtime.ts` schedules declarative timers → `plugin-pet-api.ts` applies speech/reactions to the default pet
 
 ## Integration Points
 
@@ -60,8 +60,8 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 - `main.ts`: Entry point, lifecycle coordination
 - `tray.ts`: System tray icon and menu
-- `windows.ts`: Task window management (pet-manager, agent-setup, plugins, settings, onboarding)
-- `plugins-window.ts`: Sandboxed plugins task-window HTML for installed/discover/developer plugin management
+- `windows.ts`: Control Center BrowserWindow management, route targeting, IPC handlers, and internal protocols
+- `renderer/`: React Control Center for pets, integrations, plugins, and settings
 - `local-ipc.ts`: TCP/Unix socket server for CLI communication
 - `lease-manager.ts`: Pet routing lease lifecycle
 - `pet-window.ts`: Pet rendering (transparent frameless windows, CSS sprite animation, speech bubbles, status badges)
@@ -84,7 +84,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `logger.ts`: Structured logging with scopes (app, ipc, lease, pet, state, tray, ui)
 - `reaction-animation-mapping.ts`: Reaction-to-animation state mapping with user overrides
 - `reaction-messages.ts`: Message pools for each reaction type
-- `preload.cjs`/`pet-preload.cjs`: Renderer preload scripts (contextBridge APIs)
+- `control-center-preload.cjs`/`pet-preload.cjs`/`plugin-sdk-preload.cjs`: Renderer preload scripts (contextBridge APIs)
 - `electron-builder.yml`: Packaging configuration
 - `scripts/release-local.mjs`: macOS-local release automation with GitHub draft creation
 - `contracts/catalog-fixture.contract.ts`: Catalog V2 validation contract tests against fixture data

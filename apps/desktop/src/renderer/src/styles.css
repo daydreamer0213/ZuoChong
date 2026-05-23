@@ -210,4 +210,5 @@
   .integration-icon { @apply grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
   .integration-logo { @apply h-9 w-9 object-contain; }
   .integration-icon svg { @apply w-8 h-8; }
+
 }
