@@ -2118,44 +2118,46 @@ function App() {
                   <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
                 </div>
 
-                <p className="desc">{selected.description || selected.id}</p>
-                <div className="stage">
-                  {safePetImage(selected.spritesheet) ? (
-                    <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
-                  ) : (
-                    <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
-                  )}
-                </div>
-                <div className="meta">
-                  {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
-                  {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
-                  {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
-                  {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
-                  {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
-                  {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
-                  {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
-                </div>
-                {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
+                <div className="pet-detail-content">
+                  <div className="pet-detail-main">
+                    <p className="desc">{selected.description || selected.id}</p>
+                    <div className="stage">
+                      {safePetImage(selected.spritesheet) ? (
+                        <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
+                      ) : (
+                        <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
+                      )}
+                    </div>
+                    <div className="meta">
+                      {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
+                      {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
+                      {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
+                      {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
+                      {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+                      {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
+                      {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
+                    </div>
+                    {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
+                  </div>
 
-                {safePetImage(selected.spritesheet) && (
-                  <>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
-                    <div className="grid grid-cols-3 gap-3 mb-2">
+                  <aside className="pet-detail-reactions">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mb-3">Preview Animations</h3>
+                    <div className="pet-preview-grid">
                       {[
                         { label: "Thinking", state: "thinking" as const },
                         { label: "Happy", state: "happy" as const },
                         { label: "Wave", state: "wave" as const },
                       ].map((previewState) => (
-                        <div key={previewState.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm transition-[border-color,background-color,box-shadow] duration-150 hover:border-blue-100 hover:bg-white">
+                        <article key={previewState.label} className="pet-preview-item">
                           <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${previewState.label} preview`} state={previewState.state} size="mini" />
                           <span className="text-xs font-bold text-slatecopy">{previewState.label}</span>
-                        </div>
+                        </article>
                       ))}
                     </div>
-                  </>
-                )}
+                  </aside>
+                </div>
 
-                <div className="actions-container mt-6 flex flex-col gap-3">
+                <div className="actions-container mt-6 flex flex-col gap-3 pet-detail-actions">
                   {/* Main Action (Install, Import, Set Default) */}
                   {!selected.installed && selected.sourceKind === "catalog" && (
                     <Button

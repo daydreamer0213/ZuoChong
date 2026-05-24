@@ -37,7 +37,7 @@
   .filter.active .filter-icon-wrapper { @apply opacity-100; }
   .filter-icon { @apply h-3.5 w-3.5 stroke-[2.5]; }
   .pager { @apply mt-3 flex items-center justify-between gap-2.5 rounded-xl border border-blue-200/40 bg-blue-50/20 p-1.5 text-xs font-bold text-slatecopy; }
-  .pets-grid { @apply grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-1.5 pr-2.5 pb-3; overscroll-behavior: contain; scrollbar-color: rgba(96, 165, 250, 0.42) transparent; }
+  .pets-grid { @apply grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-y-auto p-1.5 pr-2.5 pb-3; overscroll-behavior: contain; scrollbar-color: rgba(96, 165, 250, 0.42) transparent; }
   .pet-card { @apply flex flex-row items-center gap-3.5 rounded-2xl border border-slate-200 bg-white/80 p-3 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] hover:-translate-y-0.5 hover:border-brand hover:bg-white active:scale-[0.96] min-h-[92px] w-full cursor-pointer; }
   .pet-card.selected { @apply border-brand bg-blue-50/90 ring-4 ring-blue-200/50 shadow-md; }
   .thumb { @apply grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-white to-blue-100 border border-blue-100/50; }
@@ -58,7 +58,7 @@
   .sprite-detail.sprite-idle { animation: cc-idle-bob 2.6s ease-in-out infinite; }
   @keyframes cc-idle-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
   @media (prefers-reduced-motion: reduce) { .sprite-frame { animation: none !important; } .sprite-frame animate { display: none; } }
-  @media (max-width: 900px) { body { overflow:auto; } .app-shell { @apply h-auto min-h-screen; } .layout, .gallery, .pets-grid, .detail { @apply overflow-visible; } }
+  @media (max-width: 900px) { body { overflow:auto; } .app-shell { @apply h-auto min-h-screen; } .layout, .gallery, .pets-grid, .detail { @apply overflow-visible; } .pets-grid { @apply grid-cols-1; } .pet-detail-content { @apply grid-cols-1; } .pet-preview-grid { @apply grid-cols-1; } }
   .meta { @apply flex flex-wrap gap-2; }
   .btn { @apply rounded-2xl px-4 py-3 font-monoDisplay text-sm font-black uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-60 active:scale-[0.96] transition-[transform,translate,background-color,border-color,box-shadow] duration-150 flex items-center justify-center min-h-[44px] cursor-pointer select-none; } 
   .btn-compact { @apply rounded-xl px-2.5 py-1 text-xs min-h-[30px]; } 
@@ -169,6 +169,12 @@
   .plugin-config-backdrop { @apply absolute inset-0 cursor-default border-0 bg-navy/[0.12] p-0 backdrop-blur-[4px]; }
   .plugin-inspector { @apply relative z-10 flex max-h-[calc(100vh-4rem)] w-[min(760px,calc(100vw-3rem))] flex-col gap-4 overflow-y-auto pr-3 shadow-[0_32px_80px_rgba(16,33,73,0.25)]; overscroll-behavior: contain; scrollbar-gutter: stable; animation: plugin-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
   .pet-detail-inspector { @apply w-[min(900px,calc(100vw-3rem))]; }
+  .pet-detail-content { @apply grid gap-5 grid-cols-[1.1fr_0.9fr] items-start; }
+  .pet-detail-main { @apply flex flex-col gap-3; }
+  .pet-detail-reactions { @apply rounded-2xl border border-blue-100/70 bg-white/55 p-3; }
+  .pet-preview-grid { @apply grid gap-3; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pet-preview-item { @apply flex flex-col items-center justify-center gap-2 rounded-2xl border border-blue-100 bg-white/60 p-2.5 shadow-sm; }
+  .pet-detail-actions .grid { @apply grid-cols-1 sm:grid-cols-2; }
   @keyframes plugin-fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes plugin-pop-in { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
   .plugin-inspector-head { @apply flex items-center gap-4; }
