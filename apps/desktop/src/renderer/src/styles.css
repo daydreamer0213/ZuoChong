@@ -211,4 +211,49 @@
   .integration-logo { @apply h-9 w-9 object-contain; }
   .integration-icon svg { @apply w-8 h-8; }
 
+  /* Dashboard */
+  .dashboard-layout { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8 h-full; overscroll-behavior: contain; }
+  .dashboard-hero { @apply relative flex items-center justify-between overflow-hidden rounded-[32px] border border-blue-200/50 bg-gradient-to-br from-blue-500 to-blue-600 p-8 text-white shadow-lg min-h-[180px]; }
+  .dashboard-hero::before { content: ""; @apply absolute inset-0 opacity-20; background-image: radial-gradient(circle at 2px 2px, white 1px, transparent 0); background-size: 24px 24px; }
+  .dashboard-hero-content { @apply relative z-10 flex flex-col gap-1.5 flex-1 min-w-0; }
+  .dashboard-hero-title { @apply m-0 font-monoDisplay text-4xl font-black leading-tight tracking-tight; text-wrap: balance; }
+  .dashboard-hero-desc { @apply max-w-md text-sm font-medium text-blue-50 opacity-90; text-wrap: pretty; }
+  .dashboard-hero-pet { @apply relative z-10 flex shrink-0 items-center justify-center ml-6; }
+  .dashboard-hero-pet .sprite-detail { filter: drop-shadow(0 20px 25px rgba(0, 0, 0, 0.25)); }
+
+  .dashboard-grid { @apply grid grid-cols-3 gap-5; }
+  .dashboard-stat-card { @apply flex flex-col gap-4 rounded-[28px] border border-blue-100/50 bg-white/80 p-6 shadow-sm transition-[border-color,background-color,box-shadow] duration-150 hover:border-blue-200 hover:bg-white hover:shadow-md; }
+  .dashboard-stat-header { @apply flex items-center gap-3; }
+  .dashboard-stat-icon { @apply flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-brand; }
+  .dashboard-stat-label { @apply font-monoDisplay text-[11px] font-black uppercase tracking-wider text-slatecopy/70; }
+  .dashboard-stat-value { @apply font-monoDisplay text-3xl font-black tracking-tight text-navy tabular-nums; }
+  .dashboard-stat-footer { @apply text-[11px] font-bold text-slatecopy opacity-60; }
+
+  .dashboard-row { @apply grid grid-cols-[1fr_320px] gap-5; }
+  .dashboard-activity-card { @apply flex flex-col gap-4; }
+  .dashboard-section-title { @apply flex items-center gap-2 font-monoDisplay text-sm font-black uppercase tracking-widest text-brand; }
+  .dashboard-reaction-list { @apply flex flex-wrap gap-2; }
+  .dashboard-reaction-item { @apply flex items-center gap-2.5 rounded-2xl border border-blue-50 bg-white/60 px-3.5 py-2.5 shadow-sm transition-[border-color,background-color,box-shadow] duration-150 hover:border-blue-100 hover:bg-white; }
+  .dashboard-reaction-count { @apply font-mono text-sm font-bold text-navy tabular-nums; }
+  .dashboard-reaction-label { @apply text-xs font-medium text-slatecopy; }
+
+  .dashboard-system-card { @apply flex flex-col gap-4; }
+  .dashboard-system-list { @apply flex flex-col gap-2.5; }
+  .dashboard-system-item { @apply flex items-center justify-between rounded-2xl border border-blue-50/50 bg-white/40 p-3.5 text-sm transition-[background-color] duration-150 hover:bg-white/60; }
+  .dashboard-system-info { @apply flex items-center gap-3; }
+  .dashboard-system-icon { @apply flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50/50 text-brand; }
+  .dashboard-system-label { @apply font-bold text-navy; }
+  .dashboard-system-value { @apply font-mono text-xs font-bold text-slatecopy; }
+  @media (max-width: 900px) { 
+    .dashboard-layout { @apply overflow-visible pr-0; } 
+    .dashboard-grid { @apply grid-cols-2; }
+    .dashboard-row { @apply grid-cols-1; } 
+    .dashboard-hero { @apply flex-col items-center text-center gap-6 p-6; }
+    .dashboard-hero-content { @apply items-center; }
+    .dashboard-hero-desc { @apply max-w-none; }
+  }
+  @media (max-width: 600px) {
+    .dashboard-grid { @apply grid-cols-1; }
+  }
+
 }

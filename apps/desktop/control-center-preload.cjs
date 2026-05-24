@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 const api = {
   getPetsState: () => ipcRenderer.invoke("openpets:get-pets-state"),
+  getDashboardSnapshot: () => ipcRenderer.invoke("openpets:get-dashboard-snapshot"),
   getSettingsState: () => ipcRenderer.invoke("openpets:get-settings-state"),
   updatePreferences: (patch) => ipcRenderer.invoke("openpets:update-preferences", patch),
   getReactionAnimationSettings: () => ipcRenderer.invoke("openpets:get-reaction-animation-settings"),
