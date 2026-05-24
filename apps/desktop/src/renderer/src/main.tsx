@@ -1825,7 +1825,8 @@ function App() {
     setState(nextState); setCatalog(nextCatalog); setCodex(nextCodex);
     setCatalogPage(nextCatalog.page ?? 0);
     setCatalogPages({ [nextCatalog.page ?? 0]: nextCatalog.pets });
-    setSelectedId((current) => current || nextState.preferences.defaultPetId || nextState.pets.installed[0]?.id || nextCatalog.pets[0]?.id || "");
+    const visiblePetIds = new Set<string>([...nextState.pets.installed.map((pet) => pet.id), ...nextCatalog.pets.map((pet) => pet.id), ...nextCodex.pets.map((pet) => pet.id)]);
+    setSelectedId((current) => current && visiblePetIds.has(current) ? current : "");
   }
   useEffect(() => {
     if (currentRoute !== "pets") return;
@@ -1897,7 +1898,7 @@ function App() {
     });
   }, [state, catalogPages, catalogSearch, codex, filter, query]);
 
-  const selected = pets.find((p) => p.id === selectedId) ?? pets[0];
+  const selected = selectedId ? pets.find((p) => p.id === selectedId) ?? null : null;
   const defaultId = state?.preferences.defaultPetId;
 
   useEffect(() => {
@@ -2047,7 +2048,12 @@ function App() {
               const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
               const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
               return (
-                <button key={`${pet.sourceKind}-${pet.id}`} className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`} onClick={() => setSelectedId(pet.id)}>
+                <button
+                  key={`${pet.sourceKind}-${pet.id}`}
+                  className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`}
+                  onClick={() => setSelectedId(pet.id)}
+                  aria-label={`Open ${pet.displayName} details`}
+                >
                   <span className="thumb">
                     {useSpritesheetFrame ? (
                       <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
@@ -2092,103 +2098,123 @@ function App() {
               ) : <span />}
             </div>
           </GlassCard>
-          <GlassCard className="detail">
-            {selected ? <><p className="eyebrow">Pet detail</p><h2>{selected.displayName}</h2><p className="desc">{selected.description || selected.id}</p>
-              <div className="stage">
-                {safePetImage(selected.spritesheet) ? (
-                  <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
-                ) : (
-                  <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
-                )}
-              </div>
-              <div className="meta">
-                {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
-                {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
-                {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
-                {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
-                {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
-                {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
-                {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
-              </div>
-              {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
 
-              {safePetImage(selected.spritesheet) && (
-                <>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
-                  <div className="grid grid-cols-3 gap-3 mb-2">
-                    {[
-                      { label: "Thinking", state: "thinking" as const },
-                      { label: "Happy", state: "happy" as const },
-                      { label: "Wave", state: "wave" as const }
-                    ].map((preview) => (
-                      <div key={preview.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm">
-                        <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${preview.label} preview`} state={preview.state} size="mini" />
-                        <span className="text-xs font-bold text-slatecopy">{preview.label}</span>
-                      </div>
-                    ))}
+          {selected ? (
+            <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={`${selected.displayName} pet details`}>
+              <button className="plugin-config-backdrop" type="button" aria-label="Close pet details" onClick={() => setSelectedId("")} />
+              <GlassCard className="plugin-inspector pet-detail-inspector">
+                <div className="plugin-inspector-head">
+                  <span className="plugin-inspector-icon">
+                    {safePetImage(selected.spritesheet) ? (
+                      <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} thumb`} size="thumb" />
+                    ) : (
+                      <PetImage src={selected.preview} debugLabel={`${selected.id}:thumb`} />
+                    )}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="eyebrow">Pet detail</p>
+                    <h2>{selected.displayName}</h2>
                   </div>
-                </>
-              )}
+                  <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
+                </div>
 
-              <div className="actions-container mt-6 flex flex-col gap-3">
-                {/* Main Action (Install, Import, Set Default) */}
-                {!selected.installed && selected.sourceKind === "catalog" && (
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    icon={<InstallIcon />}
-                    disabled={!!busy}
-                    onClick={() => act("Installing", () => api.installPet(selected.id))}
-                  >
-                    {busy || "Install Pet"}
-                  </Button>
-                )}
-                {!selected.installed && selected.sourceKind === "codex" && (
-                  <Button
-                    variant="warning"
-                    fullWidth
-                    icon={<ImportIcon />}
-                    disabled={!!busy}
-                    onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
-                  >
-                    {busy || "Import Codex Pet"}
-                  </Button>
-                )}
-                {selected.installed && selected.id !== defaultId && !selected.broken && (
-                  <Button
-                    variant="primary"
-                    fullWidth
-                    icon={<SetDefaultIcon />}
-                    disabled={!!busy}
-                    onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
-                  >
-                    {busy || "Set Default Pet"}
-                  </Button>
+                <p className="desc">{selected.description || selected.id}</p>
+                <div className="stage">
+                  {safePetImage(selected.spritesheet) ? (
+                    <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
+                  ) : (
+                    <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
+                  )}
+                </div>
+                <div className="meta">
+                  {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
+                  {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
+                  {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
+                  {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
+                  {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+                  {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
+                  {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
+                </div>
+                {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
+
+                {safePetImage(selected.spritesheet) && (
+                  <>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mt-6 mb-3">Preview Animations</h3>
+                    <div className="grid grid-cols-3 gap-3 mb-2">
+                      {[
+                        { label: "Thinking", state: "thinking" as const },
+                        { label: "Happy", state: "happy" as const },
+                        { label: "Wave", state: "wave" as const },
+                      ].map((previewState) => (
+                        <div key={previewState.label} className="flex flex-col items-center gap-2 rounded-2xl border border-blue-100 bg-white/50 p-3 shadow-sm transition-[border-color,background-color,box-shadow] duration-150 hover:border-blue-100 hover:bg-white">
+                          <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${previewState.label} preview`} state={previewState.state} size="mini" />
+                          <span className="text-xs font-bold text-slatecopy">{previewState.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
 
-                {/* Secondary Actions (Remove, Refresh) */}
-                <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
-                  {selected.installed && !selected.builtIn && !selected.protected && (
+                <div className="actions-container mt-6 flex flex-col gap-3">
+                  {/* Main Action (Install, Import, Set Default) */}
+                  {!selected.installed && selected.sourceKind === "catalog" && (
                     <Button
-                      variant="danger"
-                      icon={<RemoveIcon />}
+                      variant="primary"
+                      fullWidth
+                      icon={<InstallIcon />}
                       disabled={!!busy}
-                      onClick={() => act("Removing", () => api.removePet(selected.id))}
+                      onClick={() => act("Installing", () => api.installPet(selected.id))}
                     >
-                      Remove
+                      {busy || "Install Pet"}
                     </Button>
                   )}
-                  <Button
-                    variant="secondary"
-                    icon={<RefreshIcon />}
-                    disabled={!!busy}
-                    onClick={() => void loadPetsData()}
-                  >
-                    Refresh
-                  </Button>
+                  {!selected.installed && selected.sourceKind === "codex" && (
+                    <Button
+                      variant="warning"
+                      fullWidth
+                      icon={<ImportIcon />}
+                      disabled={!!busy}
+                      onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
+                    >
+                      {busy || "Import Codex Pet"}
+                    </Button>
+                  )}
+                  {selected.installed && selected.id !== defaultId && !selected.broken && (
+                    <Button
+                      variant="primary"
+                      fullWidth
+                      icon={<SetDefaultIcon />}
+                      disabled={!!busy}
+                      onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
+                    >
+                      {busy || "Set Default Pet"}
+                    </Button>
+                  )}
+
+                  <div className={`grid gap-3 ${selected.installed && !selected.builtIn && !selected.protected ? "grid-cols-2" : "grid-cols-1"}`}>
+                    {selected.installed && !selected.builtIn && !selected.protected && (
+                      <Button
+                        variant="danger"
+                        icon={<RemoveIcon />}
+                        disabled={!!busy}
+                        onClick={() => act("Removing", () => api.removePet(selected.id))}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      icon={<RefreshIcon />}
+                      disabled={!!busy}
+                      onClick={() => void loadPetsData()}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
-              </div></> : <p>No pets available.</p>}
-          </GlassCard>
+              </GlassCard>
+            </div>
+          ) : null}
         </div>
       )}
     </main>
