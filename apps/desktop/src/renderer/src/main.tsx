@@ -25,6 +25,8 @@ type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides }; petScaleOptions: PetScaleOption[] };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
+type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
+type DashboardSnapshot = { defaultPet: { id: string; displayName: string; previewSpriteUrl: string }; installedPetCount: number; catalog: { source: string; total?: number; page?: number; pageCount?: number; error?: string }; plugins: { installed: number; enabled: number; broken: number }; updateStatus: UpdateStatus; activity: DashboardActivity };
 type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: { frameWidth: number; frameHeight: number; columns: number; rows: number; states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string };
 type PluginFilter = "all" | "installed" | "catalog" | "local" | "broken";
 type PluginPermission = "pet:speak" | "pet:reaction" | "timer" | "schedule" | "storage" | "status" | "commands" | "network";
@@ -42,6 +44,7 @@ type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok:
 type PluginEntry = { id: string; installed?: SafePluginRecord; catalog?: SafeCatalogPluginRecord };
 type ControlCenterApi = {
   getPetsState(): Promise<StateSnapshot>;
+  getDashboardSnapshot(): Promise<DashboardSnapshot>;
   getSettingsState(): Promise<SettingsState>;
   updatePreferences(patch: Partial<SettingsState["preferences"]>): Promise<SettingsState>;
   getReactionAnimationSettings(): Promise<ReactionAnimationSettings>;
@@ -265,6 +268,50 @@ const FilterCodexIcon = () => (
   </svg>
 );
 
+const MessageIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
+const HeartIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+  </svg>
+);
+
+const StarIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const ZapIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+  </svg>
+);
+
+const ActivityIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+  </svg>
+);
+
+const BoxIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+    <path d="m3.3 7 8.7 5 8.7-5" />
+    <path d="M12 22V12" />
+  </svg>
+);
+
+const ShieldIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z" />
+  </svg>
+);
+
 // Navigation Shell Types and Icons
 type Route = "dashboard" | "pets" | "settings" | "plugins" | "integrations";
 
@@ -339,6 +386,185 @@ const routeMetadata: Record<Route, { title: string; description: string }> = {
   },
 };
 
+function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    try {
+      const next = await api.getDashboardSnapshot();
+      setSnapshot(next);
+      setError("");
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  if (!snapshot) {
+    return (
+      <div className="flex flex-col gap-6 h-full">
+        <GlassCard className="flex h-full flex-col items-center justify-center gap-4 text-center py-16">
+          <p className="text-sm font-semibold text-slatecopy">{error || "Gathering companion metrics..."}</p>
+          {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>Retry</Button>}
+        </GlassCard>
+      </div>
+    );
+  }
+
+  const { activity, defaultPet, plugins, installedPetCount, updateStatus, catalog } = snapshot;
+
+  // Find top pet by activity or fallback to default
+  const topPetId = Object.entries(activity.perPetActivityCounts).sort(([, a], [, b]) => b - a)[0]?.[0];
+  const topPetName = topPetId === defaultPet.id ? defaultPet.displayName : (topPetId || defaultPet.displayName);
+
+  // Find top reaction
+  const reactionEntries = Object.entries(activity.reactionCounts)
+    .filter(([, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a);
+  const topReactionEntry = reactionEntries[0];
+  const topReaction = topReactionEntry ? topReactionEntry[0].charAt(0).toUpperCase() + topReactionEntry[0].slice(1) : "None yet";
+  const updateLabel = updateStatus.state === "available" ? "Update available" : updateStatus.state === "error" ? "Check failed" : updateStatus.state === "checking" ? "Checking" : updateStatus.state === "current" ? "Current" : "Not checked";
+
+  return (
+    <div className="dashboard-layout">
+      {error && <div className="error">{error}</div>}
+
+      <section className="dashboard-hero">
+        <div className="dashboard-hero-content">
+          <p className="eyebrow !text-blue-100 opacity-80">Primary Companion</p>
+          <h2 className="dashboard-hero-title">{defaultPet.displayName}</h2>
+          <p className="dashboard-hero-desc">
+            Ready for your next coding session.
+          </p>
+          <div className="flex gap-3 mt-3">
+            <Button variant="secondary" size="compact" onClick={() => onNavigate("pets")}>Change Pet</Button>
+          </div>
+        </div>
+        <div className="dashboard-hero-pet">
+          <SpriteFrame src={defaultPet.previewSpriteUrl} label={defaultPet.displayName} state="idle" size="detail" />
+        </div>
+      </section>
+
+      <div className="dashboard-grid">
+        <article className="dashboard-stat-card">
+          <div className="dashboard-stat-header">
+            <div className="dashboard-stat-icon"><MessageIcon /></div>
+            <span className="dashboard-stat-label">Messages</span>
+          </div>
+          <div className="dashboard-stat-value">{activity.messagesSent.toLocaleString()}</div>
+          <div className="dashboard-stat-footer">Total speech bubbles sent</div>
+        </article>
+
+        <article className="dashboard-stat-card">
+          <div className="dashboard-stat-header">
+            <div className="dashboard-stat-icon"><HeartIcon /></div>
+            <span className="dashboard-stat-label">Reactions</span>
+          </div>
+          <div className="dashboard-stat-value">{activity.reactionsSent.toLocaleString()}</div>
+          <div className="dashboard-stat-footer">Total animations triggered</div>
+        </article>
+
+        <article className="dashboard-stat-card">
+          <div className="dashboard-stat-header">
+            <div className="dashboard-stat-icon"><StarIcon /></div>
+            <span className="dashboard-stat-label">Top Companion</span>
+          </div>
+          <div className="dashboard-stat-value truncate text-2xl">{topPetName}</div>
+          <div className="dashboard-stat-footer">Most active pet lately</div>
+        </article>
+      </div>
+
+      <div className="dashboard-row">
+        <GlassCard className="dashboard-activity-card">
+          <div className="dashboard-section-title"><ActivityIcon /> Activity Overview</div>
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3">
+              <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Top Reactions</span>
+              <div className="dashboard-reaction-list">
+                {reactionEntries.length > 0 ? (
+                  reactionEntries.slice(0, 6)
+                    .map(([label, count]) => (
+                      <div key={label} className="dashboard-reaction-item">
+                        <span className="dashboard-reaction-count">{count}</span>
+                        <span className="dashboard-reaction-label">{label}</span>
+                      </div>
+                    ))
+                ) : (
+                  <div className="text-xs text-slatecopy italic py-2">No reactions recorded yet. Start coding!</div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 rounded-2xl bg-blue-50/30 border border-blue-100/30">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Last Interaction</span>
+                <span className="text-sm font-bold text-navy">
+                  {activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : "Never"}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1 text-right">
+                <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Top Reaction</span>
+                <span className="text-sm font-bold text-brand">{topReaction}</span>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+
+        <GlassCard className="dashboard-system-card">
+          <div className="dashboard-section-title"><ZapIcon /> System Health</div>
+          <div className="dashboard-system-list">
+            <div className="dashboard-system-item">
+              <div className="dashboard-system-info">
+                <div className="dashboard-system-icon"><BoxIcon /></div>
+                <span className="dashboard-system-label">Pets</span>
+              </div>
+              <span className="dashboard-system-value">{installedPetCount} installed</span>
+            </div>
+
+            <div className="dashboard-system-item">
+              <div className="dashboard-system-info">
+                <div className="dashboard-system-icon"><PluginGlyph className="w-4 h-4" /></div>
+                <span className="dashboard-system-label">Plugins</span>
+              </div>
+              <div className="flex gap-1.5">
+                <StatusPill tone="green">{plugins.enabled} enabled</StatusPill>
+                {plugins.broken > 0 && <StatusPill tone="red">{plugins.broken}</StatusPill>}
+              </div>
+            </div>
+
+            <div className="dashboard-system-item">
+              <div className="dashboard-system-info">
+                <div className="dashboard-system-icon"><StarIcon /></div>
+                <span className="dashboard-system-label">Catalog</span>
+              </div>
+              <span className="dashboard-system-value">{catalog.error ? "Offline" : catalog.total ? `${catalog.total} pets` : "Ready"}</span>
+            </div>
+
+            <div className="dashboard-system-item">
+              <div className="dashboard-system-info">
+                <div className="dashboard-system-icon"><ShieldIcon /></div>
+                <span className="dashboard-system-label">Updates</span>
+              </div>
+              <StatusPill tone={updateStatus.state === "available" ? "orange" : "blue"}>
+                {updateLabel}
+              </StatusPill>
+            </div>
+          </div>
+
+          <div className="mt-auto pt-4 border-t border-blue-100/30">
+             <div className="flex items-center justify-between text-[10px] font-bold text-slatecopy uppercase tracking-wider">
+               <span>Version</span>
+               <span className="font-mono">{updateStatus.currentVersion}</span>
+             </div>
+          </div>
+        </GlassCard>
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderView({ route }: { route: "dashboard" }) {
   const meta = routeMetadata[route];
   return (
@@ -403,9 +629,9 @@ function initialControlCenterRoute(): Route {
   try {
     const params = new URLSearchParams(window.location.search);
     const route = params.get("route");
-    return isRoute(route) ? route : "pets";
+    return isRoute(route) ? route : "dashboard";
   } catch {
-    return "pets";
+    return "dashboard";
   }
 }
 
@@ -470,12 +696,16 @@ function isAllowedCodexPreview(value: string | undefined): value is string {
   return typeof value === "string" && /^openpets-codex:\/\/spritesheet\/[a-zA-Z0-9%][a-zA-Z0-9%_-]{0,128}$/u.test(value);
 }
 
+function isAllowedDefaultPetPreview(value: string | undefined): value is string {
+  return typeof value === "string" && /^openpets-pet-preview:\/\/spritesheet\/default\?v=[a-z0-9_-]+-\d+-\d+$/u.test(value);
+}
+
 function isAllowedDataUrl(value: string | undefined): value is string {
   return typeof value === "string" && /^data:image\/(?:png|webp|jpeg|jpg);base64,[a-z0-9+/=]+$/iu.test(value);
 }
 
 function safePetImage(value: string | undefined): string | undefined {
-  return isAllowedCatalogPreview(value) || isAllowedCodexPreview(value) || isAllowedDataUrl(value) ? value : undefined;
+  return isAllowedCatalogPreview(value) || isAllowedCodexPreview(value) || isAllowedDefaultPetPreview(value) || isAllowedDataUrl(value) ? value : undefined;
 }
 
 function imageDebug(value: string | undefined): string {
@@ -1588,7 +1818,7 @@ function App() {
     if (isRoute(route)) setCurrentRoute(route);
   }), []);
 
-  async function load() {
+  async function loadPetsData() {
     setError("");
     const [nextState, nextCatalog, nextCodex] = await Promise.all([api.getPetsState(), api.getCatalog(), api.getCodexPets()]);
     logPetsEvent("load-complete", { installed: nextState.pets.installed.length, defaultPetId: nextState.preferences.defaultPetId, catalogSource: nextCatalog.source, catalogPets: nextCatalog.pets.length, catalogPage: nextCatalog.page, catalogPageCount: nextCatalog.pageCount, codexPets: nextCodex.pets.length, catalogError: nextCatalog.error, codexError: nextCodex.error, firstCatalogPet: nextCatalog.pets[0] ? { id: nextCatalog.pets[0].id, preview: imageDebug(nextCatalog.pets[0].preview), thumbnail: imageDebug(nextCatalog.pets[0].thumbnail), spritesheet: imageDebug(nextCatalog.pets[0].spritesheet) } : null });
@@ -1597,7 +1827,10 @@ function App() {
     setCatalogPages({ [nextCatalog.page ?? 0]: nextCatalog.pets });
     setSelectedId((current) => current || nextState.preferences.defaultPetId || nextState.pets.installed[0]?.id || nextCatalog.pets[0]?.id || "");
   }
-  useEffect(() => { void load().catch((err) => setError(String(err?.message ?? err))); }, []);
+  useEffect(() => {
+    if (currentRoute !== "pets") return;
+    void loadPetsData().catch((err) => setError(String(err?.message ?? err)));
+  }, [currentRoute]);
 
   const pets = useMemo(() => {
     const installed = new Map((state?.pets.installed ?? []).map((p) => [p.id, p]));
@@ -1688,20 +1921,22 @@ function App() {
 
   async function act(label: string, fn: () => Promise<unknown>) {
     if (!selected) return;
-    try { setBusy(label); setError(""); await fn(); await load(); }
+    try { setBusy(label); setError(""); await fn(); await loadPetsData(); }
     catch (err) { setError(String((err as Error)?.message ?? err)); }
     finally { setBusy(""); }
   }
 
   useEffect(() => {
+    if (currentRoute !== "pets") return;
     if (catalogSearch) return;
     void api.getCatalogSearch().then((result) => {
       if (result.error) setError(result.error);
       setCatalogSearch(result.pets ?? []);
     }).catch((err) => setError(String(err?.message ?? err)));
-  }, [catalogSearch]);
+  }, [catalogSearch, currentRoute]);
 
   useEffect(() => {
+    if (currentRoute !== "pets") return;
     if (!catalogSearch) return;
     const q = query.trim().toLowerCase();
     const needsRemotePages = !!q || filter === "featured" || filter === "originals" || filter === "western" || filter === "asian";
@@ -1741,7 +1976,7 @@ function App() {
       if (firstError) setError(firstError);
     });
     return () => { cancelled = true; };
-  }, [catalogPages, catalogSearch, filter, query, state]);
+  }, [catalogPages, catalogSearch, filter, query, state, currentRoute]);
 
   async function loadCatalogPage(page: number) {
     if (catalogPages[page]) { setCatalogPage(page); return; }
@@ -1783,14 +2018,14 @@ function App() {
 
       {error && <div className="error">{error}</div>}
 
-      {currentRoute === "settings" ? (
+      {currentRoute === "dashboard" ? (
+        <DashboardView onNavigate={setCurrentRoute} />
+      ) : currentRoute === "settings" ? (
         <SettingsView />
       ) : currentRoute === "plugins" ? (
         <PluginsView />
       ) : currentRoute === "integrations" ? (
         <IntegrationsView />
-      ) : currentRoute !== "pets" ? (
-        <PlaceholderView route={currentRoute} />
       ) : (
         <div className="layout">
           <GlassCard className="gallery">
@@ -1947,7 +2182,7 @@ function App() {
                     variant="secondary"
                     icon={<RefreshIcon />}
                     disabled={!!busy}
-                    onClick={() => void load()}
+                    onClick={() => void loadPetsData()}
                   >
                     Refresh
                   </Button>

@@ -57,6 +57,50 @@ function getSettingsStateSnapshot(): {
   };
 }
 
+async function getDashboardSnapshot(): Promise<{
+  readonly defaultPet: { readonly id: string; readonly displayName: string; readonly previewSpriteUrl: string };
+  readonly installedPetCount: number;
+  readonly catalog: { readonly source: string; readonly total?: number; readonly page?: number; readonly pageCount?: number; readonly error?: string };
+  readonly plugins: { readonly installed: number; readonly enabled: number; readonly broken: number };
+  readonly updateStatus: ReturnType<typeof getUpdateStatus>;
+  readonly activity: ReturnType<typeof getAppStateSnapshot>["analytics"];
+}> {
+  const state = getAppStateSnapshot();
+  const defaultPet = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId && !pet.broken) ?? state.pets.installed[0];
+  const preview = await getDefaultPetPreviewSpriteInfo();
+  const catalog = await getCatalogUiState().catch((error: unknown) => ({ source: "error" as const, pets: [], total: undefined, page: undefined, pageCount: undefined, error: error instanceof Error ? error.message : "Catalog unavailable." }));
+  const pluginSnapshot = await getPluginService().getSnapshot().catch((error: unknown) => {
+    warn("ui", "dashboard plugin snapshot unavailable", { error: error instanceof Error ? error.message : String(error) });
+    return { plugins: [] } as const;
+  });
+  const installedPlugins = pluginSnapshot.plugins.length;
+  const brokenPlugins = pluginSnapshot.plugins.filter((plugin) => Boolean(plugin.brokenReason)).length;
+  const enabledPlugins = pluginSnapshot.plugins.filter((plugin) => plugin.enabled && !plugin.brokenReason).length;
+
+  return {
+    defaultPet: {
+      id: defaultPet?.id ?? state.preferences.defaultPetId,
+      displayName: defaultPet?.displayName ?? "OpenPets",
+      previewSpriteUrl: `openpets-pet-preview://spritesheet/default?v=${encodeURIComponent(preview.version)}`,
+    },
+    installedPetCount: state.pets.installed.length,
+    catalog: {
+      source: catalog.source,
+      total: catalog.total,
+      page: catalog.page,
+      pageCount: catalog.pageCount,
+      error: catalog.error,
+    },
+    plugins: {
+      installed: installedPlugins,
+      enabled: enabledPlugins,
+      broken: brokenPlugins,
+    },
+    updateStatus: getUpdateStatus(),
+    activity: state.analytics,
+  };
+}
+
 export function installInternalUiHandlers(): void {
   if (internalUiHandlersInstalled) {
     return;
@@ -72,6 +116,11 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:get-settings-state", (event) => {
     assertAllowedSender(event, ["control-center"]);
     return getSettingsStateSnapshot();
+  });
+
+  ipcMain.handle("openpets:get-dashboard-snapshot", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getDashboardSnapshot();
   });
 
   ipcMain.handle("openpets:get-reaction-animation-settings", async (event) => {
@@ -296,7 +345,7 @@ export function installInternalUiProtocol(): void {
       const url = new URL(request.url);
       if (url.hostname !== "spritesheet" || url.pathname !== "/default" || url.hash) return new Response(null, { status: 404 });
       const version = url.searchParams.get("v");
-      if ([...url.searchParams.keys()].some((key) => key !== "v") || (version !== null && !/^[a-z0-9_-]{1,64}-\d+-\d+$/.test(version))) return new Response(null, { status: 404 });
+      if ([...url.searchParams.keys()].some((key) => key !== "v") || (version !== null && !/^[a-z0-9_-]+-\d+-\d+$/.test(version))) return new Response(null, { status: 404 });
       const { path } = await getDefaultPetPreviewSpriteInfo();
       const spritesheet = await stat(path);
       if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) return new Response(null, { status: 404 });
@@ -312,7 +361,7 @@ export function installInternalUiProtocol(): void {
   });
 }
 
-export function openControlCenterWindow(route: ControlCenterRoute = "pets"): void {
+export function openControlCenterWindow(route: ControlCenterRoute = "dashboard"): void {
   const safeRoute = normalizeControlCenterRoute(route);
   if (controlCenterWindow && !controlCenterWindow.isDestroyed()) {
     syncDockVisibilityForInternalUi();
@@ -379,7 +428,7 @@ export function focusOpenTaskWindows(): void {
 }
 
 function normalizeControlCenterRoute(route: unknown): ControlCenterRoute {
-  return typeof route === "string" && controlCenterRoutes.has(route as ControlCenterRoute) ? route as ControlCenterRoute : "pets";
+  return typeof route === "string" && controlCenterRoutes.has(route as ControlCenterRoute) ? route as ControlCenterRoute : "dashboard";
 }
 
 function sendControlCenterRoute(window: BrowserWindow, route: ControlCenterRoute): void {
