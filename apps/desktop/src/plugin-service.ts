@@ -7,7 +7,7 @@ import { getEffectivePluginConfig, validatePluginConfigReplacement, type PluginC
 import { publishLocalPluginSnapshot, readLocalPluginSourceManifest } from "./plugin-local-loader.js";
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import type { PluginJsHost } from "./plugin-js-host.js";
-import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginPermission } from "./plugin-manifest.js";
+import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginIcon, type PluginPermission } from "./plugin-manifest.js";
 import { downloadCatalogPluginZip, installCatalogPluginPackage, readCatalogPluginManifestFromZip, resolveSafePluginInstallDir } from "./plugin-package.js";
 import type { PluginPetApi } from "./plugin-pet-api.js";
 import { JsonPluginStorageStore, type PluginCommand, type PluginLogLevel, type PluginStatus } from "./plugin-sdk-bridge.js";
@@ -18,6 +18,7 @@ export type SafePluginRecord = {
   readonly id: string;
   readonly name?: string;
   readonly version: string;
+  readonly icon?: PluginIcon;
   readonly source: PluginSource;
   readonly enabled: boolean;
   readonly brokenReason?: string;
@@ -35,7 +36,7 @@ export type SafePluginRecord = {
 };
 
 export type PluginServiceSnapshot = { readonly plugins: readonly SafePluginRecord[] };
-export type SafeCatalogPluginRecord = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative" | "javascript"; readonly sdkVersion?: string; readonly permissions: readonly PluginPermission[]; readonly installed: boolean; readonly deprecated?: boolean; readonly statusReason?: string };
+export type SafeCatalogPluginRecord = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative" | "javascript"; readonly icon?: PluginIcon; readonly sdkVersion?: string; readonly permissions: readonly PluginPermission[]; readonly installed: boolean; readonly deprecated?: boolean; readonly statusReason?: string };
 export type PluginCatalogSnapshot = { readonly plugins: readonly SafeCatalogPluginRecord[] };
 export type PluginServiceResult = { readonly ok: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type DevPluginLoadResult = { readonly path: string; readonly id?: string; readonly ok: true } | { readonly path: string; readonly ok: false; readonly error: string };
@@ -157,7 +158,7 @@ export class PluginService {
     try {
       const catalog = await getPluginCatalog({ ...this.#catalogOptions, fetchImpl: this.#fetchImpl ?? this.#catalogOptions?.fetchImpl, refresh });
       for (const entry of catalog.plugins) await this.#updateCatalogMetadata(entry);
-      return { plugins: catalog.plugins.filter((entry) => !isEntryDisabled(entry) && isCatalogEntryCompatible(entry.minOpenPetsVersion, getMaxVersion(entry), this.#currentAppVersion)).map((entry) => ({ id: entry.id, name: entry.name, version: entry.version, description: entry.description, runtime: entry.runtime, sdkVersion: getSdkVersion(entry), permissions: entry.permissions, installed: this.stateStore.getRecord(entry.id)?.source === "catalog", deprecated: isEntryDeprecated(entry) || undefined, statusReason: getStatusReason(entry) })) };
+      return { plugins: catalog.plugins.filter((entry) => !isEntryDisabled(entry) && isCatalogEntryCompatible(entry.minOpenPetsVersion, getMaxVersion(entry), this.#currentAppVersion)).map((entry) => ({ id: entry.id, name: entry.name, version: entry.version, description: entry.description, runtime: entry.runtime, icon: entry.icon, sdkVersion: getSdkVersion(entry), permissions: entry.permissions, installed: this.stateStore.getRecord(entry.id)?.source === "catalog", deprecated: isEntryDeprecated(entry) || undefined, statusReason: getStatusReason(entry) })) };
     } catch {
       return { plugins: [] };
     }
@@ -326,7 +327,7 @@ export class PluginService {
       const manifest = await this.#readManifest(record);
       const config = getEffectivePluginConfig(manifest, record.config);
       const runtimeState = typeof (this.runtime as unknown as { getPluginState?: unknown }).getPluginState === "function" ? this.runtime.getPluginState(record.id) : { commands: [] };
-      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: manifest.name, configSchema: manifest.configSchema, effectiveConfig: config.ok ? config.config : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands, status: runtimeState.status };
+      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: manifest.name, icon: manifest.icon, configSchema: manifest.configSchema, effectiveConfig: config.ok ? config.config : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands, status: runtimeState.status };
     } catch (error) {
       return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason) ?? safeError(error) };
     }

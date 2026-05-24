@@ -146,6 +146,7 @@
 
   .plugin-card-body { @apply flex items-start gap-4 p-4; }
   .plugin-card-icon { @apply grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-blue-100/60 bg-gradient-to-br from-white to-blue-100 text-brand shadow-sm; }
+  .plugin-card-icon .plugin-glyph { @apply h-7 w-7; }
   .plugin-glyph { @apply h-7 w-7 stroke-[2.5]; }
 
   .plugin-card-content { @apply flex min-w-0 flex-1 flex-col gap-1; }
@@ -181,6 +182,7 @@
   @keyframes plugin-pop-in { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
   .plugin-inspector-head { @apply flex items-center gap-4; }
   .plugin-inspector-icon { @apply grid h-16 w-16 shrink-0 place-items-center rounded-[22px] border border-blue-100/70 bg-gradient-to-br from-white to-blue-100 text-brand shadow-sm; }
+  .plugin-inspector-icon .plugin-glyph { @apply h-8 w-8; }
   .plugin-inspector h2 { @apply m-0 font-monoDisplay text-3xl font-black text-navy leading-tight; }
   .plugin-status-strip { @apply flex items-center gap-2 rounded-2xl border border-blue-100/60 bg-blue-50/60 p-3 text-xs font-semibold text-slatecopy shadow-inner; }
   .plugin-section { @apply flex flex-col gap-3 rounded-[24px] border border-blue-100/70 bg-white/65 p-5 shadow-sm; }
@@ -192,6 +194,8 @@
   .plugin-toggle-row { @apply rounded-2xl border-b-0 bg-white/65; }
   .plugin-permissions { @apply mt-0; }
   .plugin-config-form { @apply flex flex-col gap-3; }
+  .plugin-config-group { @apply flex flex-col gap-2 p-3 rounded-2xl border border-blue-100/40 bg-blue-50/10; }
+  .plugin-config-group-title { @apply font-monoDisplay text-[10px] font-black uppercase tracking-wider text-brand/70 mb-1 px-1; }
   .plugin-config-row { @apply flex flex-col gap-2 rounded-2xl border border-blue-50 bg-white/60 p-3; }
   .plugin-config-row > span:first-child { @apply flex flex-col gap-0.5; }
   .plugin-config-row strong { @apply text-sm font-bold text-navy; }

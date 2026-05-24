@@ -30,14 +30,15 @@ type DashboardSnapshot = { defaultPet: { id: string; displayName: string; previe
 type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: { frameWidth: number; frameHeight: number; columns: number; rows: number; states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string };
 type PluginFilter = "all" | "installed" | "catalog" | "local" | "broken";
 type PluginPermission = "pet:speak" | "pet:reaction" | "timer" | "schedule" | "storage" | "status" | "commands" | "network";
+type PluginIconName = "plugin" | "bell" | "timer" | "github";
 type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "multiSelect" | "list"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
 type PluginConfigSchema = Record<string, PluginConfigField>;
 type PluginConfig = Record<string, unknown>;
 type PluginCommand = { id: string; title: string; description?: string };
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
-type SafePluginRecord = { id: string; name?: string; version: string; source: "catalog" | "local"; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
-type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; deprecated?: boolean; statusReason?: string };
+type SafePluginRecord = { id: string; name?: string; version: string; icon?: PluginIconName; source: "catalog" | "local"; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
+type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; deprecated?: boolean; statusReason?: string };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
@@ -1021,6 +1022,25 @@ function PluginGlyph({ className = "plugin-glyph" }: { className?: string }) {
   </svg>;
 }
 
+function PluginIcon({ icon = "plugin", className = "plugin-glyph" }: { icon?: PluginIconName; className?: string }) {
+  if (icon === "bell") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3H4a4 4 0 0 0 2-3v-3a7 7 0 0 1 4-6M9 17v1a3 3 0 0 0 6 0v-1" />
+  </svg>;
+  if (icon === "timer") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0" />
+    <path d="M12 7v5l3 3" />
+  </svg>;
+  if (icon === "github") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 19c-4.3 1.4-4.3-2.5-6-3" />
+    <path d="M15 21v-3.5c0-1 .1-1.4-.5-2c2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2a4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6c-.6.6-.6 1.2-.5 2V21" />
+  </svg>;
+  return <PluginGlyph className={className} />;
+}
+
+function pluginIcon(entry: PluginEntry): PluginIconName {
+  return entry.installed?.icon || entry.catalog?.icon || "plugin";
+}
+
 function pluginName(entry: PluginEntry): string {
   return entry.installed?.name || entry.catalog?.name || entry.id;
 }
@@ -1088,7 +1108,7 @@ function materializeConfigDraft(schema: PluginConfigSchema | undefined, config: 
   return next;
 }
 
-function ConfigFieldEditor({ fieldKey, field, value, onChange }: { fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void }) {
+function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { pluginId?: string; fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void }) {
   const label = field.label || fieldKey;
   const description = field.description;
   const textValue = typeof value === "string" ? value : typeof field.default === "string" ? field.default : "";
@@ -1103,18 +1123,84 @@ function ConfigFieldEditor({ fieldKey, field, value, onChange }: { fieldKey: str
   if (field.type === "list" && field.itemSchema) {
     const items = Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item)) : [];
     const maxed = typeof field.maxItems === "number" && items.length >= field.maxItems;
+
+    const isReminders = pluginId === "openpets.daily-reminders" && fieldKey === "reminders";
+    const addLabel = isReminders ? "Add reminder" : "Add item";
+
     return <div className="plugin-config-row">
       <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
       <div className="plugin-list-editor">
-        {items.map((item, index) => (
-          <div className="plugin-list-item" key={index}>
-            <div className="plugin-list-item-header"><span>Item {index + 1}</span><Button variant="danger" size="compact" onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button></div>
-            {Object.entries(field.itemSchema ?? {}).map(([childKey, childField]) => (
-              <ConfigFieldEditor key={childKey} fieldKey={childKey} field={childField} value={item[childKey] ?? initialConfigValue(childField)} onChange={(nextValue) => onChange(items.map((existing, itemIndex) => itemIndex === index ? { ...existing, [childKey]: nextValue } : existing))} />
-            ))}
-          </div>
-        ))}
-        <Button variant="secondary" size="compact" disabled={maxed} onClick={() => onChange([...items, materializeListItemDefaults(field.itemSchema ?? {})])}>Add Item</Button>
+        {items.map((item, index) => {
+          let itemTitle = `Item ${index + 1}`;
+          let removeLabel = "Remove";
+
+          if (isReminders) {
+            removeLabel = "Remove reminder";
+            const id = String(item.id || "").trim();
+            const scheduleType = item.scheduleType;
+            if (scheduleType === "daily") {
+              const time = String(item.time || "09:00");
+              itemTitle = `${id || "Reminder"} · Daily at ${time}`;
+            } else if (scheduleType === "interval") {
+              const mins = Number(item.intervalMinutes) || 60;
+              itemTitle = `${id || "Reminder"} · Every ${mins} min`;
+            } else if (id) {
+              itemTitle = id;
+            }
+          }
+
+          const schemaEntries = Object.entries(field.itemSchema ?? {});
+          const messageField = schemaEntries.find(([k]) => k === "message");
+          const scheduleFields = schemaEntries.filter(([k]) => ["scheduleType", "time", "days", "intervalMinutes"].includes(k));
+          const behaviorFields = schemaEntries.filter(([k]) => ["id", "enabled", "reaction"].includes(k));
+          const otherFields = schemaEntries.filter(([k]) => !["message", "scheduleType", "time", "days", "intervalMinutes", "id", "enabled", "reaction"].includes(k));
+
+          const renderField = ([childKey, childField]: [string, PluginConfigField]) => {
+            if (isReminders) {
+              const scheduleType = item.scheduleType;
+              if (scheduleType === "daily" && childKey === "intervalMinutes") return null;
+              if (scheduleType === "interval" && (childKey === "time" || childKey === "days")) return null;
+            }
+            return <ConfigFieldEditor key={childKey} pluginId={pluginId} fieldKey={childKey} field={childField} value={item[childKey] ?? initialConfigValue(childField)} onChange={(nextValue) => onChange(items.map((existing, itemIndex) => itemIndex === index ? { ...existing, [childKey]: nextValue } : existing))} />;
+          };
+
+          return (
+            <div className="plugin-list-item" key={index}>
+              <div className="plugin-list-item-header">
+                <span className="truncate mr-2">{itemTitle}</span>
+                <Button variant="danger" size="compact" onClick={() => onChange(items.filter((_, itemIndex) => itemIndex !== index))}>{removeLabel}</Button>
+              </div>
+              <div className="flex flex-col gap-3">
+                {isReminders ? (
+                  <>
+                    {behaviorFields.length > 0 && (
+                      <div className="plugin-config-group">
+                        <div className="plugin-config-group-title">Identity & Behavior</div>
+                        {behaviorFields.map(renderField)}
+                      </div>
+                    )}
+                    {messageField && (
+                      <div className="plugin-config-group">
+                        <div className="plugin-config-group-title">Message</div>
+                        {renderField(messageField)}
+                      </div>
+                    )}
+                    {scheduleFields.length > 0 && (
+                      <div className="plugin-config-group">
+                        <div className="plugin-config-group-title">Schedule</div>
+                        {scheduleFields.map(renderField)}
+                      </div>
+                    )}
+                    {otherFields.map(renderField)}
+                  </>
+                ) : (
+                  schemaEntries.map(renderField)
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <Button variant="secondary" size="compact" disabled={maxed} onClick={() => onChange([...items, materializeListItemDefaults(field.itemSchema ?? {})])}>{addLabel}</Button>
       </div>
     </div>;
   }
@@ -1692,7 +1778,7 @@ function PluginsView() {
           {filteredEntries.map((entry) => (
             <article key={entry.id} className={`plugin-card ${entry.installed?.brokenReason ? "broken" : ""}`}>
               <div className="plugin-card-body">
-                <span className="plugin-card-icon"><PluginGlyph /></span>
+                <span className="plugin-card-icon"><PluginIcon icon={pluginIcon(entry)} /></span>
                 <div className="plugin-card-content">
                   <strong>{pluginName(entry)}</strong>
                   <small>{pluginDescription(entry)}</small>
@@ -1755,7 +1841,7 @@ function PluginsView() {
         <GlassCard className="plugin-inspector">
         {selected ? <>
           <div className="plugin-inspector-head">
-            <span className="plugin-inspector-icon"><PluginGlyph /></span>
+            <span className="plugin-inspector-icon"><PluginIcon icon={pluginIcon(selected)} /></span>
             <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Configuration</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
             <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
           </div>
@@ -1781,10 +1867,22 @@ function PluginsView() {
             {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>Configuration</small><strong>Needs attention</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
             {installed.configSchema && <section className="plugin-section">
               <div className="plugin-section-title"><small>Settings</small><strong>Configuration</strong></div>
-              <div className="plugin-config-form">{Object.entries(installed.configSchema).map(([key, field]) => <ConfigFieldEditor key={key} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
+              <div className="plugin-config-form">{Object.entries(installed.configSchema).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
               <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run("Saving", async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), "Plugin configuration saved."); })}>Save Configuration</Button>
             </section>}
-            {!!installed.commands?.length && <section className="plugin-section"><div className="plugin-section-title"><small>Commands</small><strong>Quick actions</strong></div><div className="plugin-command-list">{installed.commands.map((command) => <Button key={command.id} variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Running", async () => { applyResult(await api.executePluginCommand(installed.id, command.id), "Plugin command ran."); })}>{command.title}</Button>)}</div></section>}
+            {!!installed.commands?.length && <section className="plugin-section">
+              <div className="plugin-section-title"><small>Commands</small><strong>Quick actions</strong></div>
+              <div className="plugin-command-list">
+                {installed.commands.map((command) => (
+                  <div key={command.id} className="flex flex-col gap-2">
+                    <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Running", async () => { applyResult(await api.executePluginCommand(installed.id, command.id), "Plugin command ran."); })}>
+                      {command.title}
+                    </Button>
+                    {command.description && <small className="text-[10px] text-slatecopy px-1 leading-tight">{command.description}</small>}
+                  </div>
+                ))}
+              </div>
+            </section>}
             <section className="plugin-section plugin-actions-section">
               <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Reloading", async () => { applyResult(await api.reloadPlugin(installed.id), "Plugin reloaded."); })}>Reload</Button>
               {installed.source === "catalog" && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}

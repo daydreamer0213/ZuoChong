@@ -7,6 +7,7 @@ export type PluginRuntime = "declarative";
 export type KnownPluginRuntime = PluginRuntime | "javascript";
 export type PluginPermission = "pet:speak" | "pet:reaction" | "timer" | "schedule" | "storage" | "status" | "commands" | "network";
 export type PluginJavascriptPermission = Exclude<PluginPermission, "timer">;
+export type PluginIcon = "plugin" | "bell" | "timer" | "github";
 export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "multiSelect" | "list";
 
 export type PluginConfigField = {
@@ -34,6 +35,7 @@ export type OpenPetsDeclarativePluginManifest = {
   name: string;
   version: string;
   runtime: PluginRuntime;
+  icon?: PluginIcon;
   permissions: PluginPermission[];
   configSchema?: Record<string, PluginConfigField>;
   triggers: PluginTrigger[];
@@ -47,6 +49,7 @@ export type OpenPetsJavascriptPluginManifest = {
   runtime: "javascript";
   sdkVersion: string;
   entry: string;
+  icon?: PluginIcon;
   permissions: PluginJavascriptPermission[];
   network?: { hosts: string[] };
   configSchema?: Record<string, PluginConfigField>;
@@ -64,8 +67,8 @@ export type PluginManifestValidationResult =
   | { ok: true; manifest: OpenPetsPluginManifest; errors: [] }
   | { ok: false; errors: PluginManifestValidationError[] };
 
-const topLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "permissions", "configSchema", "triggers"]);
-const jsTopLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "sdkVersion", "entry", "permissions", "network", "configSchema"]);
+const topLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "icon", "permissions", "configSchema", "triggers"]);
+const jsTopLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "sdkVersion", "entry", "icon", "permissions", "network", "configSchema"]);
 const configFieldFields = new Set(["type", "label", "description", "default", "options", "min", "max", "step", "maxLength", "maxItems", "itemSchema"]);
 const configOptionFields = new Set(["label", "value"]);
 const triggerFields = new Set(["on", "everyMinutes", "actions"]);
@@ -74,6 +77,7 @@ const reactActionFields = new Set(["type", "reaction"]);
 const supportedConfigTypes = new Set(["text", "textarea", "number", "boolean", "select", "time", "multiSelect", "list"]);
 const deferredConfigTypes = new Set(["multi-select", "date", "schedule", "connection", "secret"]);
 const deferredConfigFeatures = new Set(["dynamicOptions"]);
+const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github"]);
 export const pluginPermissions = ["pet:speak", "pet:reaction", "timer", "schedule", "storage", "status", "commands", "network"] as const satisfies readonly PluginPermission[];
 const javascriptPluginPermissions = ["pet:speak", "pet:reaction", "schedule", "storage", "status", "commands", "network"] as const satisfies readonly PluginJavascriptPermission[];
 export const pluginPermissionSet: ReadonlySet<string> = new Set(pluginPermissions);
@@ -103,6 +107,7 @@ export function validatePluginManifest(input: unknown): PluginManifestValidation
   validateString(input.id, "$.id", "id", errors, /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/);
   validateString(input.name, "$.name", "name", errors);
   validateString(input.version, "$.version", "version", errors, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
+  validatePluginIcon(input.icon, errors);
 
   if (input.runtime === "javascript") {
     addError(errors, "$.runtime", "unsupported_runtime", 'Runtime "javascript" is recognized but unsupported in manifest v1. Use "declarative".');
@@ -124,6 +129,7 @@ function validateJavascriptPluginManifest(input: Record<string, unknown>): Plugi
   validateString(input.id, "$.id", "id", errors, /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/);
   validateString(input.name, "$.name", "name", errors);
   validateString(input.version, "$.version", "version", errors, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
+  validatePluginIcon(input.icon, errors);
   if (input.runtime !== "javascript") addError(errors, "$.runtime", "invalid_runtime", 'manifestVersion 2 runtime must be "javascript".');
   validateString(input.sdkVersion, "$.sdkVersion", "sdkVersion", errors, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   validateEntryPath(input.entry, errors);
@@ -139,6 +145,11 @@ function validateJavascriptPermissions(value: unknown, errors: PluginManifestVal
   const permissions = validatePermissions(value, errors);
   for (const permission of permissions) if (!allowed.has(permission)) addError(errors, "$.permissions", "invalid_permission", "Permission is not valid for javascript plugins.");
   return permissions;
+}
+
+function validatePluginIcon(value: unknown, errors: PluginManifestValidationError[]): void {
+  if (value === undefined) return;
+  if (typeof value !== "string" || !supportedPluginIcons.has(value)) addError(errors, "$.icon", "invalid_icon", "icon must be one of plugin, bell, timer, or github.");
 }
 
 function validateEntryPath(value: unknown, errors: PluginManifestValidationError[]): void {

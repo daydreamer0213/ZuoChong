@@ -1,15 +1,16 @@
-import { canonicalizePluginPermissions, type PluginPermission, type KnownPluginRuntime } from "./plugin-manifest.js";
+import { canonicalizePluginPermissions, type PluginIcon, type PluginPermission, type KnownPluginRuntime } from "./plugin-manifest.js";
 
-export type PluginCatalogEntry = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative"; readonly permissions: readonly PluginPermission[]; readonly downloadUrl: string; readonly sha256: string; readonly minOpenPetsVersion?: string };
+export type PluginCatalogEntry = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative"; readonly icon?: PluginIcon; readonly permissions: readonly PluginPermission[]; readonly downloadUrl: string; readonly sha256: string; readonly minOpenPetsVersion?: string };
 export type PluginCatalogEntryV2 = Omit<PluginCatalogEntry, "runtime"> & { readonly runtime: KnownPluginRuntime; readonly sdkVersion?: string; readonly maxOpenPetsVersion?: string; readonly disabled?: boolean; readonly deprecated?: boolean; readonly statusReason?: string; readonly network?: { readonly hosts: readonly string[] } };
 export type PluginCatalog = { readonly version: 1; readonly generatedAt: string; readonly plugins: readonly PluginCatalogEntry[] } | { readonly version: 2; readonly generatedAt: string; readonly plugins: readonly PluginCatalogEntryV2[] };
 
 const catalogFields = new Set(["version", "generatedAt", "plugins"]);
-const entryFields = new Set(["id", "name", "version", "description", "runtime", "permissions", "downloadUrl", "sha256", "minOpenPetsVersion"]);
+const entryFields = new Set(["id", "name", "version", "description", "runtime", "icon", "permissions", "downloadUrl", "sha256", "minOpenPetsVersion"]);
 const entryFieldsV2 = new Set([...entryFields, "sdkVersion", "maxOpenPetsVersion", "disabled", "deprecated", "statusReason", "network"]);
 const idPattern = /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/;
 const versionPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const shaPattern = /^[0-9a-f]{64}$/;
+const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github"]);
 
 export function validatePluginCatalog(input: unknown): PluginCatalog {
   if (!isRecord(input)) throw new Error("Plugin catalog must be an object.");
@@ -26,7 +27,7 @@ export function validatePluginCatalog(input: unknown): PluginCatalog {
     if (seen.has(id)) throw new Error(`Duplicate plugin id: ${id}`);
     seen.add(id);
     const permissions = canonicalizePluginPermissions(entry.permissions);
-    const base = { id, name: requireString(entry.name, "name", 1, 120), version: requireString(entry.version, "version", 1, 80, versionPattern), description: requireString(entry.description, "description", 0, 1000), runtime: requireRuntime(entry.runtime, input.version), permissions, downloadUrl: requireString(entry.downloadUrl, "downloadUrl", 1, 2048), sha256: requireString(entry.sha256, "sha256", 64, 64, shaPattern), minOpenPetsVersion: entry.minOpenPetsVersion === undefined ? undefined : requireString(entry.minOpenPetsVersion, "minOpenPetsVersion", 1, 80, versionPattern) };
+    const base = { id, name: requireString(entry.name, "name", 1, 120), version: requireString(entry.version, "version", 1, 80, versionPattern), description: requireString(entry.description, "description", 0, 1000), runtime: requireRuntime(entry.runtime, input.version), icon: normalizeIcon(entry.icon), permissions, downloadUrl: requireString(entry.downloadUrl, "downloadUrl", 1, 2048), sha256: requireString(entry.sha256, "sha256", 64, 64, shaPattern), minOpenPetsVersion: entry.minOpenPetsVersion === undefined ? undefined : requireString(entry.minOpenPetsVersion, "minOpenPetsVersion", 1, 80, versionPattern) };
     if (input.version === 1) return base;
     const hasNetworkPermission = permissions.includes("network");
     if (base.runtime === "javascript" && entry.sdkVersion === undefined) throw new Error("Invalid plugin catalog sdkVersion.");
@@ -39,6 +40,7 @@ export function validatePluginCatalog(input: unknown): PluginCatalog {
 }
 
 function requireRuntime(value: unknown, catalogVersion: unknown): KnownPluginRuntime { if (value !== "declarative" && !(catalogVersion === 2 && value === "javascript")) throw new Error(catalogVersion === 2 ? 'Plugin runtime must be "declarative" or "javascript".' : 'Plugin runtime must be "declarative".'); return value; }
+function normalizeIcon(value: unknown): PluginIcon | undefined { if (value === undefined) return undefined; if (typeof value !== "string" || !supportedPluginIcons.has(value)) throw new Error("Invalid plugin catalog icon."); return value as PluginIcon; }
 function requireBoolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new Error(`Invalid plugin catalog ${name}.`); return value; }
 function normalizeNetwork(value: unknown): { readonly hosts: readonly string[] } | undefined { if (value === undefined) return undefined; if (!isRecord(value) || !Array.isArray(value.hosts)) throw new Error("Invalid plugin catalog network.hosts."); rejectUnknown(value, new Set(["hosts"]), "network"); return { hosts: value.hosts.map((host) => requireString(host, "network.hosts", 1, 253, /^[a-z0-9.-]+(?::\d{1,5})?$/i)) }; }
 function requireString(value: unknown, name: string, min: number, max: number, pattern?: RegExp): string { if (typeof value !== "string" || value.length < min || value.length > max || (min > 0 && value.trim() === "")) throw new Error(`Invalid plugin catalog ${name}.`); if (pattern && !pattern.test(value)) throw new Error(`Invalid plugin catalog ${name}.`); return value; }

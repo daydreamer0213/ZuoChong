@@ -14,6 +14,7 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 - `packages/client/src/index.ts`: public IPC client API consumed by integrations and tools.
 - `packages/cursor/src/index.ts`: Cursor MCP/rules setup API.
 - `packages/pi/src/extension.ts`: Pi coding-agent extension runtime entry point.
+- `plugins/official/`: first-party plugin product source consumed by desktop dev mode and web catalog sync.
 
 ## Directory Map
 
@@ -48,6 +49,8 @@ OpenPets is a pnpm/TypeScript monorepo for an Electron desktop companion app plu
 | `packages/pi/src/` | Pi extension entry point, event classification, OpenPets command parsing, and validation checks. | [View Map](packages/pi/src/codemap.md) |
 | `packages/pet-format/` | Minimal package marker/type interface for OpenPets pet package identity. | [View Map](packages/pet-format/codemap.md) |
 | `packages/pet-format/src/` | Marker source export for pet-format package consumers. | [View Map](packages/pet-format/src/codemap.md) |
+| `plugins/` | Root product source for first-party OpenPets plugins before web catalog packaging and R2 upload. | |
+| `plugins/official/` | Official plugin manifests and single-file JavaScript entries loaded by desktop dev mode and packaged by web sync. | |
 
 ## Architecture Flow
 

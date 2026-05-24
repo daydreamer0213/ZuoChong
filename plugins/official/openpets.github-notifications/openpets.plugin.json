@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 2,
+  "id": "openpets.github-notifications",
+  "name": "GitHub Notifications",
+  "version": "1.1.0",
+  "runtime": "javascript",
+  "icon": "github",
+  "sdkVersion": "1.0.0",
+  "entry": "index.js",
+  "permissions": ["network", "schedule", "storage", "pet:speak", "pet:reaction", "commands", "status"],
+  "network": { "hosts": ["api.github.com"] },
+  "configSchema": {
+    "repositories": { "type": "textarea", "label": "Public repositories", "description": "One owner/repo per line. Public repositories only.", "default": "" },
+    "pollIntervalMinutes": { "type": "number", "label": "Poll interval minutes", "default": 30, "min": 10, "max": 1440, "step": 5 },
+    "notifyReleases": { "type": "boolean", "label": "Notify new releases", "default": true },
+    "notifyFailedWorkflows": { "type": "boolean", "label": "Notify failed workflows", "default": true },
+    "notifyIssues": { "type": "boolean", "label": "Notify new issues", "default": false },
+    "notifyPullRequests": { "type": "boolean", "label": "Notify new pull requests", "default": false },
+    "releaseMessage": { "type": "text", "label": "Release message", "default": "New release: {repo} {tag}", "maxLength": 140 },
+    "workflowMessage": { "type": "text", "label": "Workflow failure message", "default": "Workflow failed in {repo}: {name}", "maxLength": 140 },
+    "issueMessage": { "type": "text", "label": "Issue message", "default": "New issue in {repo}: {name}", "maxLength": 140 },
+    "pullRequestMessage": { "type": "text", "label": "Pull request message", "default": "New pull request in {repo}: {name}", "maxLength": 140 },
+    "releaseReaction": { "type": "select", "label": "Release reaction", "default": "celebrating", "options": [{ "label": "Celebrating", "value": "celebrating" }, { "label": "Success", "value": "success" }, { "label": "Waving", "value": "waving" }, { "label": "Idle", "value": "idle" }] },
+    "workflowReaction": { "type": "select", "label": "Workflow reaction", "default": "error", "options": [{ "label": "Error", "value": "error" }, { "label": "Thinking", "value": "thinking" }, { "label": "Waiting", "value": "waiting" }, { "label": "Idle", "value": "idle" }] },
+    "issueReaction": { "type": "select", "label": "Issue reaction", "default": "thinking", "options": [{ "label": "Thinking", "value": "thinking" }, { "label": "Waving", "value": "waving" }, { "label": "Waiting", "value": "waiting" }, { "label": "Idle", "value": "idle" }] },
+    "pullRequestReaction": { "type": "select", "label": "Pull request reaction", "default": "waving", "options": [{ "label": "Waving", "value": "waving" }, { "label": "Success", "value": "success" }, { "label": "Thinking", "value": "thinking" }, { "label": "Idle", "value": "idle" }] }
+  }
+}

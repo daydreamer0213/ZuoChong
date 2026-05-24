@@ -281,14 +281,20 @@ Plugin ZIP installs validate:
 - JavaScript entry presence inside package
 - safe install/uninstall path containment
 
-The web repo builds catalog artifacts with:
+The repository root provides safe plugin catalog commands:
 
 ```bash
-cd web
-node scripts/sync-plugins.js --dry-run --skip-r2
+pnpm plugins:test
+pnpm plugins:check
+pnpm plugins:package
 ```
 
-Publishing uploads plugin ZIPs and regenerates public catalog files.
+`plugins:check` dry-runs package validation, while `plugins:package` writes `web/public/plugins/*.json` and stages ZIPs under `web/.data/plugin-zips` without uploading to R2. Publishing is separate:
+
+```bash
+pnpm plugins:publish
+pnpm plugins:deploy
+```
 
 ## Local development workflow
 
@@ -303,7 +309,7 @@ For this repository, run from the root:
 pnpm dev:desktop:plugins
 ```
 
-This points desktop at `web/plugins/official`, snapshots each official plugin into the app data `plugins-dev` directory, auto-approves permissions for those explicit dev paths, preserves enabled state when permissions/hosts remain compatible, and starts the runtime.
+This points desktop at `plugins/official`, snapshots each official plugin into the app data `plugins-dev` directory, auto-approves permissions for those explicit dev paths, preserves enabled state when permissions/hosts remain compatible, and starts the runtime.
 
 To load one plugin manually:
 
@@ -396,11 +402,12 @@ Desktop plugin/runtime validation:
 pnpm --filter @open-pets/desktop test
 ```
 
-Web plugin catalog dry-run:
+Plugin catalog validation and local packaging:
 
 ```bash
-cd web
-node scripts/sync-plugins.js --dry-run --skip-r2
+pnpm plugins:test
+pnpm plugins:check
+pnpm plugins:package
 ```
 
 Manual dogfood:

@@ -130,32 +130,40 @@ Manual desktop QA:
 
 Web release includes:
 
-- `web/plugins/official/**` source plugins.
+- `plugins/official/**` source plugins.
 - `web/public/plugins/catalog.v2.json` with the three official plugins.
 - `web/public/plugins/catalog.v1.json` with an empty plugin list.
 - Removal of legacy sample plugin manifests.
 - Updated `web/docs/plugin-publishing.md`.
 
-Required validation from `web/`:
+Required validation from the repository root:
 
 ```bash
-node scripts/sync-plugins.js --dry-run --skip-r2
-bun run generate
+pnpm plugins:test
+pnpm plugins:check
+pnpm plugins:package
+pnpm --dir web generate
 ```
 
 Publishing sequence:
 
-1. From `web/`, upload plugin ZIPs and regenerate catalogs:
+1. From the repository root, validate and stage local catalog/ZIP artifacts:
    ```bash
-   bun run sync:plugins
+   pnpm plugins:test
+   pnpm plugins:check
+   pnpm plugins:package
    ```
-2. Confirm `public/plugins/catalog.v2.json` has only the three official plugins.
-3. Confirm `public/plugins/catalog.v1.json` has `plugins: []`.
-4. Deploy web:
+2. Confirm `web/public/plugins/catalog.v2.json` has only the three official plugins.
+3. Confirm `web/public/plugins/catalog.v1.json` has `plugins: []`.
+4. Upload plugin ZIPs to R2 and regenerate catalogs:
    ```bash
-   bun run deploy
+   pnpm plugins:publish
    ```
-5. Verify live endpoints:
+5. Deploy web:
+   ```bash
+   pnpm plugins:deploy
+   ```
+6. Verify live endpoints:
    - `https://openpets.dev/plugins/catalog.v2.json`
    - `https://openpets.dev/plugins/catalog.v1.json`
    - each `https://zip.openpets.dev/plugins/<plugin-id>.zip`
