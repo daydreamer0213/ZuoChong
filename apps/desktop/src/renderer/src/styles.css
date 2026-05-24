@@ -38,11 +38,13 @@
   .filter-icon { @apply h-3.5 w-3.5 stroke-[2.5]; }
   .pager { @apply mt-3 flex items-center justify-between gap-2.5 rounded-xl border border-blue-200/40 bg-blue-50/20 p-1.5 text-xs font-bold text-slatecopy; }
   .pets-grid { @apply grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-y-auto p-1.5 pr-2.5 pb-3; overscroll-behavior: contain; scrollbar-color: rgba(96, 165, 250, 0.42) transparent; }
-  .pet-card { @apply flex flex-row items-center gap-3.5 rounded-2xl border border-slate-200 bg-white/80 p-3 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] hover:-translate-y-0.5 hover:border-brand hover:bg-white active:scale-[0.96] min-h-[92px] w-full cursor-pointer; }
+  .pet-card { @apply relative flex flex-row items-start gap-3.5 rounded-2xl border border-slate-200 bg-white/80 p-3 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] hover:-translate-y-0.5 hover:border-brand hover:bg-white min-h-[138px] w-full; }
   .pet-card.selected { @apply border-brand bg-blue-50/90 ring-4 ring-blue-200/50 shadow-md; }
-  .thumb { @apply grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-white to-blue-100 border border-blue-100/50; }
+  .pet-card-actions { @apply relative z-10 mt-2 grid grid-cols-3 gap-1.5; }
+  .pet-card-actions .btn { @apply min-h-[30px] min-w-0 px-2 py-1 text-[10px] tracking-wide; }
+  .thumb { @apply relative z-10 grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-gradient-to-br from-white to-blue-100 border border-blue-100/50; }
   .thumb img { @apply max-h-12 max-w-12 object-contain; }
-  .card-content { @apply flex flex-col flex-1 min-w-0 justify-center gap-1; }
+  .card-content { @apply relative z-10 flex flex-col flex-1 min-w-0 justify-center gap-1; }
   .card-title-row { @apply flex items-center justify-between gap-2; }
   .card-title { @apply font-semibold text-navy text-sm truncate block; }
   .card-desc { @apply text-xs text-slatecopy line-clamp-1 m-0; }

@@ -649,7 +649,8 @@ function Button({
   disabled,
   icon,
   iconPosition = "left",
-  fullWidth
+  fullWidth,
+  ariaLabel,
 }: {
   children: React.ReactNode;
   variant?: "primary" | "secondary" | "danger" | "success" | "warning";
@@ -659,12 +660,14 @@ function Button({
   icon?: React.ReactNode;
   iconPosition?: "left" | "right";
   fullWidth?: boolean;
+  ariaLabel?: string;
 }) {
   return (
     <button
       className={`btn ${buttonVariantClass[variant]} ${size === "compact" ? "btn-compact" : ""} ${fullWidth ? "w-full" : ""} ${icon ? "has-icon" : ""}`}
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
     >
       {icon && iconPosition === "left" && <span className="btn-icon-wrapper mr-1.5 inline-flex items-center justify-center">{icon}</span>}
       <span className="btn-text">{children}</span>
@@ -1966,7 +1969,6 @@ function App() {
   }, [selected, defaultId, state]);
 
   async function act(label: string, fn: () => Promise<unknown>) {
-    if (!selected) return;
     try { setBusy(label); setError(""); await fn(); await loadPetsData(); }
     catch (err) { setError(String((err as Error)?.message ?? err)); }
     finally { setBusy(""); }
@@ -2093,12 +2095,16 @@ function App() {
               const isBuiltIn = pet.builtIn;
               const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
               const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
+              const isDefault = pet.id === defaultId;
+              const canInstall = !pet.installed && pet.sourceKind === "catalog";
+              const canImport = !pet.installed && pet.sourceKind === "codex";
+              const canSetDefault = pet.installed && !isDefault && !pet.broken;
+              const canRemove = pet.installed && !pet.builtIn && !pet.protected;
+
               return (
-                <button
+                <div
                   key={`${pet.sourceKind}-${pet.id}`}
-                  className={`pet-card ${selected?.id === pet.id ? "selected" : ""}`}
-                  onClick={() => setSelectedId(pet.id)}
-                  aria-label={`Open ${pet.displayName} details`}
+                  className={`pet-card group ${selected?.id === pet.id ? "selected" : ""}`}
                 >
                   <span className="thumb">
                     {useSpritesheetFrame ? (
@@ -2112,9 +2118,69 @@ function App() {
                       <b className="card-title">{pet.displayName}</b>
                     </span>
                     <p className="card-desc">{pet.description || pet.id}</p>
-                    <div className="badges">{pet.id === defaultId && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                    <div className="badges">{isDefault && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+
+                    <div className="pet-card-actions" onClick={(event) => event.stopPropagation()}>
+                      <Button
+                        variant="secondary"
+                        size="compact"
+                        icon={<ConfigureIcon />}
+                        ariaLabel={`View ${pet.displayName} details`}
+                        onClick={() => setSelectedId(pet.id)}
+                      >
+                        Details
+                      </Button>
+                      {canInstall && (
+                        <Button
+                          variant="primary"
+                          size="compact"
+                          icon={<InstallIcon />}
+                          disabled={!!busy}
+                          ariaLabel={`Install ${pet.displayName}`}
+                          onClick={() => { void act("Installing", () => api.installPet(pet.id)); }}
+                        >
+                          Install
+                        </Button>
+                      )}
+                      {canImport && (
+                        <Button
+                          variant="warning"
+                          size="compact"
+                          icon={<ImportIcon />}
+                          disabled={!!busy}
+                          ariaLabel={`Import ${pet.displayName} from Codex`}
+                          onClick={() => { void act("Importing", () => api.importCodexPet(pet.id)); }}
+                        >
+                          Import
+                        </Button>
+                      )}
+                      {canSetDefault && (
+                        <Button
+                          variant="primary"
+                          size="compact"
+                          icon={<SetDefaultIcon />}
+                          disabled={!!busy}
+                          ariaLabel={`Set ${pet.displayName} as default`}
+                          onClick={() => { void act("Setting default", () => api.setDefaultPet(pet.id)); }}
+                        >
+                          Default
+                        </Button>
+                      )}
+                      {canRemove && (
+                        <Button
+                          variant="danger"
+                          size="compact"
+                          icon={<RemoveIcon />}
+                          disabled={!!busy}
+                          ariaLabel={`Remove ${pet.displayName}`}
+                          onClick={() => { void act("Removing", () => api.removePet(pet.id)); }}
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </button>
+                </div>
               );
             })}</div>
             <div className="pager">
