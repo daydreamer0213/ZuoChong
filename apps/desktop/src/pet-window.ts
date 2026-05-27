@@ -756,6 +756,8 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-header { display: inline-flex; align-items: center; min-width: 0; gap: 7px; color: currentColor; font: 780 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0.01em; }
     .bubble-status-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; min-width: 18px; height: 18px; border-radius: 999px; background: #3b82f6; color: #fff; font: 900 12px/18px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: center; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(59, 130, 246, 0.3); }
     .bubble-status-icon::before { content: attr(data-icon); display: block; width: 18px; height: 18px; line-height: 18px; text-align: center; transform: none; }
+    .bubble-status-icon.has-svg::before { content: none; }
+    .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
     .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -804,7 +806,7 @@ function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean
   if (!text && !status) return "";
   const isExplicitMessage = Boolean(display?.message && !display?.reactionMessage);
   const className = getBubbleClassName(text, isExplicitMessage, status?.className);
-  const header = status ? `<div class="bubble-header"><span class="bubble-status-icon" data-icon="${escapeHtml(status.icon)}" aria-hidden="true"></span><span class="bubble-status-label">${escapeHtml(status.label)}</span></div>` : "";
+  const header = status ? `<div class="bubble-header"><span class="bubble-status-icon${status.iconSvg ? " has-svg" : ""}" data-icon="${escapeHtml(status.icon ?? "")}" aria-hidden="true">${status.iconSvg ?? ""}</span><span class="bubble-status-label">${escapeHtml(status.label)}</span></div>` : "";
   const divider = status && text ? `<div class="bubble-divider" aria-hidden="true"></div>` : "";
   const body = text ? `<div class="bubble-body"><span class="bubble-text">${escapeHtml(text)}</span></div>` : "";
   // Use provided dismissToken, fallback to display's dismissToken for transient messages
@@ -813,15 +815,21 @@ function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean
   return `<div class="${className}" role="status" aria-live="polite"${dismissAttr}>${header}${divider}${body}</div>`;
 }
 
-function getStatusBadge(reaction: PetStatusBadgeReaction): { readonly className: string; readonly icon: string; readonly label: string } | null {
+const statusBadgeIcons = {
+  check: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 6L9 17l-5-5"/></svg>',
+  alert: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4m0 4h.01"/></svg>',
+  wavingHand: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path fill="currentColor" fill-rule="evenodd" d="M4.771 1.197A.625.625 0 1 0 4.266.053a3.5 3.5 0 0 0-1.494 1.258a.625.625 0 0 0 1.04.694c.247-.37.582-.642.96-.808m8.563.739a.625.625 0 0 0-1.01.738c.244.332.399.736.427 1.18A.625.625 0 0 0 14 3.771a3.5 3.5 0 0 0-.665-1.836M2.685 7.304a.488.488 0 0 0-.904.367l.687 1.835c.229.61.566 1.173.996 1.663l.346.393a.625.625 0 1 1-.939.825l-.345-.393a6.6 6.6 0 0 1-1.228-2.05L.61 8.11a1.738 1.738 0 0 1 3.075-1.574l1.006-3.755a1.75 1.75 0 0 1 2.635-1.022a1.751 1.751 0 0 1 3.272 1.206l-.149.554a1.75 1.75 0 0 1 1.741 2.204L10.482 12.1a2.63 2.63 0 0 1-1.223 1.594l-.385.222a.625.625 0 1 1-.625-1.082l.385-.223c.316-.182.547-.483.64-.835l1.71-6.377a.5.5 0 0 0-.968-.26l-.758 2.828a.625.625 0 0 1-1.207-.323l.758-2.828l.582-2.175a.5.5 0 0 0-.967-.259l-.35 1.305L7.2 6.949a.625.625 0 0 1-1.207-.323l.874-3.263a.5.5 0 0 0-.968-.259L4.59 7.997c.567.267 1.289.753 1.732 1.522a.625.625 0 1 1-1.082.624c-.383-.66-1.163-1.043-1.53-1.15l-.033-.008a.62.62 0 0 1-.419-.372z" clip-rule="evenodd"/></svg>',
+} as const;
+
+function getStatusBadge(reaction: PetStatusBadgeReaction): { readonly className: string; readonly icon?: string; readonly iconSvg?: string; readonly label: string } | null {
   if (reaction === "thinking") return { className: "is-busy", icon: "", label: "Thinking" };
   if (reaction === "working" || reaction === "running") return { className: "is-busy", icon: "", label: "Working" };
   if (reaction === "editing") return { className: "is-busy", icon: "", label: "Editing" };
   if (reaction === "testing") return { className: "is-busy", icon: "", label: "Testing" };
   if (reaction === "waiting") return { className: "is-waiting", icon: "", label: "Waiting" };
-  if (reaction === "success" || reaction === "celebrating") return { className: "is-success", icon: "✓", label: "Done" };
-  if (reaction === "error") return { className: "is-error", icon: "!", label: "Oops" };
-  if (reaction === "waving") return { className: "is-info", icon: "♪", label: "Hi" };
+  if (reaction === "success" || reaction === "celebrating") return { className: "is-success", iconSvg: statusBadgeIcons.check, label: "Done" };
+  if (reaction === "error") return { className: "is-error", iconSvg: statusBadgeIcons.alert, label: "Oops" };
+  if (reaction === "waving") return { className: "is-info", iconSvg: statusBadgeIcons.wavingHand, label: "Hi" };
   return null;
 }
 
