@@ -195,6 +195,8 @@ OpenPets now includes a first-party plugin platform for optional desktop compani
 - Break Buddy — wellness break nudges with custom messages, reactions, days, and intervals.
 - Pet Pal — playful user-triggered pet actions.
 - Focus Buddy — passive focus/break sessions with pet feedback and controls.
+- Wander Buddy — gentle companion movement with conservative defaults.
+- Quick Reminders — short local reminders from the pet menu.
 - GitHub Notifications — developer/advanced public repository release and failed-workflow notifications. No GitHub login, token, or private repository access is used.
 
 ### Plugin management
@@ -250,13 +252,13 @@ Published releases are visible to the app update checker.
 
 ## Default release assets
 
-Default command:
+Default command for this companion-first plugin release:
 
 ```bash
-pnpm release:desktop -- --yes
+pnpm release:desktop -- --yes --include-optional
 ```
 
-Default build matrix:
+Default build matrix for the local release script:
 
 - macOS DMG: x64 + arm64
 - Windows NSIS installer: x64
@@ -389,7 +391,7 @@ If not authenticated:
 gh auth login
 ```
 
-### 7. Run a dry run first
+### 7. Optional dry run
 
 Run:
 
@@ -397,7 +399,7 @@ Run:
 pnpm release:desktop -- --dry-run
 ```
 
-This should pass preflight, build artifacts, generate checksums, and stop before creating the GitHub Release.
+This should pass preflight, build artifacts, generate checksums, and stop before creating the GitHub Release. A dry run is recommended for risky releases, but it can be skipped when the current release has already been validated and the user explicitly approves publishing directly.
 
 If it fails because the tree is dirty, inspect:
 
@@ -409,13 +411,7 @@ The release script requires a clean tree before release creation.
 
 ### 8. Create the published GitHub Release and upload assets
 
-For the recommended default release:
-
-```bash
-pnpm release:desktop -- --yes
-```
-
-For a fuller x64 release with optional artifacts:
+For the recommended companion-first plugin release with optional artifacts:
 
 ```bash
 pnpm release:desktop -- --yes --include-optional
