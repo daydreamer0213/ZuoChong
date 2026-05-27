@@ -21,3 +21,8 @@ When working on desktop UI, renderer, IPC, catalog, plugin, or pet-window behavi
 Prefer concise, scoped logs that capture data shape, selected IDs, load/error states, and boundary decisions.
 Route renderer diagnostics into the app log when possible so failures are visible in `openpets.log`, not only DevTools.
 Avoid noisy permanent logs, secrets, full payload dumps, or logging in tight animation/render loops.
+
+## Control Center CSP
+
+When adding any renderer-visible URL scheme, image source, dev server endpoint, or internal protocol, update the Control Center CSP in both `apps/desktop/vite.config.ts` and `apps/desktop/src/renderer/index.html`.
+Common pet image protocols include `openpets-codex:`, `openpets-installed:`, and `openpets-pet-preview:`; forgetting CSP causes images to load as the default/fallback pet even when install/render logic is correct.

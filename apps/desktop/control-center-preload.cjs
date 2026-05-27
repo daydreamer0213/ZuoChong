@@ -28,7 +28,9 @@ const api = {
   getCodexPets: () => ipcRenderer.invoke("openpets:get-codex-pets"),
   setDefaultPet: (petId) => ipcRenderer.invoke("openpets:set-default-pet", petId),
   installPet: (petId) => ipcRenderer.invoke("openpets:install-pet", petId),
+  installLocalPet: () => ipcRenderer.invoke("openpets:install-local-pet"),
   importCodexPet: (petId) => ipcRenderer.invoke("openpets:import-codex-pet", petId),
+  openGallery: () => ipcRenderer.invoke("openpets:open-gallery"),
   removePet: (petId) => ipcRenderer.invoke("openpets:remove-pet", petId),
   onRouteChange: (callback) => {
     const listener = (_event, route) => callback(route);

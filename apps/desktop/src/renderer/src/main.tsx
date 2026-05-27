@@ -12,7 +12,7 @@ import vscodeLogoUrl from "../../../assets/integrations/vscode.svg";
 import windsurfLogoUrl from "../../../assets/integrations/windsurf.svg";
 import zedLogoUrl from "../../../assets/integrations/zed.svg";
 
-type Filter = "all" | "installed" | "featured" | "originals" | "western" | "asian" | "codex";
+type Filter = "all" | "installed" | "featured" | "originals" | "codex";
 type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; source?: { kind?: "catalog"; preview?: string } | { kind: "codex"; path: string } };
 type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
 type SearchPetEntry = Pick<PetEntry, "id" | "displayName" | "category" | "original" | "featured"> & { searchText?: string; catalogPage?: number };
@@ -71,7 +71,9 @@ type ControlCenterApi = {
   getCodexPets(): Promise<CodexState>;
   setDefaultPet(petId: string): Promise<StateSnapshot>;
   installPet(petId: string): Promise<unknown>;
+  installLocalPet(): Promise<unknown>;
   importCodexPet(petId: string): Promise<unknown>;
+  openGallery(): Promise<void>;
   removePet(petId: string): Promise<StateSnapshot>;
   onRouteChange(callback: (route: Route) => void): () => void;
   getIntegrationsState(selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
@@ -174,6 +176,13 @@ const ConfigureIcon = () => (
     <line x1="14" x2="14" y1="2" y2="6" />
     <line x1="8" x2="8" y1="10" y2="14" />
     <line x1="16" x2="16" y1="18" y2="22" />
+  </svg>
+);
+
+const EyeIcon = () => (
+  <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+    <circle cx="12" cy="12" r="3" />
   </svg>
 );
 
@@ -336,8 +345,15 @@ const PetsIcon = () => (
 
 const SettingsIcon = () => (
   <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path fill="currentColor" d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0a2.34 2.34 0 0 0 3.319 1.915a2.34 2.34 0 0 1 2.33 4.033a2.34 2.34 0 0 0 0 3.831a2.34 2.34 0 0 1-2.33 4.033a2.34 2.34 0 0 0-3.319 1.915a2.34 2.34 0 0 1-4.659 0a2.34 2.34 0 0 0-3.32-1.915a2.34 2.34 0 0 1-2.33-4.033a2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
-    <circle fill="currentColor" cx="12" cy="12" r="3" />
+    <line x1="21" x2="14" y1="4" y2="4" />
+    <line x1="10" x2="3" y1="4" y2="4" />
+    <line x1="21" x2="12" y1="12" y2="12" />
+    <line x1="8" x2="3" y1="12" y2="12" />
+    <line x1="21" x2="16" y1="20" y2="20" />
+    <line x1="12" x2="3" y1="20" y2="20" />
+    <line x1="14" x2="14" y1="2" y2="6" />
+    <line x1="8" x2="8" y1="10" y2="14" />
+    <line x1="16" x2="16" y1="18" y2="22" />
   </svg>
 );
 
@@ -350,9 +366,12 @@ const PluginsIcon = () => (
 
 const IntegrationsIcon = () => (
   <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path fill="currentColor" d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1zm0 2v-2" />
-    <path fill="currentColor" d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10m16 11v-2M3 5V3" />
-    <path fill="currentColor" d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2zm3-5V3" />
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="12" cy="18" r="3" />
+    <path d="M8.6 7.5 10.8 15" />
+    <path d="M15.4 7.5 13.2 15" />
+    <path d="M9 6h6" />
   </svg>
 );
 
@@ -424,8 +443,19 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const reactionEntries = Object.entries(activity.reactionCounts)
     .filter(([, count]) => count > 0)
     .sort(([, a], [, b]) => b - a);
-  const topReactionEntry = reactionEntries[0];
-  const topReaction = topReactionEntry ? topReactionEntry[0].charAt(0).toUpperCase() + topReactionEntry[0].slice(1) : "None yet";
+  const reactionTotal = reactionEntries.reduce((total, [, count]) => total + count, 0);
+  const reactionColors = ["#3b82f6", "#a855f7", "#f97316", "#14b8a6"];
+  const reactionDonutSegments = reactionEntries.slice(0, 4).map(([label, count], index) => ({
+    label,
+    count,
+    color: reactionColors[index] ?? "#64748b",
+  }));
+  const topCompanionEntries = Object.entries(activity.perPetActivityCounts)
+    .filter(([, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 4);
+  const maxCompanionActivity = Math.max(...topCompanionEntries.map(([, count]) => count), 1);
+  const lastActiveLabel = activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : "No activity yet";
   const updateLabel = updateStatus.state === "available" ? "Update available" : updateStatus.state === "error" ? "Check failed" : updateStatus.state === "checking" ? "Checking" : updateStatus.state === "current" ? "Current" : "Not checked";
 
   return (
@@ -498,17 +528,63 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
               </div>
             </div>
 
-            <div className="flex items-center justify-between p-4 rounded-2xl bg-blue-50/30 border border-blue-100/30">
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Last Interaction</span>
-                <span className="text-sm font-bold text-navy">
-                  {activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : "Never"}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1 text-right">
-                <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Top Reaction</span>
-                <span className="text-sm font-bold text-brand">{topReaction}</span>
-              </div>
+            <div className="dashboard-activity-charts">
+              <section className="dashboard-chart-panel dashboard-reaction-mix">
+                <div className="dashboard-chart-heading">
+                  <span>Reaction Mix</span>
+                  <small>{reactionTotal ? `${reactionTotal.toLocaleString()} total` : "Waiting for activity"}</small>
+                </div>
+                <div className="dashboard-donut-row">
+                  <div className="dashboard-donut" aria-label="Reaction mix chart">
+                    <svg viewBox="0 0 100 100" role="img">
+                      <circle className="dashboard-donut-track" cx="50" cy="50" r="40" />
+                      {reactionTotal > 0 && reactionDonutSegments.map((segment, index) => {
+                        const circumference = 251.327;
+                        const previousTotal = reactionDonutSegments.slice(0, index).reduce((total, item) => total + item.count, 0);
+                        const dash = (segment.count / reactionTotal) * circumference;
+                        const offset = -(previousTotal / reactionTotal) * circumference;
+                        return <circle key={segment.label} className="dashboard-donut-segment" cx="50" cy="50" r="40" stroke={segment.color} strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={offset} />;
+                      })}
+                    </svg>
+                    <div className="dashboard-donut-center">
+                      <strong>{reactionTotal.toLocaleString()}</strong>
+                      <span>reactions</span>
+                    </div>
+                  </div>
+                  <div className="dashboard-donut-legend">
+                    {reactionDonutSegments.length ? reactionDonutSegments.map((segment) => (
+                      <div key={segment.label} className="dashboard-donut-legend-item">
+                        <span className="dashboard-donut-dot" style={{ background: segment.color }} />
+                        <span>{segment.label}</span>
+                        <strong>{segment.count}</strong>
+                      </div>
+                    )) : <p>No reaction mix yet.</p>}
+                  </div>
+                </div>
+              </section>
+
+              <section className="dashboard-chart-panel dashboard-companion-bars">
+                <div className="dashboard-chart-heading">
+                  <span>Top Companions</span>
+                  <small>Most active pets</small>
+                </div>
+                <div className="dashboard-bars-list">
+                  {topCompanionEntries.length ? topCompanionEntries.map(([petId, count]) => {
+                    const label = petId === defaultPet.id ? defaultPet.displayName : petId.replace(/[-_]/g, " ");
+                    return (
+                      <div key={petId} className="dashboard-bar-item">
+                        <div className="dashboard-bar-labels">
+                          <span>{label}</span>
+                          <strong>{count}</strong>
+                        </div>
+                        <div className="dashboard-bar-track"><span style={{ width: `${Math.max(8, Math.round((count / maxCompanionActivity) * 100))}%` }} /></div>
+                      </div>
+                    );
+                  }) : <p className="dashboard-empty-note">No companion activity yet.</p>}
+                </div>
+              </section>
+
+              <div className="dashboard-last-active-pill">Last active: <strong>{lastActiveLabel}</strong></div>
             </div>
           </div>
         </GlassCard>
@@ -589,8 +665,6 @@ const filterIcons: Record<Filter, React.ReactNode> = {
   installed: <FilterInstalledIcon />,
   featured: <FilterFeaturedIcon />,
   originals: <FilterOriginalIcon />,
-  western: <FilterWesternIcon />,
-  asian: <FilterAsianIcon />,
   codex: <FilterCodexIcon />,
 };
 
@@ -599,8 +673,6 @@ const filterLabels: Record<Filter, string> = {
   installed: "Installed",
   featured: "Featured",
   originals: "Originals",
-  western: "Western",
-  asian: "Asian",
   codex: "Codex",
 };
 
@@ -700,6 +772,10 @@ function isAllowedCodexPreview(value: string | undefined): value is string {
   return typeof value === "string" && /^openpets-codex:\/\/spritesheet\/[a-zA-Z0-9%][a-zA-Z0-9%_-]{0,128}$/u.test(value);
 }
 
+function isAllowedInstalledPetPreview(value: string | undefined): value is string {
+  return typeof value === "string" && /^openpets-installed:\/\/spritesheet\/[a-zA-Z0-9%][a-zA-Z0-9%_-]{0,128}$/u.test(value);
+}
+
 function isAllowedDefaultPetPreview(value: string | undefined): value is string {
   return typeof value === "string" && /^openpets-pet-preview:\/\/spritesheet\/default\?v=[a-z0-9_-]+-\d+-\d+$/u.test(value);
 }
@@ -709,7 +785,11 @@ function isAllowedDataUrl(value: string | undefined): value is string {
 }
 
 function safePetImage(value: string | undefined): string | undefined {
-  return isAllowedCatalogPreview(value) || isAllowedCodexPreview(value) || isAllowedDefaultPetPreview(value) || isAllowedDataUrl(value) ? value : undefined;
+  return isAllowedCatalogPreview(value) || isAllowedCodexPreview(value) || isAllowedInstalledPetPreview(value) || isAllowedDefaultPetPreview(value) || isAllowedDataUrl(value) ? value : undefined;
+}
+
+function installedPetSpritesheetUrl(petId: string): string {
+  return `openpets-installed://spritesheet/${encodeURIComponent(petId)}`;
 }
 
 function imageDebug(value: string | undefined): string {
@@ -1949,8 +2029,9 @@ function App() {
     const rows: PetEntry[] = (state?.pets.installed ?? []).map((p) => {
       const catalogPet = catalogMap.get(p.id);
       const codexPet = codexMap.get(p.id);
-      const spritesheet = safePetImage(codexPet?.spritesheet) || safePetImage(catalogPet?.spritesheet);
-      const preview = safePetImage(codexPet?.preview) || safePetImage(catalogPet?.preview) || safePetImage(catalogPet?.thumbnail) || safePetImage(p.source && "preview" in p.source ? (p.source as { preview?: string }).preview : undefined) || defaultThumbUrl;
+      const localSpritesheet = p.id && !catalogPet && !codexPet && !p.builtIn ? installedPetSpritesheetUrl(p.id) : undefined;
+      const spritesheet = safePetImage(codexPet?.spritesheet) || safePetImage(catalogPet?.spritesheet) || safePetImage(localSpritesheet);
+      const preview = safePetImage(codexPet?.preview) || safePetImage(catalogPet?.preview) || safePetImage(catalogPet?.thumbnail) || safePetImage(p.source && "preview" in p.source ? (p.source as { preview?: string }).preview : undefined) || safePetImage(localSpritesheet) || defaultThumbUrl;
       const category = catalogPet?.category;
       const original = catalogPet?.original;
       const featured = catalogPet?.featured;
@@ -1995,7 +2076,6 @@ function App() {
       if (filter === "codex" && p.sourceKind !== "codex" && !(installed.get(p.id)?.source?.kind === "codex")) return false;
       if (filter === "originals" && !p.original && !p.builtIn) return false;
       if (filter === "featured" && (!p.featured || p.original)) return false;
-      if ((filter === "western" || filter === "asian") && (p.category !== filter || p.featured || p.original)) return false;
       const q = query.trim().toLowerCase();
       return !q || `${p.displayName} ${p.description ?? ""} ${p.searchText ?? ""} ${p.id}`.toLowerCase().includes(q);
     });
@@ -2085,7 +2165,7 @@ function App() {
     if (currentRoute !== "pets") return;
     if (!catalogSearch) return;
     const q = query.trim().toLowerCase();
-    const needsRemotePages = !!q || filter === "featured" || filter === "originals" || filter === "western" || filter === "asian";
+    const needsRemotePages = !!q || filter === "featured" || filter === "originals";
     
     const pages = new Set<number>();
     
@@ -2101,7 +2181,6 @@ function App() {
     if (needsRemotePages) {
       for (const pet of catalogSearch) {
         if (pages.size >= 12) break;
-        if ((filter === "western" || filter === "asian") && (pet.category !== filter || pet.featured || pet.original)) continue;
         if (filter === "originals" && !pet.original) continue;
         if (filter === "featured" && (!pet.featured || pet.original)) continue;
         if (q && !`${pet.displayName} ${pet.searchText ?? ""} ${pet.id}`.toLowerCase().includes(q)) continue;
@@ -2176,18 +2255,24 @@ function App() {
         <div className="layout">
           <GlassCard className="gallery">
             <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-            <div className="filters">
-              {(["all", "installed", "featured", "originals", "western", "asian", "codex"] as Filter[]).map((f) => (
-                <button
-                  key={f}
-                  className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
-                  onClick={() => setFilter(f)}
-                  aria-current={filter === f ? "page" : undefined}
-                >
-                  <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-                  <span className="filter-text">{filterLabels[f]}</span>
-                </button>
-              ))}
+            <div className="filter-row">
+              <div className="filters">
+                {(["all", "installed", "featured", "originals", "codex"] as Filter[]).map((f) => (
+                  <button
+                    key={f}
+                    className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
+                    onClick={() => setFilter(f)}
+                    aria-current={filter === f ? "page" : undefined}
+                  >
+                    <span className="filter-icon-wrapper">{filterIcons[f]}</span>
+                    <span className="filter-text">{filterLabels[f]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="filter-actions">
+                <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void act("Importing", () => api.installLocalPet())}>Import pet</Button>
+                <Button variant="secondary" size="compact" icon={<HeartIcon />} onClick={() => void api.openGallery().catch((err) => setError(String(err?.message ?? err)))}>Gallery</Button>
+              </div>
             </div>
             <div className="pets-grid">{pets.map((pet) => {
               const isBuiltIn = pet.builtIn;
@@ -2216,17 +2301,17 @@ function App() {
                       <b className="card-title">{pet.displayName}</b>
                     </span>
                     <p className="card-desc">{pet.description || pet.id}</p>
-                    <div className="badges">{isDefault && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.category === "western" && !pet.original && !pet.featured && <StatusPill tone="slate">Western</StatusPill>}{pet.category === "asian" && !pet.original && !pet.featured && <StatusPill tone="slate">Asian</StatusPill>}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                    <div className="badges">{isDefault && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
 
                     <div className="pet-card-actions" onClick={(event) => event.stopPropagation()}>
                       <Button
                         variant="secondary"
                         size="compact"
-                        icon={<ConfigureIcon />}
-                        ariaLabel={`View ${pet.displayName} details`}
+                        icon={<EyeIcon />}
+                        ariaLabel={`View ${pet.displayName}`}
                         onClick={() => setSelectedId(pet.id)}
                       >
-                        Details
+                        View pet
                       </Button>
                       {canInstall && (
                         <Button
@@ -2344,8 +2429,6 @@ function App() {
                       {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
                       {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
                       {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
-                      {selected.category === "western" && !selected.original && !selected.featured && <StatusPill tone="slate">Western</StatusPill>}
-                      {selected.category === "asian" && !selected.original && !selected.featured && <StatusPill tone="slate">Asian</StatusPill>}
                     </div>
                     {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
                   </div>
@@ -2354,6 +2437,7 @@ function App() {
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mb-3">Preview Animations</h3>
                     <div className="pet-preview-grid">
                       {[
+                        { label: "Idle", state: "idle" as const },
                         { label: "Thinking", state: "thinking" as const },
                         { label: "Happy", state: "happy" as const },
                         { label: "Wave", state: "wave" as const },

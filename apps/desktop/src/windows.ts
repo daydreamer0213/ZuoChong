@@ -1,16 +1,17 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-import { app, BrowserWindow, ipcMain, protocol, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent, type OpenDialogOptions } from "electron";
 
 import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, normalizePetScale, petScaleOptions, updatePreferences } from "./app-state.js";
+import { createAppIcon } from "./assets.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
-import { installPet, removePet, setDefaultInstalledPet } from "./pet-installation.js";
-import { getInstalledPetDir } from "./pet-paths.js";
+import { installPet, installPetFromFolder, installPetFromZipFile, removePet, setDefaultInstalledPet } from "./pet-installation.js";
+import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { debug, error as logError, warn } from "./logger.js";
 import { getPluginService, type PluginServiceResult } from "./plugin-service.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
@@ -23,6 +24,9 @@ const controlCenterRoutes = new Set<ControlCenterRoute>(["dashboard", "pets", "s
 let controlCenterWindow: BrowserWindow | null = null;
 let internalUiHandlersInstalled = false;
 let pendingControlCenterRoute: ControlCenterRoute | null = null;
+let pendingDockTimer: NodeJS.Timeout | null = null;
+let lastDockHideAt = 0;
+const dockHideShowCooldownMs = 1100;
 
 function hasOpenInternalUiWindows(): boolean {
   if (controlCenterWindow && !controlCenterWindow.isDestroyed()) return true;
@@ -33,8 +37,24 @@ function syncDockVisibilityForInternalUi(): void {
   if (process.platform !== "darwin") return;
   const dock = app.dock;
   if (!dock) return;
-  if (hasOpenInternalUiWindows()) dock.show();
-  else dock.hide();
+
+  if (pendingDockTimer) {
+    clearTimeout(pendingDockTimer);
+    pendingDockTimer = null;
+  }
+
+  if (hasOpenInternalUiWindows()) {
+    const elapsedSinceHide = Date.now() - lastDockHideAt;
+    const delayMs = elapsedSinceHide < dockHideShowCooldownMs ? dockHideShowCooldownMs - elapsedSinceHide : 0;
+    pendingDockTimer = setTimeout(() => {
+      pendingDockTimer = null;
+      dock.setIcon(createAppIcon());
+      dock.show();
+    }, delayMs);
+  } else {
+    dock.hide();
+    lastDockHideAt = Date.now();
+  }
 }
 
 function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: ReturnType<typeof getAppStateSnapshot>["pets"] } {
@@ -273,6 +293,41 @@ export function installInternalUiHandlers(): void {
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
   });
 
+  ipcMain.handle("openpets:install-local-pet", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const importKind = await chooseLocalPetImportKind(owner);
+    if (!importKind) return getPetsStateSnapshot();
+    const options: OpenDialogOptions = importKind === "zip" ? {
+      title: "Install pet from ZIP",
+      buttonLabel: "Install Pet",
+      properties: ["openFile"],
+      filters: [{ name: "OpenPets ZIP", extensions: ["zip"] }],
+    } : {
+      title: "Install pet from folder",
+      buttonLabel: "Install Pet",
+      properties: ["openDirectory"],
+    };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths[0]) return getPetsStateSnapshot();
+    const selectedPath = result.filePaths[0];
+    try {
+      const selectedStats = await stat(selectedPath);
+      const state = selectedStats.isDirectory() ? await installPetFromFolder(selectedPath) : await installPetFromZipFile(selectedPath);
+      debug("ui", "local pet import succeeded", { kind: selectedStats.isDirectory() ? "folder" : "zip" });
+      refreshDefaultPetContent();
+      return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
+    } catch (error) {
+      logError("ui", "local pet import failed", { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  });
+
+  ipcMain.handle("openpets:open-gallery", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    await shell.openExternal("https://openpets.dev/gallery");
+  });
+
   ipcMain.handle("openpets:import-codex-pet", async (event, petId: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof petId !== "string") {
@@ -320,6 +375,23 @@ export function installInternalUiHandlers(): void {
   });
 }
 
+async function chooseLocalPetImportKind(owner: BrowserWindow | undefined): Promise<"zip" | "folder" | null> {
+  const options = {
+    type: "question" as const,
+    title: "Install pet",
+    message: "Install pet from ZIP or folder?",
+    detail: "Choose the source type before selecting the pet package.",
+    buttons: ["ZIP", "Folder", "Cancel"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  };
+  const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+  if (result.response === 0) return "zip";
+  if (result.response === 1) return "folder";
+  return null;
+}
+
 export function installInternalUiProtocol(): void {
   protocol.handle("openpets-codex", async (request) => {
     try {
@@ -329,6 +401,29 @@ export function installInternalUiProtocol(): void {
       const petId = decodeURIComponent(url.pathname.replace(/^\//, ""));
       const spritesheet = await readCodexPetSpritesheet(petId);
       return new Response(spritesheet, {
+        headers: {
+          "Content-Type": "image/webp",
+          "Cache-Control": "private, max-age=60",
+        },
+      });
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+
+  protocol.handle("openpets-installed", async (request) => {
+    try {
+      if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });
+      const url = new URL(request.url);
+      if (url.hostname !== "spritesheet" || url.search || url.hash) return new Response(null, { status: 404 });
+      const petId = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      assertSafePetId(petId);
+      const pet = getAppStateSnapshot().pets.installed.find((candidate) => candidate.id === petId && !candidate.broken);
+      if (!pet) return new Response(null, { status: 404 });
+      const spritesheetPath = join(getInstalledPetDir(petId), "spritesheet.webp");
+      const spritesheet = await stat(spritesheetPath);
+      if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) return new Response(null, { status: 404 });
+      return new Response(await readFile(spritesheetPath), {
         headers: {
           "Content-Type": "image/webp",
           "Cache-Control": "private, max-age=60",
@@ -379,6 +474,7 @@ export function openControlCenterWindow(route: ControlCenterRoute = "dashboard")
     minWidth: 820,
     minHeight: 620,
     show: false,
+    icon: createAppIcon(),
     backgroundColor: "#f8fbff",
     webPreferences: {
       nodeIntegration: false,

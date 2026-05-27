@@ -2,6 +2,7 @@ import { app } from "electron";
 import { delimiter, resolve } from "node:path";
 
 import { initializeAppState, releaseStartupInstallLock } from "./app-state.js";
+import { createAppIcon } from "./assets.js";
 import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
 import { debug, error as logError, getLogFilePath, info, initializeLogger, warn } from "./logger.js";
@@ -38,9 +39,13 @@ if (!gotSingleInstanceLock) {
   app.whenReady().then(async () => {
     initializeLogger();
     app.setName("OpenPets");
+    if (process.platform === "win32") {
+      app.setAppUserModelId("dev.openpets.app");
+    }
     info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null });
 
     if (process.platform === "darwin") {
+      app.dock?.setIcon(createAppIcon());
       app.dock?.hide();
     }
 
