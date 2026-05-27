@@ -1,0 +1,13 @@
+{
+  "manifestVersion": 2,
+  "id": "openpets.pet-pal",
+  "name": "Pet Pal",
+  "description": "Adds fun right-click pet actions like say hello, keep me company, cheer me up, do a trick, celebrate, and calm down.",
+  "version": "1.0.0",
+  "runtime": "javascript",
+  "icon": "sparkles",
+  "sdkVersion": "1.0.0",
+  "entry": "index.js",
+  "permissions": ["pet:speak", "pet:reaction", "commands", "status"],
+  "configSchema": {}
+}

@@ -10,7 +10,7 @@ const entryFieldsV2 = new Set([...entryFields, "sdkVersion", "maxOpenPetsVersion
 const idPattern = /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/;
 const versionPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const shaPattern = /^[0-9a-f]{64}$/;
-const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github"]);
+const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus"]);
 
 export function validatePluginCatalog(input: unknown): PluginCatalog {
   if (!isRecord(input)) throw new Error("Plugin catalog must be an object.");

@@ -1,0 +1,36 @@
+{
+  "manifestVersion": 2,
+  "id": "openpets.break-buddy",
+  "name": "Break Buddy",
+  "description": "Reminds you to rest your eyes, stretch, hydrate, and take healthy breaks on a schedule you control.",
+  "version": "1.0.0",
+  "runtime": "javascript",
+  "icon": "bell",
+  "sdkVersion": "1.0.0",
+  "entry": "index.js",
+  "permissions": ["pet:speak", "pet:reaction", "schedule", "storage", "commands", "status"],
+  "configSchema": {
+    "quietHoursEnabled": { "type": "boolean", "label": "Quiet hours", "default": true },
+    "quietStart": { "type": "time", "label": "Quiet start", "default": "22:00" },
+    "quietEnd": { "type": "time", "label": "Quiet end", "default": "08:00" },
+    "snoozeMinutes": { "type": "number", "label": "Snooze minutes", "default": 15, "min": 1, "max": 120, "step": 5 },
+    "breaks": {
+      "type": "list",
+      "label": "Break reminders",
+      "description": "Stretch, eye-rest, and hydration reminders.",
+      "maxItems": 8,
+      "default": [
+        { "id": "eye-rest", "enabled": true, "message": "Rest your eyes for a moment.", "reaction": "waiting", "intervalMinutes": 50 },
+        { "id": "tiny-stretch", "enabled": true, "message": "Tiny stretch break.", "reaction": "waving", "intervalMinutes": 90 },
+        { "id": "water-check", "enabled": false, "message": "Water check.", "reaction": "success", "intervalMinutes": 150 }
+      ],
+      "itemSchema": {
+        "id": { "type": "text", "label": "ID", "default": "break", "maxLength": 48 },
+        "enabled": { "type": "boolean", "label": "Enabled", "default": true },
+        "message": { "type": "textarea", "label": "Message", "default": "Rest your eyes for a moment.", "maxLength": 140 },
+        "reaction": { "type": "select", "label": "Reaction", "default": "waiting", "options": [{ "label": "Waving", "value": "waving" }, { "label": "Waiting", "value": "waiting" }, { "label": "Success", "value": "success" }, { "label": "Celebrating", "value": "celebrating" }] },
+        "intervalMinutes": { "type": "number", "label": "Interval minutes", "default": 60, "min": 10, "max": 1440, "step": 5 }
+      }
+    }
+  }
+}

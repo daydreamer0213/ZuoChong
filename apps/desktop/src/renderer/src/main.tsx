@@ -30,15 +30,16 @@ type DashboardSnapshot = { defaultPet: { id: string; displayName: string; previe
 type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: { frameWidth: number; frameHeight: number; columns: number; rows: number; states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string };
 type PluginFilter = "all" | "installed" | "catalog" | "local" | "broken";
 type PluginPermission = "pet:speak" | "pet:reaction" | "timer" | "schedule" | "storage" | "status" | "commands" | "network";
-type PluginIconName = "plugin" | "bell" | "timer" | "github";
+type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
 type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "multiSelect" | "list"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
 type PluginConfigSchema = Record<string, PluginConfigField>;
 type PluginConfig = Record<string, unknown>;
 type PluginCommand = { id: string; title: string; description?: string };
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
-type SafePluginRecord = { id: string; name?: string; version: string; icon?: PluginIconName; source: "catalog" | "local"; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
-type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; deprecated?: boolean; statusReason?: string };
+type PluginCategory = "Companion" | "Wellness" | "Focus" | "Developer" | "Advanced";
+type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; source: "catalog" | "local"; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
+type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
@@ -1114,6 +1115,14 @@ function PluginIcon({ icon = "plugin", className = "plugin-glyph" }: { icon?: Pl
     <path d="M9 19c-4.3 1.4-4.3-2.5-6-3" />
     <path d="M15 21v-3.5c0-1 .1-1.4-.5-2c2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2a4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6c-.6.6-.6 1.2-.5 2V21" />
   </svg>;
+  if (icon === "heart") return <HeartIcon />;
+  if (icon === "sparkles") return <StarIcon />;
+  if (icon === "coffee") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 2v2" /><path d="M14 2v2" /><path d="M16 8h1a4 4 0 0 1 0 8h-1" /><path d="M6 8h10v7a5 5 0 0 1-5 5h0a5 5 0 0 1-5-5Z" /><path d="M4 22h14" />
+  </svg>;
+  if (icon === "focus") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+  </svg>;
   return <PluginGlyph className={className} />;
 }
 
@@ -1127,7 +1136,7 @@ function pluginName(entry: PluginEntry): string {
 
 function pluginDescription(entry: PluginEntry): string {
   if (entry.installed?.brokenReason) return entry.installed.brokenReason;
-  return entry.catalog?.description || (entry.installed ? "Installed plugin ready for configuration." : "Available from the plugin catalog.");
+  return entry.installed?.description || entry.catalog?.description || (entry.installed ? "Installed plugin ready for configuration." : "Available from the plugin catalog.");
 }
 
 function pluginPrimaryTone(entry: PluginEntry): keyof typeof statusPillToneClass {
@@ -1204,7 +1213,7 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { plu
     const items = Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item)) : [];
     const maxed = typeof field.maxItems === "number" && items.length >= field.maxItems;
 
-    const isReminders = pluginId === "openpets.daily-reminders" && fieldKey === "reminders";
+    const isReminders = (pluginId === "openpets.break-buddy" || fieldKey === "reminders") && ["reminders", "breaks"].includes(fieldKey);
     const addLabel = isReminders ? "Add reminder" : "Add item";
 
     return <div className="plugin-config-row">
@@ -1797,6 +1806,7 @@ function PluginsView() {
   const selected = entries.find((entry) => entry.id === selectedId);
   const installed = selected?.installed;
   const catalogPlugin = selected?.catalog;
+  const hasConfigFields = Boolean(installed?.configSchema && Object.keys(installed.configSchema).length > 0);
 
   useEffect(() => { setConfigDraft(materializeConfigDraft(installed?.configSchema, installed?.effectiveConfig)); }, [installed?.id, installed?.configSchema, installed?.effectiveConfig]);
 
@@ -1864,6 +1874,7 @@ function PluginsView() {
                   <small>{pluginDescription(entry)}</small>
                   <div className="badges mt-1">
                     <StatusPill tone={pluginPrimaryTone(entry)}>{pluginPrimaryLabel(entry)}</StatusPill>
+                    {entry.installed?.bundled && <StatusPill tone="blue">Bundled</StatusPill>}
                     {entry.installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
                     {entry.installed?.runtime === "javascript" || entry.catalog?.runtime === "javascript" ? <StatusPill tone="purple">JS</StatusPill> : <StatusPill tone="slate">Declarative</StatusPill>}
                   </div>
@@ -1922,12 +1933,13 @@ function PluginsView() {
         {selected ? <>
           <div className="plugin-inspector-head">
             <span className="plugin-inspector-icon"><PluginIcon icon={pluginIcon(selected)} /></span>
-            <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Configuration</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
+            <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Details</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
             <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
           </div>
           <div className="meta">
             <StatusPill tone={pluginPrimaryTone(selected)}>{pluginPrimaryLabel(selected)}</StatusPill>
             <StatusPill tone="slate">v{installed?.version ?? catalogPlugin?.version}</StatusPill>
+            {installed?.bundled && <StatusPill tone="blue">Bundled</StatusPill>}
             {installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
             {(installed?.catalogDeprecated || catalogPlugin?.deprecated) && <StatusPill tone="orange">Deprecated</StatusPill>}
           </div>
@@ -1945,9 +1957,9 @@ function PluginsView() {
               <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={permission === "network" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>) : <StatusPill tone="slate">No permissions</StatusPill>}</div>
             </section>
             {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>Configuration</small><strong>Needs attention</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
-            {installed.configSchema && <section className="plugin-section">
+            {hasConfigFields && <section className="plugin-section">
               <div className="plugin-section-title"><small>Settings</small><strong>Configuration</strong></div>
-              <div className="plugin-config-form">{Object.entries(installed.configSchema).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
+              <div className="plugin-config-form">{Object.entries(installed.configSchema ?? {}).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
               <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run("Saving", async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), "Plugin configuration saved."); })}>Save Configuration</Button>
             </section>}
             {!!installed.commands?.length && <section className="plugin-section">
@@ -1965,8 +1977,8 @@ function PluginsView() {
             </section>}
             <section className="plugin-section plugin-actions-section">
               <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Reloading", async () => { applyResult(await api.reloadPlugin(installed.id), "Plugin reloaded."); })}>Reload</Button>
-              {installed.source === "catalog" && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}
-              <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(`Uninstall ${pluginName(selected)}?`)) void run("Uninstalling", async () => { if (applyResult(await api.uninstallPlugin(installed.id), "Plugin uninstalled.")) setSelectedId(""); }); }}>Uninstall</Button>
+              {installed.source === "catalog" && !installed.bundled && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}
+              {!installed.bundled && <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(`Uninstall ${pluginName(selected)}?`)) void run("Uninstalling", async () => { if (applyResult(await api.uninstallPlugin(installed.id), "Plugin uninstalled.")) setSelectedId(""); }); }}>Uninstall</Button>}
             </section>
           </> : <section className="plugin-section">
             <div className="plugin-section-title"><small>Catalog</small><strong>Ready to install</strong></div>

@@ -1,5 +1,6 @@
 import { app } from "electron";
-import { delimiter, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
 
 import { initializeAppState, releaseStartupInstallLock } from "./app-state.js";
 import { createAppIcon } from "./assets.js";
@@ -59,7 +60,7 @@ if (!gotSingleInstanceLock) {
     const roots = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_ROOTS);
     const paths = parseDevPluginEnv(process.env.OPENPETS_DEV_PLUGIN_PATHS);
     const devPluginMode = roots.length > 0 || paths.length > 0;
-    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode);
+    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode);
     if (shouldOpenDefaultPetOnLaunch()) {
       showDefaultPet();
     }
@@ -90,6 +91,11 @@ if (!gotSingleInstanceLock) {
 function parseDevPluginEnv(value: string | undefined): string[] {
   if (!value) return [];
   return value.split(delimiter).map((item) => item.trim()).filter(Boolean).map((item) => resolve(item));
+}
+
+function resolveBundledOfficialPluginRoots(): string[] {
+  const candidates = [join(process.resourcesPath, "plugins", "official"), resolve(process.cwd(), "plugins", "official"), resolve(app.getAppPath(), "..", "..", "plugins", "official")];
+  return Array.from(new Set(candidates.filter((candidate) => existsSync(candidate))));
 }
 
 function writePluginRuntimeLog(level: "debug" | "info" | "warn" | "error", message: string, fields?: Record<string, unknown>): void {

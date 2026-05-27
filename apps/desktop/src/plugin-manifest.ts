@@ -7,7 +7,7 @@ export type PluginRuntime = "declarative";
 export type KnownPluginRuntime = PluginRuntime | "javascript";
 export type PluginPermission = "pet:speak" | "pet:reaction" | "timer" | "schedule" | "storage" | "status" | "commands" | "network";
 export type PluginJavascriptPermission = Exclude<PluginPermission, "timer">;
-export type PluginIcon = "plugin" | "bell" | "timer" | "github";
+export type PluginIcon = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
 export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "multiSelect" | "list";
 
 export type PluginConfigField = {
@@ -33,6 +33,7 @@ export type OpenPetsDeclarativePluginManifest = {
   manifestVersion: 1;
   id: string;
   name: string;
+  description?: string;
   version: string;
   runtime: PluginRuntime;
   icon?: PluginIcon;
@@ -45,6 +46,7 @@ export type OpenPetsJavascriptPluginManifest = {
   manifestVersion: 2;
   id: string;
   name: string;
+  description?: string;
   version: string;
   runtime: "javascript";
   sdkVersion: string;
@@ -67,8 +69,8 @@ export type PluginManifestValidationResult =
   | { ok: true; manifest: OpenPetsPluginManifest; errors: [] }
   | { ok: false; errors: PluginManifestValidationError[] };
 
-const topLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "icon", "permissions", "configSchema", "triggers"]);
-const jsTopLevelFields = new Set(["manifestVersion", "id", "name", "version", "runtime", "sdkVersion", "entry", "icon", "permissions", "network", "configSchema"]);
+const topLevelFields = new Set(["manifestVersion", "id", "name", "description", "version", "runtime", "icon", "permissions", "configSchema", "triggers"]);
+const jsTopLevelFields = new Set(["manifestVersion", "id", "name", "description", "version", "runtime", "sdkVersion", "entry", "icon", "permissions", "network", "configSchema"]);
 const configFieldFields = new Set(["type", "label", "description", "default", "options", "min", "max", "step", "maxLength", "maxItems", "itemSchema"]);
 const configOptionFields = new Set(["label", "value"]);
 const triggerFields = new Set(["on", "everyMinutes", "actions"]);
@@ -77,7 +79,7 @@ const reactActionFields = new Set(["type", "reaction"]);
 const supportedConfigTypes = new Set(["text", "textarea", "number", "boolean", "select", "time", "multiSelect", "list"]);
 const deferredConfigTypes = new Set(["multi-select", "date", "schedule", "connection", "secret"]);
 const deferredConfigFeatures = new Set(["dynamicOptions"]);
-const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github"]);
+const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus"]);
 export const pluginPermissions = ["pet:speak", "pet:reaction", "timer", "schedule", "storage", "status", "commands", "network"] as const satisfies readonly PluginPermission[];
 const javascriptPluginPermissions = ["pet:speak", "pet:reaction", "schedule", "storage", "status", "commands", "network"] as const satisfies readonly PluginJavascriptPermission[];
 export const pluginPermissionSet: ReadonlySet<string> = new Set(pluginPermissions);
@@ -106,6 +108,7 @@ export function validatePluginManifest(input: unknown): PluginManifestValidation
   if (input.manifestVersion !== 1) addError(errors, "$.manifestVersion", "invalid_manifest_version", "manifestVersion must be 1 or 2.");
   validateString(input.id, "$.id", "id", errors, /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/);
   validateString(input.name, "$.name", "name", errors);
+  if (input.description !== undefined) validateString(input.description, "$.description", "description", errors);
   validateString(input.version, "$.version", "version", errors, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   validatePluginIcon(input.icon, errors);
 
@@ -128,6 +131,7 @@ function validateJavascriptPluginManifest(input: Record<string, unknown>): Plugi
   rejectUnknownFields(input, jsTopLevelFields, "$", errors);
   validateString(input.id, "$.id", "id", errors, /^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/);
   validateString(input.name, "$.name", "name", errors);
+  if (input.description !== undefined) validateString(input.description, "$.description", "description", errors);
   validateString(input.version, "$.version", "version", errors, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
   validatePluginIcon(input.icon, errors);
   if (input.runtime !== "javascript") addError(errors, "$.runtime", "invalid_runtime", 'manifestVersion 2 runtime must be "javascript".');
@@ -149,7 +153,7 @@ function validateJavascriptPermissions(value: unknown, errors: PluginManifestVal
 
 function validatePluginIcon(value: unknown, errors: PluginManifestValidationError[]): void {
   if (value === undefined) return;
-  if (typeof value !== "string" || !supportedPluginIcons.has(value)) addError(errors, "$.icon", "invalid_icon", "icon must be one of plugin, bell, timer, or github.");
+  if (typeof value !== "string" || !supportedPluginIcons.has(value)) addError(errors, "$.icon", "invalid_icon", "icon must be one of plugin, bell, timer, github, heart, sparkles, coffee, or focus.");
 }
 
 function validateEntryPath(value: unknown, errors: PluginManifestValidationError[]): void {

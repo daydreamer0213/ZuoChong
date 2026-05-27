@@ -1,6 +1,6 @@
 # OpenPets Plugins
 
-OpenPets now has a first-party plugin platform for optional desktop-pet behaviors. The desktop app remains responsible for rendering pets, tray/window UI, persistence, IPC, permission checks, sandboxing, and safety. Plugins add narrowly scoped behavior such as reminders, focus timers, and developer notifications.
+OpenPets has a first-party plugin platform for optional desktop-pet behaviors. The desktop app remains responsible for rendering pets, tray/window UI, persistence, IPC, permission checks, sandboxing, and safety. Plugins add narrowly scoped companion behaviors such as ambient presence, break nudges, playful pet actions, focus timers, and developer notifications.
 
 The guiding model is:
 
@@ -16,12 +16,14 @@ The current implementation includes:
 - Catalog v2 support at `https://openpets.dev/plugins/catalog.v2.json`, with v1 fallback for older/declarative catalog support.
 - Local developer plugin loading through explicit environment variables.
 - Host-rendered plugin configuration and command UI in the desktop Plugins window.
-- Three first-party JavaScript plugins under the web repo:
-  - `openpets.daily-reminders`
-  - `openpets.pomodoro`
+- Five launch-current first-party JavaScript plugins under `plugins/official`:
+  - `openpets.ambient-companion`
+  - `openpets.break-buddy`
+  - `openpets.pet-pal`
+  - `openpets.focus-buddy`
   - `openpets.github-notifications`
 
-The initial public plugin release should include all three first-party plugins together. Daily Reminders proves scheduling and list configuration, Pomodoro proves stateful storage plus commands/status, and GitHub Notifications proves the network proxy and host allowlist model.
+Ambient Companion, Break Buddy, Pet Pal, and Focus Buddy form the companion-first default bundle. GitHub Notifications remains available as a Developer/Advanced plugin and is not part of the regular-user default experience.
 
 ## Non-goals for the current release
 
@@ -108,10 +110,10 @@ Example:
 ```json
 {
   "manifestVersion": 2,
-  "id": "openpets.daily-reminders",
-  "name": "Daily Reminders",
+  "id": "openpets.break-buddy",
+  "name": "Break Buddy",
   "version": "1.0.0",
-  "description": "Recurring local reminders delivered by your pet.",
+  "description": "Friendly break nudges delivered by your pet.",
   "author": "OpenPets",
   "runtime": "javascript",
   "entry": "index.js",
@@ -321,9 +323,17 @@ Local plugin snapshots copy `openpets.plugin.json` and the declared JavaScript e
 
 ## First-party plugins
 
-### Daily Reminders
+The current first-party plugins below are the companion-first launch lineup.
 
-Purpose: user-defined recurring reminders delivered by the pet.
+### Ambient Companion
+
+Purpose: make the pet feel alive without user setup through calm local check-ins, time-of-day greetings, quiet hours, and low-frequency reactions.
+
+Uses local scheduling, pet speech/reactions, status, commands, and config. It should be bundled and enabled by default.
+
+### Break Buddy
+
+Purpose: lightweight wellness reminders delivered by the pet.
 
 Uses:
 
@@ -334,9 +344,15 @@ Uses:
 - `status` for current reminder summary
 - `config.onChange` to reschedule after config edits
 
-Config includes reminder list items with message, reaction, schedule type, time, days, interval, and enabled state.
+Config includes break/reminder list items with message, reaction, schedule type, time, days, interval, quiet-hours behavior, and enabled state.
 
-### Pomodoro
+### Pet Pal
+
+Purpose: immediate playful pet interactions such as hello, cheer, trick, celebration, calm down, or random mood commands.
+
+Uses commands plus pet speech/reactions. It should be bundled and enabled by default, with no account, network, or setup requirement.
+
+### Focus Buddy
 
 Purpose: focus/break session timer with pet feedback and controls.
 
@@ -348,13 +364,13 @@ Uses:
 - `status` for current phase/remaining state
 - `pet:speak` and `pet:reaction` for start/complete feedback
 
-Config includes focus length, break lengths, long-break cadence, auto-start options, and custom messages/reactions.
+Config includes focus length, break lengths, long-break cadence, auto-start options, and custom messages/reactions. Focus Buddy is enabled by default in the bundled set but passive: it does not auto-start or interrupt until the user invokes a command.
 
 ### GitHub Notifications
 
 Purpose: public repository release/workflow notifications for developers.
 
-Initial scope is intentionally public-only. There is no OAuth, no tokens, and no private repository access.
+Initial scope is intentionally public-only. There is no OAuth, no tokens, and no private repository access. It is Developer/Advanced and should not be default-enabled.
 
 Uses:
 

@@ -1,4 +1,4 @@
-export const STATE_KEY = "pomodoroState";
+export const STATE_KEY = "focusBuddyState";
 export const SCHEDULE_ID = "phase-end";
 const MIN_DELAY_MS = 1;
 const MAX_MESSAGE_LENGTH = 140;
@@ -98,7 +98,7 @@ export async function updateStatus(ctx, state) {
       await ctx.status.set({ text: `${phaseLabel(state.pendingBreakPhase)} ready (${state.completedToday || 0} completed today)`, tone: "success" });
       return;
     }
-    await ctx.status.set({ text: `Pomodoro idle (${state.completedToday || 0} completed today)`, tone: "info" });
+    await ctx.status.set({ text: `Focus Buddy idle (${state.completedToday || 0} completed today)`, tone: "info" });
     return;
   }
   if (state.phase === "paused") {
@@ -192,10 +192,10 @@ export async function stop(ctx) {
 }
 
 export function statusSummary(state) {
-  if (state.phase === "paused") return `Pomodoro paused with ${formatMs(state.remainingMs || 0)} left.`;
+  if (state.phase === "paused") return `Focus paused with ${formatMs(state.remainingMs || 0)} left.`;
   if (["focus", "shortBreak", "longBreak"].includes(state.phase)) return `${phaseLabel(state.phase)} running until ${state.endAt ? new Date(state.endAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "soon"}. ${state.completedToday || 0} completed today.`;
-  if (state.pendingBreakPhase) return `Pomodoro idle. ${phaseLabel(state.pendingBreakPhase)} is ready. ${state.completedToday || 0} focus sessions completed today.`;
-  return `Pomodoro idle. ${state.completedToday || 0} focus sessions completed today.`;
+  if (state.pendingBreakPhase) return `Focus Buddy idle. ${phaseLabel(state.pendingBreakPhase)} is ready. ${state.completedToday || 0} focus sessions completed today.`;
+  return `Focus Buddy idle. ${state.completedToday || 0} focus sessions completed today.`;
 }
 
 export async function reconcileStartup(ctx) {
@@ -221,7 +221,7 @@ export async function reconcileStartup(ctx) {
 export async function startNextBreak(ctx) {
   const state = await getState(ctx);
   const phase = ["shortBreak", "longBreak"].includes(state.pendingBreakPhase) ? state.pendingBreakPhase : undefined;
-  if (!phase) { await ctx.pet.speak("No pending Pomodoro break is ready."); return false; }
+  if (!phase) { await ctx.pet.speak("No pending focus break is ready."); return false; }
   const config = normalizeConfig(await ctx.config.get());
   await startPhase(ctx, phase, durationForPhase(phase, config));
   return true;
@@ -230,7 +230,7 @@ export async function startNextBreak(ctx) {
 export async function resetCount(ctx) {
   const state = await getState(ctx);
   await setState(ctx, { ...state, completedSessions: 0, completedToday: 0, lastCompletedAt: undefined });
-  await ctx.pet.speak("Pomodoro counts reset for today.");
+  await ctx.pet.speak("Focus counts reset for today.");
 }
 
 export function register(OpenPetsPlugin) {
@@ -240,31 +240,22 @@ export function register(OpenPetsPlugin) {
       await updateStatus(ctx, state);
       await schedulePhaseEnd(ctx, state);
 
-      await ctx.commands.register({ id: "start-focus", title: "Start focus", description: "Start a Pomodoro focus session." }, async () => {
+      await ctx.commands.register({ id: "start-focus", title: "Start focus", description: "Start a focus session." }, async () => {
         const config = normalizeConfig(await ctx.config.get());
         await startPhase(ctx, "focus", durationForPhase("focus", config));
       });
-      await ctx.commands.register({ id: "start-short-break", title: "Start short break", description: "Start a short Pomodoro break." }, async () => {
+      await ctx.commands.register({ id: "start-short-break", title: "Start short break", description: "Start a short focus break." }, async () => {
         const config = normalizeConfig(await ctx.config.get());
         await startPhase(ctx, "shortBreak", durationForPhase("shortBreak", config));
       });
-      await ctx.commands.register({ id: "start-long-break", title: "Start long break", description: "Start a long Pomodoro break." }, async () => {
+      await ctx.commands.register({ id: "start-long-break", title: "Start long break", description: "Start a long focus break." }, async () => {
         const config = normalizeConfig(await ctx.config.get());
         await startPhase(ctx, "longBreak", durationForPhase("longBreak", config));
       });
-      await ctx.commands.register({ id: "start-next-break", title: "Start next break", description: "Start the pending Pomodoro break." }, () => startNextBreak(ctx));
-      await ctx.commands.register({ id: "show-status", title: "Show Pomodoro status", description: "Speak the current timer phase and daily count." }, async () => ctx.pet.speak(statusSummary(await getState(ctx))));
-      await ctx.commands.register({ id: "reset-count", title: "Reset Pomodoro count", description: "Reset today's completed focus count." }, () => resetCount(ctx));
-      await ctx.commands.register({ id: "pause", title: "Pause Pomodoro", description: "Pause the current phase." }, () => pause(ctx));
-      await ctx.commands.register({ id: "resume", title: "Resume Pomodoro", description: "Resume a paused phase." }, () => resume(ctx));
-      await ctx.commands.register({ id: "stop", title: "Stop Pomodoro", description: "Stop and return to idle." }, () => stop(ctx));
-      await ctx.commands.register({ id: "skip-phase", title: "Skip phase", description: "Complete the current phase now." }, () => completePhase(ctx));
-      await ctx.commands.register({ id: "test-complete", title: "Test completion", description: "Preview the current phase completion message." }, async () => {
-        const config = normalizeConfig(await ctx.config.get());
-        const current = await getState(ctx);
-        if (current.phase === "shortBreak" || current.phase === "longBreak") await announce(ctx, config.breakCompleteMessage, config.breakCompleteReaction);
-        else await announce(ctx, config.focusCompleteMessage, config.focusCompleteReaction);
-      });
+      await ctx.commands.register({ id: "pause-focus", title: "Pause focus", description: "Pause the current focus timer." }, () => pause(ctx));
+      await ctx.commands.register({ id: "resume-focus", title: "Resume focus", description: "Resume a paused focus timer." }, () => resume(ctx));
+      await ctx.commands.register({ id: "stop-focus", title: "Stop focus", description: "Stop and return to idle." }, () => stop(ctx));
+      await ctx.commands.register({ id: "show-focus-status", title: "Show focus status", description: "Speak the current timer phase and daily count." }, async () => ctx.pet.speak(statusSummary(await getState(ctx))));
     },
     async stop() {}
   });

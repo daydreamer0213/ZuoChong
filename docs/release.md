@@ -69,7 +69,7 @@ OPENPETS_DISCOVERY_FILE=/mnt/c/Users/<WindowsUser>/AppData/Roaming/OpenPets/runt
   npx -y @open-pets/cli@2.1.1 status
 ```
 
-## Previous plugin platform release plan
+## Companion-first plugin release plan
 
 The next end-user release is a **desktop + web plugin catalog release**, not an npm package release by default.
 
@@ -77,15 +77,17 @@ Release goals:
 
 1. Ship the desktop JavaScript plugin runtime and polished Plugins UI.
 2. Publish the official plugin catalog with exactly these first-party plugins:
-   - Daily Reminders (`openpets.daily-reminders`)
-   - Pomodoro (`openpets.pomodoro`)
+   - Ambient Companion (`openpets.ambient-companion`)
+   - Break Buddy (`openpets.break-buddy`)
+   - Pet Pal (`openpets.pet-pal`)
+   - Focus Buddy (`openpets.focus-buddy`)
    - GitHub Notifications (`openpets.github-notifications`)
 3. Remove legacy sample plugins from public discovery:
    - Break Reminder
    - Eye Rest
    - Focus Check-in
    - Hydration Buddy
-   - Pomodoro Buddy
+   - Legacy focus samples
 4. Keep the old v1 plugin catalog available as an empty compatibility catalog.
 5. Release desktop artifacts through GitHub Releases so app update checks see the new version.
 
@@ -114,24 +116,26 @@ pnpm --filter @open-pets/desktop package:dir
 
 Manual desktop QA:
 
-1. Run `pnpm dev:desktop:plugins`.
+1. Run normal desktop dev startup or a packaged app (`pnpm dev:desktop` or the output from `pnpm --filter @open-pets/desktop package:dir`) so bundled seeding runs.
 2. Open tray → Plugins.
-3. Confirm only Daily Reminders, Pomodoro, and GitHub Notifications appear in dev mode.
+3. Confirm Ambient Companion, Break Buddy, Pet Pal, Focus Buddy, and GitHub Notifications appear in dev mode.
 4. Confirm old sample plugins do not appear.
-5. Enable/configure Daily Reminders with reminder cards, not JSON.
-6. Run Daily Reminders test command.
-7. Configure Pomodoro timing/messages/reactions and run start/pause/stop commands.
+5. Confirm Ambient Companion, Break Buddy, Pet Pal, and Focus Buddy are bundled/default-enabled as intended; Focus Buddy should remain passive until a command starts a session.
+6. Configure Break Buddy with break/reminder cards, not JSON.
+7. Run Pet Pal and Focus Buddy commands from the Plugins UI and pet right-click menu when available.
 8. Configure GitHub public repositories; verify no token/OAuth UI exists.
-9. Confirm GitHub plugin only asks for `api.github.com` network approval.
+9. Confirm GitHub plugin only asks for `api.github.com` network approval and is not default-enabled.
 10. Restart desktop and confirm enabled plugins reload without broken state.
 11. Inspect logs for plugin errors.
+
+For explicit local plugin development, run `pnpm dev:desktop:plugins` separately and confirm official plugins are loaded as local dev plugins and start disabled; this mode intentionally skips bundled seeding.
 
 ### B. Web plugin catalog release
 
 Web release includes:
 
 - `plugins/official/**` source plugins.
-- `web/public/plugins/catalog.v2.json` with the three official plugins.
+- `web/public/plugins/catalog.v2.json` with the five official plugins.
 - `web/public/plugins/catalog.v1.json` with an empty plugin list.
 - Removal of legacy sample plugin manifests.
 - Updated `web/docs/plugin-publishing.md`.
@@ -153,7 +157,7 @@ Publishing sequence:
    pnpm plugins:check
    pnpm plugins:package
    ```
-2. Confirm `web/public/plugins/catalog.v2.json` has only the three official plugins.
+2. Confirm `web/public/plugins/catalog.v2.json` has only the five launch-current official plugins.
 3. Confirm `web/public/plugins/catalog.v1.json` has `plugins: []`.
 4. Upload plugin ZIPs to R2 and regenerate catalogs:
    ```bash
@@ -185,9 +189,11 @@ OpenPets now includes a first-party plugin platform for optional desktop compani
 
 ### Included plugins
 
-- Daily Reminders — recurring local reminders with custom messages, reactions, days, and intervals.
-- Pomodoro — focus/break sessions with pet feedback and controls.
-- GitHub Notifications — public repository release and failed-workflow notifications. No GitHub login, token, or private repository access is used.
+- Ambient Companion — calm local presence, greetings, and low-frequency reactions.
+- Break Buddy — wellness break nudges with custom messages, reactions, days, and intervals.
+- Pet Pal — playful user-triggered pet actions.
+- Focus Buddy — passive focus/break sessions with pet feedback and controls.
+- GitHub Notifications — developer/advanced public repository release and failed-workflow notifications. No GitHub login, token, or private repository access is used.
 
 ### Plugin management
 

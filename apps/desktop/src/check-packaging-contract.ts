@@ -49,6 +49,7 @@ assert.match(builderConfig, /control-center-preload\.cjs/);
 assert.match(builderConfig, /pet-preload\.cjs/);
 assert.match(builderConfig, /plugin-sdk-preload\.cjs/);
 assert.match(builderConfig, /assets\/\*\*/);
+assert.match(builderConfig, /extraResources:[\s\S]*from:\s*\.\.\/\.\.\/plugins\/official[\s\S]*to:\s*plugins\/official/, "desktop packages must include bundled official plugins as extra resources.");
 assert.match(builderConfig, /icon:\s*assets\/app-icon\.icns/);
 
 assert.ok(existsSync(join(appDir, "control-center-preload.cjs")), "control-center-preload.cjs must exist for Control Center IPC.");
@@ -238,6 +239,7 @@ function checkPackageOutput(): void {
   const appResourceDir = findPackagedAppResourceDir(outputDir);
   assert.ok(appResourceDir, "packaged app resources directory was not found.");
   assert.ok(existsSync(join(appResourceDir, "app.asar")), "packaged app.asar is missing.");
+  assertBundledOfficialPlugins(appResourceDir);
   const appContents = join(appResourceDir, "app.asar.unpacked");
   assert.ok(existsSync(appContents), "packaged app.asar.unpacked resources are missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "@open-pets", "claude", "dist", "index.js")), "packaged @open-pets/claude runtime is missing.");
@@ -349,6 +351,16 @@ function assertNonEmptyFile(path: string, message: string): void {
   const stat = lstatSync(path);
   assert.ok(stat.isFile(), message);
   assert.ok(stat.size > 0, message);
+}
+
+function assertBundledOfficialPlugins(resourceDir: string): void {
+  for (const id of ["openpets.ambient-companion", "openpets.break-buddy", "openpets.pet-pal", "openpets.focus-buddy", "openpets.github-notifications"]) {
+    const dir = join(resourceDir, "plugins", "official", id);
+    const manifestPath = join(dir, "openpets.plugin.json");
+    assertNonEmptyFile(manifestPath, `packaged bundled plugin manifest is missing: ${id}`);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { entry?: string };
+    if (manifest.entry) assertNonEmptyFile(join(dir, manifest.entry), `packaged bundled plugin entry is missing: ${id}`);
+  }
 }
 
 function assertSafeBundledSvg(path: string, message: string): void {

@@ -16,6 +16,10 @@ files:
   - assets/**
   - package.json
 
+extraResources:
+  - from: ../../plugins/official
+    to: plugins/official
+
 asar: true
 asarUnpack:
   - node_modules/**

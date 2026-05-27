@@ -1,0 +1,19 @@
+{
+  "manifestVersion": 2,
+  "id": "openpets.ambient-companion",
+  "name": "Ambient Companion",
+  "description": "Adds gentle greetings and occasional background check-ins so your pet feels present while you work.",
+  "version": "1.0.0",
+  "runtime": "javascript",
+  "icon": "sparkles",
+  "sdkVersion": "1.0.0",
+  "entry": "index.js",
+  "permissions": ["pet:speak", "pet:reaction", "schedule", "storage", "status"],
+  "configSchema": {
+    "frequency": { "type": "select", "label": "Message frequency", "default": "low", "options": [{ "label": "Low", "value": "low" }, { "label": "Normal", "value": "normal" }, { "label": "Lively", "value": "lively" }] },
+    "greetingsEnabled": { "type": "boolean", "label": "Time-of-day greetings", "default": true },
+    "quietHoursEnabled": { "type": "boolean", "label": "Quiet hours", "default": true },
+    "quietStart": { "type": "time", "label": "Quiet start", "default": "22:00" },
+    "quietEnd": { "type": "time", "label": "Quiet end", "default": "08:00" }
+  }
+}

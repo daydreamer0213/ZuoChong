@@ -2,6 +2,7 @@
   "manifestVersion": 2,
   "id": "openpets.github-notifications",
   "name": "GitHub Notifications",
+  "description": "Watches public GitHub repositories and lets your pet notify you about releases and failed workflows.",
   "version": "1.1.0",
   "runtime": "javascript",
   "icon": "github",

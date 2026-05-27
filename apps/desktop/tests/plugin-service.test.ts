@@ -5,17 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsDeclarativePluginManifest } from "../src/plugin-manifest.js";
-import { PluginService } from "../src/plugin-service.js";
+import { PluginService, executeDefaultPetPluginCommand, getDefaultPetPluginCommands, setPluginServiceForTests, stopPluginService } from "../src/plugin-service.js";
 import { PluginStateStore, type PluginStateRecord } from "../src/plugin-state.js";
 
 let lastRoot = "";
 
 class FakeRuntime {
   reloads: string[] = [];
+  logs: Array<{ level: string; message: string; fields?: Record<string, unknown> }> = [];
+  commandState: Record<string, Array<{ id: string; title: string }>> = {};
+  executed: Array<{ pluginId: string; commandId: string }> = [];
   stopped = false;
   async start(): Promise<void> {}
   stop(): void { this.stopped = true; }
   async reloadPlugin(id: string): Promise<void> { this.reloads.push(id); }
+  getPluginState(id: string): { commands: Array<{ id: string; title: string }> } { return { commands: this.commandState[id] ?? [] }; }
+  async executeCommand(pluginId: string, commandId: string): Promise<void> { this.executed.push({ pluginId, commandId }); }
+  log(level: string, message: string, fields?: Record<string, unknown>): void { this.logs.push({ level, message, fields }); }
 }
 
 class ThrowingStateStore extends PluginStateStore {
@@ -240,6 +246,110 @@ await localScenario("loadLocal snapshots javascript entry", async ({ service, so
   assert.equal(readFileSync(join(install, "index.mjs"), "utf8"), "export default {};\n");
 });
 
+await localScenario("bundled seeding copies manifest and preserves user choices", async ({ userData, root, store }) => {
+  const official = join(root, "official");
+  const source = join(official, "openpets.break-buddy");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"], configSchema: { minutes: { type: "number", default: 30 } } });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
+  await service.start();
+  let record = store.getRecord("openpets.break-buddy");
+  assert.equal(record?.source, "catalog");
+  assert.equal(record?.bundled, true);
+  assert.equal(record?.enabled, true);
+  assert.equal(readFileSync(join(record?.installPath ?? "", "index.js"), "utf8"), "OpenPetsPlugin.register({ start() {} });\n");
+  store.replaceConfig("openpets.break-buddy", { minutes: 45 });
+  store.setEnabled("openpets.break-buddy", false);
+  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "2.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak", "pet:reaction"] });
+  await service.seedBundledPlugins();
+  record = store.getRecord("openpets.break-buddy");
+  assert.equal(record?.version, "2.0.0");
+  assert.equal(record?.enabled, false);
+  assert.deepEqual(record?.config, { minutes: 45 });
+  assert.deepEqual(record?.approvedPermissions, ["pet:speak", "pet:reaction"]);
+});
+
+await localScenario("bundled seeding prunes stale ids and blocks uninstall update", async ({ userData, root, store }) => {
+  const oldInstall = join(userData, "plugins", "openpets.pomodoro");
+  const oldManifest = writeManifest(oldInstall, manifest({ id: "openpets.pomodoro" }));
+  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  const official = join(root, "official");
+  const source = join(official, "openpets.github-notifications");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.github-notifications", name: "GitHub", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["network"], network: { hosts: ["api.github.com"] } });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
+  await service.start();
+  assert.equal(store.getRecord("openpets.pomodoro"), undefined);
+  assert.equal(store.getRecord("openpets.github-notifications")?.enabled, false);
+  assert.deepEqual(store.getRecord("openpets.github-notifications")?.approvedNetworkHosts, ["api.github.com"]);
+  assert.equal((await service.uninstall("openpets.github-notifications")).ok, false);
+  const update = await service.updateCatalog("openpets.github-notifications");
+  assert.equal(update.ok, false);
+  assert.match(update.error, /Bundled plugins update/);
+});
+
+await localScenario("bundled seeding prunes stale local old ids", async ({ userData, store }) => {
+  const oldInstall = join(userData, "plugins-dev", "openpets.daily-reminders");
+  const oldManifest = writeManifest(oldInstall, manifest({ id: "openpets.daily-reminders" }));
+  store.upsertRecord({ id: "openpets.daily-reminders", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "local", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [] });
+  await service.seedBundledPlugins();
+  assert.equal(store.getRecord("openpets.daily-reminders"), undefined);
+  assert.equal(existsSync(oldInstall), false);
+});
+
+await localScenario("bundled stale prune refuses unsafe path", async ({ userData, root, store }) => {
+  const outside = join(root, "outside-stale");
+  mkdirSync(outside, { recursive: true });
+  const link = join(userData, "plugins", "openpets.pomodoro");
+  symlinkSync(outside, link, "dir");
+  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  const runtime = new FakeRuntime();
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, bundledPluginSourceDirs: [] });
+  await service.seedBundledPlugins();
+  assert.equal(store.getRecord("openpets.pomodoro")?.id, "openpets.pomodoro");
+  assert.equal(existsSync(outside), true);
+  assert.equal(runtime.logs.some((entry) => entry.message.includes("Refused to prune")), true);
+});
+
+await localScenario("bundled seeding rejects plugins root symlink", async ({ userData, root, store }) => {
+  rmSync(join(userData, "plugins"), { recursive: true, force: true });
+  const outsideRoot = join(root, "outside-plugins");
+  mkdirSync(outsideRoot, { recursive: true });
+  symlinkSync(outsideRoot, join(userData, "plugins"), "dir");
+  const official = join(root, "official");
+  const source = join(official, "openpets.break-buddy");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  const runtime = new FakeRuntime();
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, bundledPluginSourceDirs: [official] });
+  await service.seedBundledPlugins();
+  assert.equal(store.getRecord("openpets.break-buddy"), undefined);
+  assert.equal(existsSync(join(outsideRoot, "openpets.break-buddy")), false);
+  assert.equal(runtime.logs.some((entry) => entry.message.includes("Bundled plugin seed failed")), true);
+});
+
+await localScenario("start skips bundled seeding when disabled", async ({ userData, root, store }) => {
+  const official = join(root, "official");
+  const source = join(official, "openpets.break-buddy");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official], seedBundledPlugins: false });
+  await service.start();
+  assert.equal(store.getRecord("openpets.break-buddy"), undefined);
+});
+
+await scenario("catalog metadata ignores bundled records", async ({ userData, store, runtime }) => {
+  const install = join(userData, "plugins", "openpets.break-buddy");
+  const manifestPath = writeManifest(install, manifest({ id: "openpets.break-buddy" }));
+  store.upsertRecord({ id: "openpets.break-buddy", version: "1.0.0", installPath: install, manifestPath, source: "catalog", bundled: true, enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), plugins: [{ ...catalogEntry("openpets.break-buddy", "1.0.0"), disabled: true, statusReason: "disabled" }] }), { status: 200 });
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, fetchImpl });
+  await service.getCatalogSnapshot(true);
+  assert.equal(store.getRecord("openpets.break-buddy")?.enabled, true);
+  assert.equal(store.getRecord("openpets.break-buddy")?.catalogDisabled, undefined);
+});
+
 await localScenario("loadLocalPath auto-approves explicit dev path", async ({ service, source, store }) => {
   writeManifest(source, { manifestVersion: 2, id: "dev-js", name: "Dev JS", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["network"], network: { hosts: ["api.github.com"] } });
   writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
@@ -355,6 +465,26 @@ await scenario("disabled catalog returns no discover plugins", async ({ userData
   assert.deepEqual(snapshot.plugins, []);
 });
 
+await scenario("right-click command helper groups caps and ignores stale commands", async ({ runtime }) => {
+  setPluginServiceForTests({
+    getSnapshot: async () => ({ plugins: [
+      { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "b", title: "Beta" }, { id: "a", title: "Alpha" }, { id: "c", title: "Gamma" }] },
+      { id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+      { id: "disabled", name: "Disabled", version: "1.0.0", source: "catalog", enabled: false, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+      { id: "broken", name: "Broken", version: "1.0.0", source: "catalog", enabled: true, brokenReason: "broken", approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+    ] }),
+    executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); },
+    stop() {},
+  } as unknown as PluginService);
+  const commands = await getDefaultPetPluginCommands(2, 2);
+  assert.deepEqual(commands.map((command) => `${command.pluginId}:${command.commandId}`), ["alpha:run", "zeta:a", "zeta:b"]);
+  setPluginServiceForTests({ getSnapshot: async () => ({ plugins: [{ id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] }, { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [] }] }), executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); }, stop() {} } as unknown as PluginService);
+  assert.deepEqual((await getDefaultPetPluginCommands()).map((command) => command.pluginId), ["alpha"]);
+  await executeDefaultPetPluginCommand("alpha", "run");
+  assert.deepEqual(runtime.executed, [{ pluginId: "alpha", commandId: "run" }]);
+  stopPluginService();
+});
+
 console.error("Plugin service validation passed.");
 
 async function scenario(name: string, fn: (ctx: { root: string; userData: string; store: PluginStateStore; service: PluginService; runtime: FakeRuntime }) => Promise<void>): Promise<void> {
@@ -424,7 +554,15 @@ function addPlugin(store: PluginStateStore, patch: Partial<PluginStateRecord> = 
   const id = patch.id ?? "plug";
   const installPath = patch.installPath ?? join(currentRootFromStore(store), id);
   const manifestPath = patch.manifestPath ?? writeManifest(installPath, data);
-  store.upsertRecord({ id, version: patch.version ?? "1.0.0", manifestPath, installPath, source: patch.source ?? "local", enabled: patch.enabled ?? true, approvedPermissions: patch.approvedPermissions ?? ["timer", "pet:speak"], config: patch.config ?? {}, brokenReason: patch.brokenReason });
+  store.upsertRecord({ id, version: patch.version ?? "1.0.0", manifestPath, installPath, source: patch.source ?? "local", bundled: patch.bundled, enabled: patch.enabled ?? true, approvedPermissions: patch.approvedPermissions ?? ["timer", "pet:speak"], config: patch.config ?? {}, brokenReason: patch.brokenReason });
+}
+
+function addCommandPlugin(store: PluginStateStore, userData: string, id: string, name: string, _commands: Array<{ id: string; title: string }>, patch: Partial<PluginStateRecord> = {}): void {
+  const data = manifest({ id, permissions: ["timer", "pet:speak"] });
+  data.name = name;
+  const installPath = join(userData, "plugins", id);
+  const manifestPath = writeManifest(installPath, data);
+  store.upsertRecord({ id, version: "1.0.0", manifestPath, installPath, source: "catalog", enabled: patch.enabled ?? true, approvedPermissions: ["timer", "pet:speak"], config: {}, brokenReason: patch.brokenReason });
 }
 
 function currentRootFromStore(_store: PluginStateStore): string { return lastRoot; }

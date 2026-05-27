@@ -10,6 +10,7 @@ import { getInstalledPetDir } from "./pet-paths.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { pickReactionMessage } from "./reaction-messages.js";
 import { debug, error as logError, info } from "./logger.js";
+import { executeDefaultPetPluginCommand, getDefaultPetPluginCommands } from "./plugin-service.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 
 export interface DefaultPetWindowOptions {
@@ -60,7 +61,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismiss
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options.onBubbleDismissed);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: "Hide pet", click: options.onHideRequested });
+  installPetContextMenu(window, { label: "Hide pet", click: options.onHideRequested, defaultPet: true });
 
   const savePosition = debounce(() => {
     if (window.isDestroyed()) {
@@ -103,17 +104,32 @@ export function recoverPetMouseInterop(window: BrowserWindow, reason: string): v
   debug("pet.window", "mouse interop recovery skipped", { windowId: window.id, reason, skippedReason: "unregistered-window" });
 }
 
-function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void }): void {
+function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean }): void {
   const webContents = window.webContents;
   const handleContextMenu = (event: Electron.Event): void => {
     event.preventDefault();
     if (window.isDestroyed()) return;
-    Menu.buildFromTemplate([{ label: action.label, click: action.click }]).popup({ window });
+    void buildPetContextMenuTemplate(action).then((template) => Menu.buildFromTemplate(template).popup({ window })).catch((error) => { logError("pet.window", "context menu build failed", error); Menu.buildFromTemplate([{ label: action.label, click: action.click }]).popup({ window }); });
   };
   webContents.on("context-menu", handleContextMenu);
   window.once("closed", () => {
     if (!webContents.isDestroyed()) webContents.off("context-menu", handleContextMenu);
   });
+}
+
+async function buildPetContextMenuTemplate(action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean }): Promise<Electron.MenuItemConstructorOptions[]> {
+  if (!action.defaultPet) return [{ label: action.label, click: action.click }];
+  const commands = await getDefaultPetPluginCommands();
+  const plugins = new Map<string, { name: string; commands: Electron.MenuItemConstructorOptions[] }>();
+  for (const command of commands) {
+    const group = plugins.get(command.pluginId) ?? { name: command.pluginName, commands: [] };
+    group.commands.push({ label: command.commandTitle, click: () => { executeDefaultPetPluginCommand(command.pluginId, command.commandId).catch((error) => logError("pet.window", "plugin command failed", error)); } });
+    plugins.set(command.pluginId, group);
+  }
+  const template: Electron.MenuItemConstructorOptions[] = [];
+  if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
+  template.push({ label: "Open Control Center", click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } }, { label: action.label, click: action.click });
+  return template;
 }
 
 function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed?: (dismissToken: string) => void): void {

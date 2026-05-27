@@ -1,8 +1,9 @@
 {
   "manifestVersion": 2,
-  "id": "openpets.pomodoro",
-  "name": "Pomodoro",
-  "version": "1.1.0",
+  "id": "openpets.focus-buddy",
+  "name": "Focus Buddy",
+  "description": "Adds pet-menu commands for focus sessions, short breaks, long breaks, pause, resume, and status updates.",
+  "version": "1.0.0",
   "runtime": "javascript",
   "icon": "timer",
   "sdkVersion": "1.0.0",

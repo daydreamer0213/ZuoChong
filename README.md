@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/openpets.png" alt="OpenPets - pixel art desktop pets for coding agents" width="100%" />
+  <img src="assets/openpets.png" alt="OpenPets - pixel art desktop companion" width="100%" />
 </p>
 
 <p align="center">
-  <strong>A tiny desktop pet for coding agents.</strong>
+  <strong>A tiny desktop companion that keeps you company.</strong>
 </p>
 
 <p align="center">
-  See agent progress, tool use, test runs, and coding state as a playful desktop companion.
+  A playful pet that lives on your desktop, keeps you company, and can grow with bundled abilities and developer integrations.
 </p>
 
 <p align="center">
@@ -29,7 +29,9 @@
 
 ## 2-minute Quick Start
 
-Install the OpenPets Agent Skill with [skills.sh](https://skills.sh/):
+Download and launch the desktop app from [OpenPets Releases](https://github.com/alvinunreal/openpets/releases/latest). A companion pet appears immediately; bundled abilities make it feel alive without requiring an agent setup.
+
+If you also want coding-agent integration, install the OpenPets Agent Skill with [skills.sh](https://skills.sh/):
 
 ```bash
 npx skills add alvinunreal/openpets --skill openpets
@@ -65,10 +67,11 @@ Here is an extra GIF of me starring my own repo to encourage you to do the same.
 
 ## What is OpenPets?
 
-OpenPets is a tray-first desktop companion app for AI coding agents.
+OpenPets is a tray-first desktop companion app. A pet appears on your desktop, keeps you company, and can use bundled abilities for ambient presence, breaks, playful actions, and focus sessions. Coding-agent integrations are still supported as an advanced developer layer.
 
-- **Desktop companion** - a small pet that reacts while agents think, edit, test, wait for approval, finish, or hit an error.
-- **Agent integrations** - first-class setup for Claude Code and OpenCode, including MCP tools, instructions, and automatic hooks/plugins.
+- **Desktop companion** - a small pet that idles, reacts, and gives OpenPets a friendly presence even before developer tools are configured.
+- **Bundled abilities** - first-party plugins can add ambient check-ins, break nudges, playful pet actions, focus timers, and optional developer notifications.
+- **Developer integrations** - advanced setup for Claude Code, OpenCode, Cursor, Pi, and MCP-capable tools when you want coding activity to drive the pet.
 - **MCP ready** - any MCP-capable agent can send short safe speech bubbles and reactions through the OpenPets MCP server.
 - **Pet-pack friendly** - loads installed animated pet packs and can route a selected agent/project to its own pet window.
 - **Privacy-conscious by design** - automatic hook speech is static and local; prompts, code, logs, command output, URLs, paths, and secrets are not shown in bubbles.
@@ -83,7 +86,7 @@ Browse installed pets, preview their animations, and choose which companion shou
 
 ## Quick start
 
-Install the desktop app, then connect your coding agent.
+Install the desktop app, then optionally connect your coding agent.
 
 ### 1. Install OpenPets Desktop
 
@@ -105,7 +108,7 @@ xattr -dr com.apple.quarantine /Applications/OpenPets.app
 open /Applications/OpenPets.app
 ```
 
-### 2. Connect your agent
+### 2. Optional: connect your agent
 
 Use the desktop **Integrations** screen for global setup when available:
 
@@ -127,7 +130,7 @@ If you prefer a permanent `openpets` shell command, install the CLI once with `n
 
 Project-local setup can create project files such as `.claude/settings.local.json` or `.opencode/opencode.jsonc`. Review them before committing because they may include the selected pet id.
 
-## Agent integrations
+## Advanced: agent integrations
 
 OpenPets integrations have three layers:
 

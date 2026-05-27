@@ -52,21 +52,20 @@ assert.equal(normalizeConfig({ focusStartMessage: "token leak" }).focusStartMess
   const plugin = { register(def) { this.def = def; } };
   register(plugin);
   await plugin.def.start(h.ctx);
-  for (const id of ["start-focus", "start-short-break", "start-long-break", "start-next-break", "show-status", "reset-count"]) assert.ok(h.calls.commands.has(id), id);
-  await h.calls.commands.get("show-status").fn();
-  assert.ok(h.calls.speak.at(-1).includes("Pomodoro"));
+  for (const id of ["start-focus", "start-short-break", "start-long-break", "pause-focus", "resume-focus", "stop-focus", "show-focus-status"]) assert.ok(h.calls.commands.has(id), id);
+  await h.calls.commands.get("show-focus-status").fn();
+  assert.ok(h.calls.speak.at(-1).includes("Focus Buddy"));
   assert.ok(statusSummary(await getState(h.ctx)).includes("idle"));
-  h.store.set("pomodoroState", { phase: "idle", pendingBreakPhase: "shortBreak", completedSessions: 1, completedToday: 1, lastActiveDate: new Date().toISOString().slice(0, 10) });
-  await h.calls.commands.get("start-next-break").fn();
+  h.store.set("focusBuddyState", { phase: "idle", pendingBreakPhase: "shortBreak", completedSessions: 1, completedToday: 1, lastActiveDate: new Date().toISOString().slice(0, 10) });
+  await h.calls.commands.get("start-short-break").fn();
   assert.equal((await getState(h.ctx)).phase, "shortBreak");
-  await h.calls.commands.get("reset-count").fn();
-  assert.equal((await getState(h.ctx)).completedToday, 0);
   await resetCount(h.ctx);
+  assert.equal((await getState(h.ctx)).completedToday, 0);
 }
 
 {
   const h = ctx();
-  h.store.set("pomodoroState", { phase: "focus", endAt: new Date(Date.now() - 1000).toISOString(), completedSessions: 1, completedToday: 1, lastActiveDate: new Date().toISOString().slice(0, 10) });
+  h.store.set("focusBuddyState", { phase: "focus", endAt: new Date(Date.now() - 1000).toISOString(), completedSessions: 1, completedToday: 1, lastActiveDate: new Date().toISOString().slice(0, 10) });
   const settled = await reconcileStartup(h.ctx);
   assert.equal(settled.phase, "idle");
   assert.equal(settled.completedToday, 2);
@@ -74,4 +73,4 @@ assert.equal(normalizeConfig({ focusStartMessage: "token leak" }).focusStartMess
   assert.equal(h.calls.speak.length, 1);
 }
 
-console.log("Pomodoro plugin tests passed.");
+console.log("Focus Buddy plugin tests passed.");
