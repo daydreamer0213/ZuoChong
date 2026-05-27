@@ -1,4 +1,6 @@
+import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { applyExternalPetReaction, applyExternalPetSay } from "./default-pet-controller.js";
+import { debug } from "./logger.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 
 export interface PluginPetApi {
@@ -9,8 +11,19 @@ export interface PluginPetApi {
 export const defaultPluginPetApi: PluginPetApi = {
   speak(message) {
     applyExternalPetSay(message);
+    recordPluginPetActivity({ kind: "say" });
   },
   react(reaction) {
     applyExternalPetReaction(reaction);
+    recordPluginPetActivity({ kind: "react", reaction });
   },
 };
+
+function recordPluginPetActivity(activity: { readonly kind: "say"; readonly reaction?: undefined } | { readonly kind: "react"; readonly reaction: OpenPetsReaction }): void {
+  try {
+    const state = getAppStateSnapshot();
+    recordOpenPetsActivity({ ...activity, petId: state.preferences.defaultPetId });
+  } catch (error) {
+    debug("plugin", "activity record failed", { error: error instanceof Error ? error.message : String(error), kind: activity.kind, reaction: activity.reaction });
+  }
+}
