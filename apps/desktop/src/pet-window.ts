@@ -503,6 +503,7 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
   const sequence = allocateWindowLoadSequence(window);
   debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
   const render = await createDefaultPetRender(paused, display, badge, dismissToken);
+  applyLinuxPetWindowShape(window, getAppStateSnapshot().preferences.petScale as PetScaleValue, Boolean(display?.message || display?.reactionMessage || display?.reaction || badge || paused));
   if (tryUpdateLoadedPetContent(window, render, "default", sequence)) return;
   await loadPetHtmlFile(window, render.html, "default", sequence).then(() => {
     petWindowRenderCache.set(window, render.cacheKey);
@@ -523,6 +524,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
     debug("pet.window", "explicit content render begin", { windowId: window.id, sequence, petId, displayName: pet.displayName, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge });
     const scale = scaleOverride ?? state.preferences.petScale as PetScaleValue;
     const render = await createInstalledPetRender(pet.id, pet.displayName, false, display, scale, badge, `explicit:${pet.id}`, dismissToken);
+    applyLinuxPetWindowShape(window, scale, Boolean(display?.message || display?.reactionMessage || display?.reaction || badge));
     if (tryUpdateLoadedPetContent(window, render, `explicit-${pet.id}`, sequence)) return;
     await loadPetHtmlFile(window, render.html, `explicit-${pet.id}`, sequence);
     petWindowRenderCache.set(window, render.cacheKey);
@@ -584,6 +586,42 @@ export function getSafeDefaultPetPosition(position: Point | undefined): Point {
 export function readWindowPosition(window: BrowserWindow): Point {
   const [x, y] = window.getPosition();
   return clampToPrimaryWorkArea({ x, y }, defaultPetWindowSize);
+}
+
+function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, hasBubble: boolean): void {
+  if (process.platform !== "linux" || window.isDestroyed()) return;
+
+  const scaledWidth = Math.ceil(defaultPetSprite.frameWidth * scale);
+  const scaledHeight = Math.ceil(defaultPetSprite.frameHeight * scale);
+  const petBottom = 22;
+  const hitPadding = 18;
+  const petHitboxWidth = scaledWidth + hitPadding * 2;
+  const petHitboxHeight = scaledHeight + hitPadding * 2;
+  const shape: Electron.Rectangle[] = [
+    {
+      x: Math.round((defaultPetWindowSize.width - petHitboxWidth) / 2),
+      y: Math.round(defaultPetWindowSize.height - Math.max(0, petBottom - hitPadding) - petHitboxHeight),
+      width: petHitboxWidth,
+      height: petHitboxHeight,
+    },
+  ];
+
+  if (hasBubble) {
+    const bubbleBottom = Math.ceil(petBottom + scaledHeight + 8);
+    shape.push({
+      x: 0,
+      y: Math.max(0, defaultPetWindowSize.height - bubbleBottom - 156),
+      width: defaultPetWindowSize.width,
+      height: Math.min(156, defaultPetWindowSize.height),
+    });
+  }
+
+  try {
+    window.setShape(shape);
+    debug("pet.window", "linux window shape applied", { windowId: window.id, scale, hasBubble, shape });
+  } catch (error) {
+    logError("pet.window", "linux window shape failed", error instanceof Error ? error : { error });
+  }
 }
 
 async function createDefaultPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string): Promise<PetContentRender> {
