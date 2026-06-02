@@ -183,7 +183,7 @@ function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, chann
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 
 function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed?: (dismissToken: string) => void): void {
-  let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number } | null = null;
+  let dragging: { readonly startScreenX: number; readonly startScreenY: number; readonly startWindowX: number; readonly startWindowY: number; readonly width: number; readonly height: number } | null = null;
   let rendererReady = false;
   let listenersRemoved = false;
   let lastInteractive = false;
@@ -333,17 +333,19 @@ function installMousePassthroughAndDrag(window: BrowserWindow, onBubbleDismissed
 
   const handleDragStart = (event: IpcMainEvent, point: unknown): void => {
     if (!isFromWindow(event) || !isScreenPoint(point) || window.isDestroyed()) return;
-    const [startWindowX, startWindowY] = window.getPosition();
-    dragging = { startScreenX: point.screenX, startScreenY: point.screenY, startWindowX, startWindowY };
+    const startBounds = window.getBounds();
+    dragging = { startScreenX: point.screenX, startScreenY: point.screenY, startWindowX: startBounds.x, startWindowY: startBounds.y, width: startBounds.width, height: startBounds.height };
     petWindowDragging.set(window, true);
-    debug("pet.window", "drag start", { windowId, point, startWindowX, startWindowY });
+    debug("pet.window", "drag start", { windowId, point, startBounds });
     clearWindowsForwardingWatch();
     setPassthrough(false);
   };
 
   const handleDragMove = (event: IpcMainEvent, point: unknown): void => {
     if (!isFromWindow(event) || !dragging || !isScreenPoint(point) || window.isDestroyed()) return;
-    window.setPosition(dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX), dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY), false);
+    const nextX = dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX);
+    const nextY = dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY);
+    window.setBounds({ x: nextX, y: nextY, width: dragging.width, height: dragging.height }, false);
   };
 
   const handleDragEnd = (event: IpcMainEvent): void => {
