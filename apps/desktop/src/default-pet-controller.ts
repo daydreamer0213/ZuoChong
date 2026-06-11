@@ -1,6 +1,7 @@
 import { BrowserWindow, powerMonitor, screen } from "electron";
 
 import { getAppStateSnapshot, getDefaultPetPosition, resetDefaultPetPosition, setDefaultPetPosition, updatePreferences } from "./app-state.js";
+import { shouldShowDefaultPetForExternalEvent } from "./app-state-core.js";
 import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
@@ -50,8 +51,12 @@ export function getDefaultPetPluginBubbles(): PetPluginBubbles | null {
 
 export function showDefaultPet(): void {
   updatePreferences({ openDefaultPetOnLaunch: true });
+  showDefaultPetWindow("user");
+}
+
+function showDefaultPetWindow(source: "user" | "external-event"): void {
   const window = getOrCreateDefaultPetWindow();
-  info("pet.default", "show requested", { windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getAppStateSnapshot().preferences.defaultPetId });
+  info("pet.default", "show requested", { source, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
   if (window.isMinimized()) {
     window.restore();
@@ -265,9 +270,13 @@ function setTransientDisplay(display: PetTransientDisplay): void {
 
 function showDefaultPetForExternalEvent(): void {
   const state = getAppStateSnapshot();
-  if (isDefaultPetVisible() || state.preferences.openDefaultPetOnLaunch) {
-    showDefaultPet();
+  const visible = isDefaultPetVisible();
+  if (!shouldShowDefaultPetForExternalEvent(visible, state.preferences.openDefaultPetOnLaunch, paused)) {
+    debug("pet.default", "external show skipped", { reason: "paused", visible, openDefaultPetOnLaunch: state.preferences.openDefaultPetOnLaunch });
+    return;
   }
+
+  showDefaultPetWindow("external-event");
 }
 
 async function moveDefaultPetBy(rawX: number, rawY: number, rawDurationMs: unknown, maxDistance = maxPluginMoveDistance): Promise<{ readonly moved: boolean; readonly reason?: string }> {

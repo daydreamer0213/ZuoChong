@@ -14,6 +14,7 @@ const rootDir = join(__dirname, "..");
 const preloadChecks = ["control-center-preload.cjs", "pet-preload.cjs", "plugin-sdk-preload.cjs", "panel-preload.cjs"];
 const behaviorTests = [
   ".test-dist/tests/lease-manager.test.js",
+  ".test-dist/tests/default-pet-external-show.test.js",
   ".test-dist/tests/onboarding-state.test.js",
   ".test-dist/tests/update-version.test.js",
   ".test-dist/tests/reaction-animation-mapping.test.js",

@@ -27,3 +27,8 @@ export function markOnboardingCompleted<T extends { readonly preferences: Record
     },
   };
 }
+
+export function shouldShowDefaultPetForExternalEvent(_visible: boolean, _openOnLaunch: boolean, paused: boolean): boolean {
+  // Agent activity is an explicit display trigger; open-on-launch only controls startup.
+  return !paused;
+}
