@@ -178,13 +178,15 @@ export interface OpenPetsBubble {
   text?: string;
   /** Limited markdown (bold/italic/code/line breaks), host-sanitized. */
   markdown?: string;
-  /** Named host icon or a bundled icon asset. */
+  /** Named host icon or a bundled icon asset. Body media is icon-only; use `indicator` for icon + message. */
   icon?: OpenPetsIconRef;
-  /** Bundled, install-time-sanitized SVG. */
+  /** Bundled, install-time-sanitized SVG. Body media is icon-only; use `indicator` for icon + message. */
   svg?: OpenPetsAssetRef;
-  /** Bundled raster image. */
+  /** Bundled raster image. Body media is icon-only; use `indicator` for icon + message. */
   image?: OpenPetsAssetRef;
   tone?: OpenPetsStatusTone;
+  /** Optional top-row indicator/header. Intended primarily for alerts. */
+  indicator?: OpenPetsAlertIndicator | false;
   /** Theme-token name, not a raw color string. */
   accent?: string;
   /**
@@ -253,6 +255,27 @@ export interface OpenPetsPanelHandle {
   /** Panel -> plugin, clone-safe. */
   onMessage(handler: (msg: unknown) => void): void;
   close(): Promise<void>;
+}
+
+/** Alert header indicator rendered above alert text. Custom art must be a manifest-declared asset. */
+export interface OpenPetsAlertIndicator {
+  /** Visible/accessibility label shown next to the icon. */
+  label?: string;
+  /** Named host icon or manifest-declared icon asset (`ctx.assets.icon(...)`). */
+  icon?: OpenPetsIconRef;
+  /** Manifest-declared sanitized SVG asset (`ctx.assets.svg(...)`). */
+  svg?: OpenPetsAssetRef;
+  /** Manifest-declared raster/icon image asset. */
+  image?: OpenPetsAssetRef;
+  tone?: OpenPetsStatusTone;
+  /** Safe CSS color for the icon/SVG (`#hex`, `rgb(a)`, or `hsl(a)`). */
+  color?: string;
+  /** Safe CSS background color for the circular icon well. */
+  background?: string;
+  /** Alias for `background`. */
+  backgroundColor?: string;
+  /** Safe CSS border color for the circular icon well. */
+  borderColor?: string;
 }
 
 /**

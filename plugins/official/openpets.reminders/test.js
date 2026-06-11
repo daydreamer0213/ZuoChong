@@ -79,7 +79,19 @@ const LOCALES = {
 
   // Advancing past the due time fires the acknowledge-pattern delivery.
   await h.clock.advance("31m");
-  h.expectBubble({ icon: "bell", tone: "info", sticky: true, priority: "high" });
+  h.expectBubble({
+    indicator: {
+      icon: { kind: "icon", name: "reminder" },
+      label: "Reminder",
+      tone: "info",
+      color: "#7c3aed",
+      background: "#ede9fe",
+      borderColor: "#c4b5fd",
+    },
+    tone: "info",
+    sticky: true,
+    priority: "high",
+  });
   h.expectBubble({ textMatch: /Drink water/ });
   h.expectNotified(/Drink water/);
   assert.equal(h.calls.alerts.length, 1, "expected ctx.ui.alert delivery");
@@ -154,6 +166,16 @@ const LOCALES = {
   await h.start();
 
   h.expectBubble({ textMatch: /Stand up/ });
+  h.expectBubble({
+    indicator: {
+      icon: { kind: "icon", name: "reminder" },
+      label: "Missed reminder",
+      tone: "warning",
+      color: "#d97706",
+      background: "#fef3c7",
+      borderColor: "#fbbf24",
+    },
+  });
   h.expectNotified(/Stand up/);
   h.expectStored("reminders", (v) => Array.isArray(v) && v.length === 0);
   h.expectNoErrors();
@@ -171,7 +193,34 @@ const LOCALES = {
   h.expectNoErrors();
 }
 
-// 6) MAX_REMINDERS guard.
+// 6) test-reminder previews the alert without storing a reminder.
+{
+  const h = createTestHarness(register, {
+    permissions: PERMISSIONS,
+    config: { soundEnabled: false, osNotification: false },
+    locales: LOCALES,
+    nowMs: 5_000_000,
+  });
+  await h.start();
+  await h.runCommand("test-reminder");
+  h.expectBubble({ textMatch: /test reminder/i });
+  h.expectBubble({
+    indicator: {
+      icon: { kind: "icon", name: "reminder" },
+      label: "Reminder",
+      tone: "info",
+      color: "#7c3aed",
+      background: "#ede9fe",
+      borderColor: "#c4b5fd",
+    },
+    sticky: true,
+    priority: "high",
+  });
+  h.expectStored("reminders", (v) => Array.isArray(v) && v.length === 0);
+  h.expectNoErrors();
+}
+
+// 7) MAX_REMINDERS guard.
 assert.equal(MAX_REMINDERS, 10);
 
 console.log("openpets.reminders: all checks passed.");

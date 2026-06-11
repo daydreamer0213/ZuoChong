@@ -62,7 +62,8 @@ export function createPluginUiApi(options: {
       bubble: (spec: unknown) => showBubble("default", spec),
       alert: async (spec: unknown) => {
         const alertOptions = isRecord(spec) ? spec : { text: spec };
-        const handle = await showBubble("default", { ...alertOptions, sticky: true, priority: "high" });
+        const { indicator, ...bubbleOptions } = alertOptions;
+        const handle = await showBubble("default", { ...bubbleOptions, ...(indicator === false ? {} : { indicator }), sticky: true, priority: "high" });
         if (alertOptions.sound !== undefined) {
           void Promise.resolve().then(async () => {
             try { await audio.play(alertOptions.sound, { volume: alertOptions.volume }); }

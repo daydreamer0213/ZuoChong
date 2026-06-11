@@ -55,6 +55,16 @@ export interface PluginStorageStore { get(pluginId: string, key: string): unknow
 
 export type PluginBubbleAction = { id: string; label: string; style: "default" | "primary" | "danger"; iconName?: string; dismissesBubble: boolean };
 export type PluginBubbleInput = { id: string; type: "text" | "number" | "select"; placeholder?: string; default?: string | number; options?: Array<{ value: string; label: string }>; submitLabel?: string };
+export type PluginBubbleIndicator = {
+  label?: string;
+  tone?: "info" | "success" | "warning" | "error";
+  iconName?: string;
+  iconSvgPath?: string;
+  imagePath?: string;
+  color?: string;
+  background?: string;
+  borderColor?: string;
+};
 export type PluginBubbleDescriptor = {
   text?: string;
   /** Pre-sanitized HTML rendered from limited markdown (everything escaped first). */
@@ -72,6 +82,7 @@ export type PluginBubbleDescriptor = {
   pin?: boolean;
   dismissOn?: Array<"timeout" | "click" | "petClick" | "action" | "outsideClick">;
   priority: "low" | "normal" | "high" | "urgent";
+  indicator?: PluginBubbleIndicator;
   actions?: PluginBubbleAction[];
   input?: PluginBubbleInput;
 };
@@ -270,7 +281,8 @@ const allowedEventNames = new Set([
 ]);
 export const pluginEventNames = allowedEventNames;
 const allowedAccents = new Set(["blue", "purple", "green", "amber", "red", "pink", "slate"]);
-const namedHostIcons = new Set(["info", "check", "alert", "heart", "star", "bell", "coffee", "timer", "sparkles", "zap", "moon", "sun", "food", "play", "pause"]);
+const namedHostIcons = new Set(["info", "check", "alert", "heart", "star", "bell", "coffee", "timer", "droplet", "sparkles", "zap", "moon", "sun", "food", "play", "pause"]);
+const safeCssColorPattern = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|hsla?\(\s*\d{1,3}(?:deg)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))$/;
 
 // ---------------------------------------------------------------------------
 // Storage stores
@@ -405,10 +417,38 @@ export class PluginSdkBridge {
         out.dismissOn = (raw.dismissOn as unknown[]).map((entry) => { check(allowed.has(String(entry)), "Invalid bubble dismissOn entry."); return String(entry) as NonNullable<PluginBubbleDescriptor["dismissOn"]>[number]; });
       }
       if (raw.priority !== undefined) { check(["low", "normal", "high", "urgent"].includes(String(raw.priority)), "Invalid bubble priority."); out.priority = raw.priority as PluginBubbleDescriptor["priority"]; }
+      if (raw.indicator !== undefined && raw.indicator !== false) out.indicator = validateBubbleIndicator(raw.indicator);
       if (raw.actions !== undefined) { requirePermission("pet:interact"); out.actions = validateBubbleActions(raw.actions); }
       if (raw.input !== undefined) { requirePermission("pet:interact"); out.input = validateBubbleInput(raw.input); }
+      if (out.text !== undefined || out.markdownHtml !== undefined) {
+        check(out.iconName === undefined && out.svgPath === undefined && out.imagePath === undefined, "Plugin bubble body media cannot be combined with text or markdown. Use indicator for icon + message alerts.");
+      }
       if (!forUpdate && out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined) throw new Error("Plugin bubble needs content (text, markdown, icon, svg, or image).");
       return out;
+    };
+
+    const validateBubbleIndicator = (value: unknown): PluginBubbleIndicator => {
+      if (!isRecord(value)) throw new Error("Invalid bubble indicator.");
+      const indicator: PluginBubbleIndicator = {};
+      if (value.label !== undefined) indicator.label = validateSayMessage(String(value.label));
+      if (value.tone !== undefined) { check(["info", "success", "warning", "error"].includes(String(value.tone)), "Invalid bubble indicator tone."); indicator.tone = value.tone as PluginBubbleIndicator["tone"]; }
+      if (value.icon !== undefined) {
+        if (typeof value.icon === "string") { check(namedHostIcons.has(value.icon), "Unknown host icon name."); indicator.iconName = value.icon; }
+        else assignIndicatorAssetPath(indicator, resolveAssetRef(value.icon, ["icons"]).path);
+      }
+      if (value.svg !== undefined) indicator.iconSvgPath = resolveAssetRef(value.svg, ["svgs", "icons"]).path;
+      if (value.image !== undefined) indicator.imagePath = resolveAssetRef(value.image, ["images", "icons"]).path;
+      if (value.color !== undefined) indicator.color = validateCssColor(value.color, "Invalid bubble indicator color.");
+      if (value.background !== undefined) indicator.background = validateCssColor(value.background, "Invalid bubble indicator background.");
+      if (value.backgroundColor !== undefined) indicator.background = validateCssColor(value.backgroundColor, "Invalid bubble indicator background color.");
+      if (value.borderColor !== undefined) indicator.borderColor = validateCssColor(value.borderColor, "Invalid bubble indicator border color.");
+      check(indicator.label !== undefined || indicator.iconName !== undefined || indicator.iconSvgPath !== undefined || indicator.imagePath !== undefined, "Bubble indicator needs a label or icon.");
+      return indicator;
+    };
+
+    const assignIndicatorAssetPath = (indicator: PluginBubbleIndicator, path: string): void => {
+      if (path.toLowerCase().endsWith(".svg")) indicator.iconSvgPath = path;
+      else indicator.imagePath = path;
     };
 
     const audio = createPluginAudioApi({ pluginId, state, capabilities: caps, requirePermission, audioPerMinute: quotas.audioPerMinute, resolveAssetRef });
@@ -882,6 +922,7 @@ export function isPrivateIp(address: string): boolean { if (net.isIPv4(address))
 
 function check(ok: boolean, message: string): void { if (!ok) throw new Error(message); }
 function clampNumber(value: number, min: number, max: number): number { if (!Number.isFinite(value)) return min; return Math.min(Math.max(value, min), max); }
+function validateCssColor(value: unknown, message: string): string { const color = String(value).trim(); check(color.length <= 48 && safeCssColorPattern.test(color), message); return color; }
 function validateStorageKey(key: string): string { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(String(key))) throw new Error("Invalid plugin storage key."); return String(key); }
 function validatePetHandleId(value: unknown): string { const id = String(value); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id)) throw new Error("Invalid pet handle id."); return id; }
 function validatePoint(value: unknown): { x: number; y: number } { if (!isRecord(value)) throw new Error("Invalid point."); const x = Number(value.x); const y = Number(value.y); if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Invalid point."); return { x, y }; }

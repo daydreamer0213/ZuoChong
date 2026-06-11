@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, screen, type IpcMainEvent } from "electron";
+import { readFileSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,7 +14,7 @@ import { pickReactionMessage } from "./reaction-messages.js";
 import { debug, error as logError, info, warn } from "./logger.js";
 import { executeDefaultPetPluginCommand, executeDefaultPetPluginMenuSelect, getDefaultPetPluginCommands, getDefaultPetPluginMenuItems } from "./plugin-service.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
-import type { PluginCommandForm } from "./plugin-sdk-bridge.js";
+import type { PluginBubbleIndicator, PluginCommandForm } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 
 export interface PetWindowInteractionHooks {
@@ -906,6 +907,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon::before { content: attr(data-icon); display: block; width: 18px; height: 18px; line-height: 18px; text-align: center; transform: none; }
     .bubble-status-icon.has-svg::before { content: none; }
     .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
+    .bubble-status-icon img { display: block; width: 14px; height: 14px; object-fit: contain; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
     .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
@@ -913,6 +915,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-status-only { max-width: min(156px, calc(100vw - 18px)); padding: 8px 11px; border-radius: 999px; }
     .bubble.is-status-only .bubble-header { display: grid; grid-template-columns: 18px minmax(0, auto); align-items: center; justify-content: center; }
     .bubble.is-message-only { border-radius: 14px 14px 3px 14px; }
+    .bubble.has-actions { min-width: min(176px, calc(100vw - 18px)); }
     .bubble.is-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 138px; }
     .bubble.is-long-message .bubble-text { -webkit-line-clamp: 6; font-size: 10px; line-height: 13px; }
     .bubble.is-very-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 156px; }
@@ -922,6 +925,10 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-success .bubble-status-icon { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }
     .bubble.is-error .bubble-status-icon { background: #ef4444; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(239, 68, 68, 0.34); }
     .bubble.is-info .bubble-status-icon { background: #38bdf8; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(56, 189, 248, 0.34); }
+    .bubble-status-icon.is-success { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }
+    .bubble-status-icon.is-error { background: #ef4444; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(239, 68, 68, 0.34); }
+    .bubble-status-icon.is-warning { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
+    .bubble-status-icon.is-info { background: #38bdf8; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(56, 189, 248, 0.34); }
     .bubble.is-busy .bubble-status-icon::before { content: ""; position: absolute; inset: 0; width: 18px; height: 18px; background: radial-gradient(circle at 50% 50%, #fff 0 4px, transparent 4.5px); animation: status-pulse 820ms ease-in-out infinite; }
     .bubble.is-waiting .bubble-status-icon::before { content: ""; position: absolute; left: 3px; top: 3px; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, 0.96); border-top-color: rgba(255, 255, 255, 0.28); border-radius: 999px; }
     .bubble.is-plugin { gap: 6px; }
@@ -930,8 +937,8 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-plugin .bubble-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; background: rgba(30, 58, 138, 0.08); border-radius: 4px; padding: 0 3px; }
     .bubble-media { display: block; max-width: 96px; max-height: 64px; margin: 0 auto 2px; pointer-events: none; }
     .bubble-plugin-icon { display: inline-block; font-size: 13px; line-height: 14px; margin-bottom: 2px; }
-    .bubble-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-    .bubble-action { border: 0; border-radius: 8px; padding: 4px 9px; font: 760 10px/12px Inter, ui-sans-serif, system-ui, sans-serif; background: rgba(30, 58, 138, 0.10); color: #172033; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
+    .bubble-actions { display: flex; flex-wrap: nowrap; gap: 5px; width: 100%; margin-top: 6px; min-width: 0; }
+    .bubble-action { flex: 1 1 0; min-width: 0; border: 0; border-radius: 8px; padding: 4px 7px; font: 760 10px/12px Inter, ui-sans-serif, system-ui, sans-serif; background: rgba(30, 58, 138, 0.10); color: #172033; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .bubble-action:hover { background: rgba(30, 58, 138, 0.18); }
     .bubble-action.is-primary { background: #2563eb; color: #fff; }
     .bubble-action.is-primary:hover { background: #1d4ed8; }
@@ -975,7 +982,7 @@ function getReactionSpriteState(reaction: OpenPetsReaction | undefined): Univers
 
 const namedHostIconGlyphs: Record<string, string> = {
   info: "ℹ", check: "✓", alert: "⚠", heart: "♥", star: "★", bell: "🔔", coffee: "☕", timer: "⏱",
-  sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "▶", pause: "⏸",
+  droplet: "💧", sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "▶", pause: "⏸",
 };
 
 /** Render a plugin-arbiter bubble descriptor into host markup (descriptor-only — no plugin markup). */
@@ -988,6 +995,7 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
   const clickDismiss = bubble.dismissOn ? bubble.dismissOn.includes("click") : !interactive;
   const dismissAttr = clickDismiss ? ` data-dismiss-token="${token}"` : "";
   const parts: string[] = [];
+  if (bubble.indicator) parts.push(createPluginIndicatorMarkup(bubble.indicator));
   if (bubble.iconName || bubble.svgPath || bubble.imagePath) {
     const media = bubble.svgPath || bubble.imagePath;
     if (media) parts.push(`<img class="bubble-media" src="${escapeHtml(pathToFileURL(media).toString())}" alt="" draggable="false">`);
@@ -998,6 +1006,7 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
     : bubble.text !== undefined
       ? `<div class="bubble-body"><span class="bubble-text">${escapeHtml(bubble.text)}</span></div>`
       : "";
+  if (bubble.indicator && body) parts.push(`<div class="bubble-divider" aria-hidden="true"></div>`);
   if (body) parts.push(body);
   if (bubble.input) {
     const input = bubble.input;
@@ -1013,7 +1022,40 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
     const buttons = bubble.actions.map((action) => `<button type="button" class="bubble-action is-${action.style}" data-bubble-token="${token}" data-bubble-action="${escapeHtml(action.id)}">${action.iconName ? `<span aria-hidden="true">${escapeHtml(namedHostIconGlyphs[action.iconName] ?? "")}</span> ` : ""}${escapeHtml(action.label)}</button>`).join("");
     parts.push(`<div class="bubble-actions">${buttons}</div>`);
   }
-  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
+  const actionsClass = bubble.actions?.length ? " has-actions" : "";
+  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${actionsClass}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
+}
+
+function createPluginIndicatorMarkup(indicator: PluginBubbleIndicator): string {
+  const toneClass = indicator.tone ? ` is-${indicator.tone}` : " is-info";
+  const style = createIndicatorStyle(indicator);
+  const styleAttr = style ? ` style="${escapeHtml(style)}"` : "";
+  const label = indicator.label ?? "";
+  const icon = createIndicatorIconMarkup(indicator);
+  return `<div class="bubble-header"><span class="bubble-status-icon${icon.hasSvg ? " has-svg" : ""}${toneClass}" data-icon="${escapeHtml(icon.glyph)}" aria-hidden="true"${styleAttr}>${icon.markup}</span>${label ? `<span class="bubble-status-label">${escapeHtml(label)}</span>` : ""}</div>`;
+}
+
+function createIndicatorIconMarkup(indicator: PluginBubbleIndicator): { glyph: string; markup: string; hasSvg: boolean } {
+  if (indicator.iconSvgPath) {
+    const svg = readSafePluginSvg(indicator.iconSvgPath);
+    if (svg) return { glyph: "", markup: svg, hasSvg: true };
+  }
+  if (indicator.imagePath) return { glyph: "", markup: `<img src="${escapeHtml(pathToFileURL(indicator.imagePath).toString())}" alt="" draggable="false">`, hasSvg: true };
+  if (indicator.iconName) return { glyph: namedHostIconGlyphs[indicator.iconName] ?? "•", markup: "", hasSvg: false };
+  return { glyph: "", markup: "", hasSvg: false };
+}
+
+function readSafePluginSvg(path: string): string {
+  try { return readFileSync(path, "utf8"); }
+  catch { return ""; }
+}
+
+function createIndicatorStyle(indicator: PluginBubbleIndicator): string {
+  const declarations: string[] = [];
+  if (indicator.color) declarations.push(`color:${indicator.color}`);
+  if (indicator.background) declarations.push(`background:${indicator.background}`);
+  if (indicator.borderColor) declarations.push(`border:1px solid ${indicator.borderColor}`);
+  return declarations.join(";");
 }
 
 function createPinnedBubbleMarkup(pluginBubbles: PetPluginBubbles | null): string {

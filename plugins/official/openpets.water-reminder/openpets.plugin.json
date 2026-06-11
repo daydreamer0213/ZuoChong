@@ -1,16 +1,16 @@
 {
   "manifestVersion": 3,
-  "id": "openpets.reminders",
+  "id": "openpets.water-reminder",
   "name": "$t:plugin.name",
   "description": "$t:plugin.description",
   "version": "1.0.0",
   "runtime": "javascript",
-  "icon": "bell",
+  "icon": "droplet",
   "sdkVersion": "3.0.0",
   "entry": "index.js",
   "assets": {
     "icons": {
-      "reminder": "assets/reminder.svg"
+      "water": "assets/water.svg"
     }
   },
   "permissions": [
@@ -19,22 +19,19 @@
     "audio",
     "schedule",
     "storage",
-    "commands",
-    "status",
-    "notify"
+    "commands"
   ],
   "configSchema": {
-    "soundEnabled": {
-      "type": "boolean",
-      "default": true,
-      "label": "$t:config.soundEnabled.label",
-      "description": "$t:config.soundEnabled.description"
-    },
-    "osNotification": {
-      "type": "boolean",
-      "default": true,
-      "label": "$t:config.osNotification.label",
-      "description": "$t:config.osNotification.description"
+    "pace": {
+      "type": "select",
+      "default": "normal",
+      "label": "$t:config.pace.label",
+      "description": "$t:config.pace.description",
+      "options": [
+        { "value": "gentle", "label": "$t:config.pace.gentle" },
+        { "value": "normal", "label": "$t:config.pace.normal" },
+        { "value": "often", "label": "$t:config.pace.often" }
+      ]
     },
     "customSound": {
       "type": "sound",

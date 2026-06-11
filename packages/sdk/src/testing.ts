@@ -373,9 +373,10 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const makeAlert = (spec: OpenPetsAlert): OpenPetsAlertHandle => {
     if (spec.sound !== undefined) requirePermission("audio");
     if (spec.notify !== undefined) requirePermission("notify");
-    const { sound, notify, ...bubbleSpec } = spec;
+    const { sound, notify, indicator, ...bubbleSpec } = spec;
     const bubble = makeBubble("default", {
       ...bubbleSpec,
+      ...(indicator === false ? {} : { indicator }),
       sticky: true,
       priority: "high",
     });

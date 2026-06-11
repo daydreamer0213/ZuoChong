@@ -93,10 +93,18 @@ Hard lines kept regardless of permissions:
 
 - `ctx.ui.alert(...)` is the must-not-miss delivery helper: it renders a sticky,
 high-priority pet bubble and can optionally request `sound`, `notify`, actions,
-`dismissOn`, and rich bubble content (`text`, limited `markdown`, `icon`, `svg`,
-`image`, `tone`). Alerts require `pet:speak`; `pet:interact` is only needed for
-actions/input, `audio` only when `sound` is set, and `notify` only when `notify`
-is set. The returned handle behaves like a bubble handle and adds
+`dismissOn`, an `indicator`, and rich bubble content (`text`, limited
+`markdown`, `icon`, `svg`, `image`, `tone`). `indicator` renders the top header
+row used by pet status messages, but is alert-owned instead of a pet reaction: it
+accepts a named host icon or a manifest-declared asset via `ctx.assets.icon(...)`
+/ `ctx.assets.svg(...)` / `ctx.assets.image(...)`, plus safe `color`,
+`background`/`backgroundColor`, and `borderColor` values. Raw SVG strings are
+not accepted at runtime; bundle SVGs in `assets` so the host can validate and
+sanitize them at install. Bubble body media (`icon`, `svg`, `image`) is
+icon-only and cannot be combined with `text`/`markdown`; use `indicator` for
+icon + message alerts. Alerts require `pet:speak`; `pet:interact` is only
+needed for actions/input, `audio` only when `sound` is set, and `notify` only
+when `notify` is set. The returned handle behaves like a bubble handle and adds
 `acknowledge()`.
 - Config schemas may use `type: "sound"` for host-managed plugin sound
   preferences. The saved value is a named host sound, an opaque user sound ref,

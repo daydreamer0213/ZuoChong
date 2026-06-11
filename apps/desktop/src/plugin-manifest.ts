@@ -42,7 +42,7 @@ export type PluginPermission =
 export type PluginJavascriptPermission = Exclude<PluginPermission, "timer">;
 /** Permissions flagged sensitive in the UI (louder consent, global toggles). */
 export const sensitivePluginPermissions: ReadonlySet<PluginPermission> = new Set(["voice:listen", "clipboard", "pet:speak:dynamic"]);
-export type PluginIcon = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
+export type PluginIcon = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus" | "droplet";
 export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound";
 
 /** Asset kinds a v3 plugin can declare and bundle. */
@@ -125,7 +125,7 @@ const reactActionFields = new Set(["type", "reaction"]);
 const supportedConfigTypes = new Set(["text", "textarea", "number", "boolean", "select", "time", "date", "multiSelect", "list", "secret", "sound"]);
 const deferredConfigTypes = new Set(["multi-select", "schedule", "connection"]);
 const deferredConfigFeatures = new Set(["dynamicOptions"]);
-const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus"]);
+const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus", "droplet"]);
 export const pluginV3Permissions = [
   "pet:interact",
   "pet:pin",
@@ -290,7 +290,7 @@ function validatePanels(value: unknown, errors: PluginManifestValidationError[])
 
 function validatePluginIcon(value: unknown, errors: PluginManifestValidationError[]): void {
   if (value === undefined) return;
-  if (typeof value !== "string" || !supportedPluginIcons.has(value)) addError(errors, "$.icon", "invalid_icon", "icon must be one of plugin, bell, timer, github, heart, sparkles, coffee, or focus.");
+  if (typeof value !== "string" || !supportedPluginIcons.has(value)) addError(errors, "$.icon", "invalid_icon", "icon must be one of plugin, bell, timer, github, heart, sparkles, coffee, focus, or droplet.");
 }
 
 function validateEntryPath(value: unknown, errors: PluginManifestValidationError[]): void {

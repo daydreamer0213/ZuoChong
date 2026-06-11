@@ -125,12 +125,20 @@ async function deliver(ctx, message, { missed = false } = {}) {
   const text = missed
     ? ctx.t("bubble.missed", { message })
     : ctx.t("bubble.due", { message });
+  const reminderIcon = ctx.assets.icon("reminder");
 
   let alert;
   try {
     alert = await ctx.ui.alert({
       text,
-      icon: "bell",
+      indicator: {
+        icon: reminderIcon,
+        label: missed ? ctx.t("indicator.missed") : ctx.t("indicator.due"),
+        tone: missed ? "warning" : "info",
+        color: missed ? "#d97706" : "#7c3aed",
+        background: missed ? "#fef3c7" : "#ede9fe",
+        borderColor: missed ? "#fbbf24" : "#c4b5fd",
+      },
       tone: "info",
       sound: soundEnabled ? config.customSound || "alert" : undefined,
       notify: osNotification
@@ -226,9 +234,20 @@ export function register(OpenPetsPlugin) {
 
       await ctx.commands.register(
         {
+          id: "test-reminder",
+          title: "$t:command.testReminder.title",
+          description: "$t:command.testReminder.description",
+          icon: "bell",
+        },
+        () => deliver(ctx, ctx.t("reminder.testMessage")),
+      );
+
+      await ctx.commands.register(
+        {
           id: "set-reminder",
           title: "$t:command.setReminder.title",
           description: "$t:command.setReminder.description",
+          icon: "bell",
           form: {
             submitLabel: "$t:command.setReminder.submit",
             fields: [
@@ -266,6 +285,7 @@ export function register(OpenPetsPlugin) {
           id: "reminder-15",
           title: "$t:command.reminder15.title",
           description: "$t:command.reminder15.description",
+          icon: "timer",
         },
         () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 15 * 60_000),
       );
@@ -274,6 +294,7 @@ export function register(OpenPetsPlugin) {
           id: "reminder-30",
           title: "$t:command.reminder30.title",
           description: "$t:command.reminder30.description",
+          icon: "timer",
         },
         () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 30 * 60_000),
       );
@@ -282,6 +303,7 @@ export function register(OpenPetsPlugin) {
           id: "reminder-60",
           title: "$t:command.reminder60.title",
           description: "$t:command.reminder60.description",
+          icon: "timer",
         },
         () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 60 * 60_000),
       );
@@ -291,6 +313,7 @@ export function register(OpenPetsPlugin) {
           id: "view-reminders",
           title: "$t:command.viewReminders.title",
           description: "$t:command.viewReminders.description",
+          icon: "bell",
         },
         () => showReminderList(ctx),
       );
@@ -300,6 +323,7 @@ export function register(OpenPetsPlugin) {
           id: "clear-reminders",
           title: "$t:command.clearReminders.title",
           description: "$t:command.clearReminders.description",
+          icon: "check",
         },
         async () => {
           await ctx.schedule.cancelAll();

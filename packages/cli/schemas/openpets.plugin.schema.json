@@ -13,7 +13,7 @@
     "description": { "type": "string", "maxLength": 1000 },
     "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$" },
     "runtime": { "enum": ["declarative", "javascript"] },
-    "icon": { "enum": ["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus"] },
+    "icon": { "enum": ["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus", "droplet"] },
     "sdkVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$" },
     "entry": { "type": "string", "pattern": "\\.(mjs|js)$" },
     "permissions": {
