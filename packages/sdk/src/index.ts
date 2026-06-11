@@ -168,12 +168,32 @@ export interface OpenPetsBubbleInput {
   submitLabel?: string;
 }
 
+/** A HUD item shown in the host-rendered pinned mini-HUD bubble. */
+export interface OpenPetsBubbleHudItem {
+  /** Named host icon or bundled icon asset reference. */
+  icon: OpenPetsIconRef;
+  /** Numeric value between 0 and 100 inclusive. */
+  value: number;
+  /** Optional short display label. */
+  label?: string;
+  /** Optional theme color tone for the bar/indicator. */
+  tone?: "amber" | "blue" | "green" | "pink" | "slate" | "red";
+}
+
+/** Descriptor for a host-rendered mini HUD layout, used in pinned bubbles. */
+export interface OpenPetsBubbleHud {
+  /** List of HUD items (usually up to 4 items). */
+  items: OpenPetsBubbleHudItem[];
+}
+
 /**
  * A structured, host-rendered bubble descriptor. The plugin describes; the
  * host renders — no raw HTML or live DOM ever crosses the SDK boundary.
  */
 export interface OpenPetsBubble {
   // --- content ---
+  /** Host-rendered mini HUD layout for pinned bubbles. */
+  hud?: OpenPetsBubbleHud;
   /** Plain text, length-capped, content-filtered. */
   text?: string;
   /** Limited markdown (bold/italic/code/line breaks), host-sanitized. */

@@ -90,6 +90,96 @@ await scenario("pet.react validates silent reaction options", async ({ api }) =>
   await assert.rejects(() => api.pet.react("waving", { showMessage: false, extra: true }), /Invalid pet reaction option\./);
 });
 
+await scenario("hud bubble spec validation is enforced", async ({ store, bridge }) => {
+  const record = store.getRecord("plug")!;
+  const updatedRecord = {
+    ...record,
+    approvedPermissions: [...record.approvedPermissions, "pet:pin" as const],
+  };
+  store.upsertRecord(updatedRecord);
+  
+  const approvedApi = bridge.createApi(updatedRecord, manifest());
+
+  // Should succeed with valid HUD
+  await approvedApi.ui.bubble({
+    pin: true,
+    hud: {
+      items: [
+        { icon: "food", value: 80, tone: "amber", label: "Food" },
+      ],
+    },
+  });
+
+  // Should reject if pin: true is missing
+  await assert.rejects(
+    () => approvedApi.ui.bubble({
+      hud: {
+        items: [
+          { icon: "food", value: 80, tone: "amber", label: "Food" },
+        ],
+      },
+    }),
+    /Bubble HUD descriptor is only allowed for pinned bubbles\./,
+  );
+
+  // Should reject if combined with text
+  await assert.rejects(
+    () => approvedApi.ui.bubble({
+      pin: true,
+      text: "hello",
+      hud: {
+        items: [
+          { icon: "food", value: 80, tone: "amber", label: "Food" },
+        ],
+      },
+    }),
+    /Plugin bubble HUD cannot be combined with text, markdown, body media, or indicator\./,
+  );
+
+  // Should reject if items contains more than 4 items
+  await assert.rejects(
+    () => approvedApi.ui.bubble({
+      pin: true,
+      hud: {
+        items: [
+          { icon: "food", value: 80 },
+          { icon: "zap", value: 80 },
+          { icon: "play", value: 80 },
+          { icon: "heart", value: 80 },
+          { icon: "star", value: 80 },
+        ],
+      },
+    }),
+    /Bubble HUD items must contain between 1 and 4 items\./,
+  );
+  
+  // Should reject if item lacks icon
+  await assert.rejects(
+    () => approvedApi.ui.bubble({
+      pin: true,
+      hud: {
+        items: [
+          { value: 80 },
+        ],
+      },
+    }),
+    /Bubble HUD item must have an icon\./,
+  );
+
+  // Should reject if item value is outside 0..100
+  await assert.rejects(
+    () => approvedApi.ui.bubble({
+      pin: true,
+      hud: {
+        items: [
+          { icon: "food", value: 150 },
+        ],
+      },
+    }),
+    /Bubble HUD item value must be a number between 0 and 100\./,
+  );
+});
+
 type ScenarioContext = {
   api: ReturnType<PluginSdkBridge["createApi"]>;
   bridge: PluginSdkBridge;

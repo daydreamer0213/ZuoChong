@@ -67,7 +67,18 @@ export type PluginBubbleIndicator = {
   background?: string;
   borderColor?: string;
 };
+export type PluginBubbleHudItem = {
+  iconName?: string;
+  svgPath?: string;
+  value: number;
+  label?: string;
+  tone?: "amber" | "blue" | "green" | "pink" | "slate" | "red";
+};
+export type PluginBubbleHud = {
+  items: PluginBubbleHudItem[];
+};
 export type PluginBubbleDescriptor = {
+  hud?: PluginBubbleHud;
   text?: string;
   /** Pre-sanitized HTML rendered from limited markdown (everything escaped first). */
   markdownHtml?: string;
@@ -395,7 +406,8 @@ export class PluginSdkBridge {
         check(caps.settings.dynamicSpeechAllowed(), "AI-generated pet speech is disabled in settings.");
         out.dynamic = true;
       }
-      if (raw.text !== undefined) out.text = dynamic ? validateDynamicText(String(raw.text)) : validateSayMessage(String(raw.text));
+      const pinned = raw.pin === true;
+      if (raw.text !== undefined) out.text = dynamic ? validateDynamicText(String(raw.text)) : pinned ? validatePinnedBubbleText(String(raw.text)) : validateSayMessage(String(raw.text));
       if (raw.markdown !== undefined) {
         const markdown = String(raw.markdown);
         check(markdown.length <= (dynamic ? quotas.dynamicTextChars : quotas.markdownChars), "Plugin bubble markdown is too long.");
@@ -414,6 +426,12 @@ export class PluginSdkBridge {
       if (raw.durationMs !== undefined) { const duration = Number(raw.durationMs); check(Number.isFinite(duration) && duration >= 500 && duration <= 10 * 60_000, "Invalid bubble durationMs."); out.durationMs = duration; }
       if (raw.sticky !== undefined) out.sticky = raw.sticky === true;
       if (raw.pin !== undefined) { if (raw.pin === true) { requirePermission("pet:pin"); out.pin = true; if (out.sticky === undefined && out.durationMs === undefined) out.sticky = true; } }
+      if (raw.hud !== undefined) {
+        if (!forUpdate) {
+          check(raw.pin === true, "Bubble HUD descriptor is only allowed for pinned bubbles.");
+        }
+        out.hud = validateBubbleHud(raw.hud);
+      }
       if (raw.dismissOn !== undefined) {
         check(Array.isArray(raw.dismissOn) && raw.dismissOn.length <= 5, "Invalid bubble dismissOn.");
         const allowed = new Set(["timeout", "click", "petClick", "action", "outsideClick"]);
@@ -425,8 +443,12 @@ export class PluginSdkBridge {
       if (raw.input !== undefined) { requirePermission("pet:interact"); out.input = validateBubbleInput(raw.input); }
       if (out.text !== undefined || out.markdownHtml !== undefined) {
         check(out.iconName === undefined && out.svgPath === undefined && out.imagePath === undefined, "Plugin bubble body media cannot be combined with text or markdown. Use indicator for icon + message alerts.");
+        check(out.hud === undefined, "Plugin bubble HUD cannot be combined with text or markdown.");
       }
-      if (!forUpdate && out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined) throw new Error("Plugin bubble needs content (text, markdown, icon, svg, or image).");
+      if (out.hud !== undefined) {
+        check(out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined && out.indicator === undefined, "Plugin bubble HUD cannot be combined with text, markdown, body media, or indicator.");
+      }
+      if (!forUpdate && out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined && out.hud === undefined) throw new Error("Plugin bubble needs content (text, markdown, icon, svg, image, or hud).");
       return out;
     };
 
@@ -452,6 +474,45 @@ export class PluginSdkBridge {
     const assignIndicatorAssetPath = (indicator: PluginBubbleIndicator, path: string): void => {
       if (path.toLowerCase().endsWith(".svg")) indicator.iconSvgPath = path;
       else indicator.imagePath = path;
+    };
+
+    const validateBubbleHud = (value: unknown): PluginBubbleHud => {
+      if (!isRecord(value)) throw new Error("Invalid bubble HUD descriptor.");
+      const rawItems = value.items;
+      check(Array.isArray(rawItems), "Bubble HUD items must be an array.");
+      const itemsList = rawItems as unknown[];
+      check(itemsList.length >= 1 && itemsList.length <= 4, "Bubble HUD items must contain between 1 and 4 items.");
+      const items: PluginBubbleHudItem[] = [];
+      for (const item of itemsList) {
+        if (!isRecord(item)) throw new Error("Invalid bubble HUD item.");
+        check(item.value !== undefined, "Bubble HUD item must have a value.");
+        const val = Number(item.value);
+        check(Number.isFinite(val) && val >= 0 && val <= 100, "Bubble HUD item value must be a number between 0 and 100.");
+
+        const hudItem: PluginBubbleHudItem = { value: Math.round(val) };
+
+        if (item.icon !== undefined) {
+          if (typeof item.icon === "string") {
+            check(namedHostIcons.has(item.icon), "Unknown host icon name in HUD item.");
+            hudItem.iconName = item.icon;
+          } else {
+            hudItem.svgPath = resolveAssetRef(item.icon, ["icons"]).path;
+          }
+        } else {
+          throw new Error("Bubble HUD item must have an icon.");
+        }
+
+        if (item.label !== undefined) {
+          hudItem.label = validateSayMessage(String(item.label));
+        }
+
+        if (item.tone !== undefined) {
+          check(["amber", "blue", "green", "pink", "slate", "red"].includes(String(item.tone)), "Invalid HUD item tone.");
+          hudItem.tone = item.tone as PluginBubbleHudItem["tone"];
+        }
+        items.push(hudItem);
+      }
+      return { items };
     };
 
     const audio = createPluginAudioApi({ pluginId, state, capabilities: caps, requirePermission, audioPerMinute: quotas.audioPerMinute, resolveAssetRef });
@@ -945,6 +1006,16 @@ export function validateDynamicText(value: string): string {
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[redacted]")
     .replace(/-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----/g, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
+}
+
+export function validatePinnedBubbleText(value: string): string {
+  const text = value.trim().replace(/\r\n?/g, "\n");
+  check(text.length >= 1, "Pinned bubble text cannot be empty.");
+  check(text.length <= 140, "Pinned bubble text is too long.");
+  const lines = text.split("\n");
+  check(lines.length <= 4, "Pinned bubble text has too many lines.");
+  check(lines.every((line) => line.trim().length > 0), "Pinned bubble text cannot contain blank lines.");
+  return lines.map((line) => validateSayMessage(line)).join("\n");
 }
 
 /** Static (non-dynamic) bubble markdown still gets the ambient content screen. */

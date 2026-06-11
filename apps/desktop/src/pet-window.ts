@@ -14,7 +14,7 @@ import { pickReactionMessage } from "./reaction-messages.js";
 import { debug, error as logError, info, warn } from "./logger.js";
 import { executeDefaultPetPluginCommand, executeDefaultPetPluginMenuSelect, getDefaultPetPluginCommands, getDefaultPetPluginMenuItems } from "./plugin-service.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
-import type { PluginBubbleIndicator, PluginCommandForm } from "./plugin-sdk-bridge.js";
+import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 
 export interface PetWindowInteractionHooks {
@@ -1003,7 +1003,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     }
     .bubble.is-pinned::after { content: none !important; }
     .bubble.is-pinned .bubble-body { width: 100%; text-align: center; }
-    .bubble.is-pinned .bubble-text { display: block; -webkit-line-clamp: 1; font-size: 10px; font-weight: 700; line-height: 12px; color: #334155; }
+    .bubble.is-pinned .bubble-text { display: inline-block; -webkit-line-clamp: unset; -webkit-box-orient: initial; white-space: pre; overflow-wrap: normal; word-break: keep-all; font: 800 10px/13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; letter-spacing: -0.03em; color: #334155; text-align: left; }
     .bubble.is-pinned .bubble-actions { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 4px; width: 100%; margin-top: 5px; justify-content: center; }
     .bubble.is-pinned .bubble-action { flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 9px; font-weight: 700; line-height: 11px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; background: rgba(30, 58, 138, 0.08); color: #1e293b; transition: background 150ms ease; }
     .bubble.is-pinned .bubble-action:hover { background: rgba(30, 58, 138, 0.14); }
@@ -1027,6 +1027,86 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-plugin.accent-red { background: linear-gradient(135deg, rgba(254, 226, 226, 0.97), rgba(254, 202, 202, 0.94)); }
     .bubble.is-plugin.accent-pink { background: linear-gradient(135deg, rgba(252, 231, 243, 0.97), rgba(251, 207, 232, 0.94)); }
     .bubble.is-plugin.accent-slate { background: linear-gradient(135deg, rgba(241, 245, 249, 0.97), rgba(226, 232, 240, 0.94)); }
+    .bubble-hud {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 8px;
+      width: 100%;
+      margin: 2px 0;
+      box-sizing: border-box;
+    }
+    .bubble-hud.items-1 {
+      grid-template-columns: 1fr;
+    }
+    .bubble-hud.items-3 .bubble-hud-item:last-child {
+      grid-column: span 2;
+    }
+    .bubble-hud-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      width: 100%;
+    }
+    .bubble-hud-item-icon {
+      flex: 0 0 12px;
+      width: 12px;
+      height: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+    }
+    .bubble-hud-item-icon img, .bubble-hud-item-icon svg {
+      width: 12px;
+      height: 12px;
+      object-fit: contain;
+      display: block;
+    }
+    .bubble-hud-item-content {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .bubble-hud-item-meta {
+      display: flex;
+      justify-content: flex-start;
+      align-items: baseline;
+      gap: 2px;
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1;
+      color: #475569;
+    }
+    .bubble-hud-item-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bubble-hud-item-bar {
+      height: 4px;
+      background: rgba(71, 85, 105, 0.15);
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+      width: 100%;
+    }
+    .bubble-hud-item-fill {
+      height: 100%;
+      border-radius: 99px;
+      width: 0%;
+      transition: width 200ms ease;
+    }
+    .bubble-hud-item-fill.tone-amber { background: #d97706; }
+    .bubble-hud-item-fill.tone-blue { background: #2563eb; }
+    .bubble-hud-item-fill.tone-green { background: #16a34a; }
+    .bubble-hud-item-fill.tone-pink { background: #db2777; }
+    .bubble-hud-item-fill.tone-slate { background: #475569; }
+    .bubble-hud-item-fill.tone-red { background: #dc2626; }
     @keyframes bubble-in { from { opacity: 0; transform: translateX(-50%) translateY(4px) scale(0.96); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
     @keyframes status-pulse { 0%, 100% { opacity: 0.52; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .sprite, .installed-sprite, .bubble, .bubble-status-icon::before { animation: none !important; } }
@@ -1052,9 +1132,32 @@ function getReactionSpriteState(reaction: OpenPetsReaction | undefined): Univers
 }
 
 const namedHostIconGlyphs: Record<string, string> = {
-  info: "ℹ", check: "✓", alert: "⚠", heart: "♥", star: "★", bell: "🔔", coffee: "☕", timer: "⏱",
-  droplet: "💧", sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "▶", pause: "⏸",
+  info: "ℹ", check: "✓", alert: "⚠", heart: "💛", star: "★", bell: "🔔", coffee: "☕", timer: "⏱",
+  droplet: "💧", sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "🎾", pause: "⏸",
 };
+
+function createHudIconMarkup(item: PluginBubbleHudItem): string {
+  if (item.svgPath) {
+    const svg = readSafePluginSvg(item.svgPath);
+    if (svg) return svg;
+  }
+  if (item.iconName) {
+    return escapeHtml(namedHostIconGlyphs[item.iconName] ?? "•");
+  }
+  return "•";
+}
+
+function createPluginHudMarkup(hud: PluginBubbleHud): string {
+  const itemsHtml = hud.items.map((item) => {
+    const value = Math.round(Math.max(0, Math.min(100, item.value)));
+    const iconMarkup = createHudIconMarkup(item);
+    const labelHtml = item.label ? `<span class="bubble-hud-item-label">${escapeHtml(item.label)}</span>` : "";
+    const tone = item.tone ?? "slate";
+    const ariaLabel = item.label ? ` aria-label="${escapeHtml(`${item.label} ${value}%`)}"` : "";
+    return `<div class="bubble-hud-item"${ariaLabel}><div class="bubble-hud-item-icon" aria-hidden="true">${iconMarkup}</div><div class="bubble-hud-item-content"><div class="bubble-hud-item-meta">${labelHtml}</div><div class="bubble-hud-item-bar"><div class="bubble-hud-item-fill tone-${tone}" style="width:${value}%"></div></div></div></div>`;
+  }).join("");
+  return `<div class="bubble-hud items-${hud.items.length}">${itemsHtml}</div>`;
+}
 
 /** Render a plugin-arbiter bubble descriptor into host markup (descriptor-only — no plugin markup). */
 function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string {
@@ -1079,6 +1182,9 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
       : "";
   if (bubble.indicator && body) parts.push(`<div class="bubble-divider" aria-hidden="true"></div>`);
   if (body) parts.push(body);
+  if (bubble.hud) {
+    parts.push(createPluginHudMarkup(bubble.hud));
+  }
   if (bubble.input) {
     const input = bubble.input;
     const inputId = escapeHtml(input.id);
@@ -1094,7 +1200,8 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
     parts.push(`<div class="bubble-actions">${buttons}</div>`);
   }
   const actionsClass = bubble.actions?.length ? " has-actions" : "";
-  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${actionsClass}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
+  const hudClass = bubble.hud ? " has-hud" : "";
+  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${actionsClass}${hudClass}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
 }
 
 function createPluginIndicatorMarkup(indicator: PluginBubbleIndicator): string {

@@ -153,15 +153,18 @@ CLI `reminder` template.
 
 `ctx.ui.bubble(spec)` / `pet.speak(spec)` accept a string or a descriptor
 (text, limited markdown, icon/svg/image refs, tone, accent token, duration,
-sticky, pin, dismissOn, priority, actions, input) and return a live handle
+sticky, pin, dismissOn, priority, actions, input, hud) and return a live handle
 (`update`, `dismiss`, `pin`, `unpin`, `onAction`, `onSubmit`, `onDismiss`).
+
+A **pinned mini HUD bubble** can be rendered using the `hud` descriptor (requires `pin: true`). The `hud` property takes an `items` array (1–4 items), where each item has `icon` (named host icon or asset ref), `value` (0–100), optional `label`, and optional `tone` ("amber", "blue", "green", "pink", "slate", "red"). When `hud` is present, it must not be combined with text, markdown, body media, or indicator. Pinned bubbles with `hud` render as a compact, polished 2x2 grid with CSS progress bars, avoiding emoji alignment issues.
 
 `plugin-bubble-arbiter.ts` (one per pet surface) arbitrates: priority queue,
 do-not-interrupt for sticky/urgent, coalescing of identical back-to-back
 messages, and a single **pinned slot** above the transient slot with
-priority-aware replace semantics. Non-dynamic text goes through the static
-content filter; `dynamic: true` content needs `pet:speak:dynamic` plus the
-global toggle and gets the relaxed screen (2,000 chars, secret redaction).
+priority-aware replace semantics. Non-dynamic transient text goes through the
+static content filter and stays single-line; pinned text may use a few safe lines
+for compact status HUDs. `dynamic: true` content needs `pet:speak:dynamic` plus
+the global toggle and gets the relaxed screen (2,000 chars, secret redaction).
 
 ## Multi-pet & liveness
 
