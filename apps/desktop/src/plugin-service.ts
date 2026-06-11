@@ -8,6 +8,7 @@ import { publishLocalPluginSnapshot, readLocalPluginSourceManifest } from "./plu
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import type { OpenDialogOptions } from "electron";
 import type { PluginJsHost } from "./plugin-js-host.js";
+import { resolveDeclaredAssetPath } from "./plugin-assets.js";
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginConfigField, type PluginIcon, type PluginPermission } from "./plugin-manifest.js";
 import { ensureLoaded as ensurePluginLocales, resolvePluginText } from "./plugin-i18n.js";
 import { downloadCatalogPluginZip, installCatalogPluginPackage, readCatalogPluginManifestFromZip, resolveSafePluginInstallDir } from "./plugin-package.js";
@@ -22,6 +23,7 @@ export type SafePluginRecord = {
   readonly description?: string;
   readonly version: string;
   readonly icon?: PluginIcon;
+  readonly iconDataUrl?: string;
   readonly source: PluginSource;
   readonly bundled?: boolean;
   readonly enabled: boolean;
@@ -414,7 +416,7 @@ export class PluginService {
       const config = getEffectivePluginConfig(manifest, record.config);
       const runtimeState = typeof (this.runtime as unknown as { getPluginState?: unknown }).getPluginState === "function" ? this.runtime.getPluginState(record.id) : { commands: [] };
       await ensurePluginLocales(record.id, record.installPath).catch(() => undefined);
-      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: resolvePluginText(record.id, manifest.name) ?? manifest.name, description: resolvePluginText(record.id, manifest.description), icon: manifest.icon, configSchema: resolveConfigSchemaText(record.id, manifest.configSchema), effectiveConfig: config.ok ? config.config : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands.map((command) => resolveCommandText(record.id, command)), status: runtimeState.status };
+      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: resolvePluginText(record.id, manifest.name) ?? manifest.name, description: resolvePluginText(record.id, manifest.description), icon: manifest.icon, iconDataUrl: await readPluginIconDataUrl(manifest, record.installPath), configSchema: resolveConfigSchemaText(record.id, manifest.configSchema), effectiveConfig: config.ok ? resolveConfigValueText(record.id, config.config) : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands.map((command) => resolveCommandText(record.id, command)), status: runtimeState.status };
     } catch (error) {
       return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason) ?? safeError(error) };
     }
@@ -579,6 +581,40 @@ function safeError(error: unknown): string {
   return "Plugin manifest is unavailable.";
 }
 
+const pluginIconDataUrlMaxBytes = 64 * 1024;
+
+async function readPluginIconDataUrl(manifest: OpenPetsPluginManifest, installPath: string): Promise<string | undefined> {
+  if (manifest.manifestVersion !== 3 || manifest.runtime !== "javascript") return undefined;
+  const icons = manifest.assets?.icons ?? {};
+  const iconName = choosePluginIconAssetName(manifest.id, manifest.icon, icons);
+  if (!iconName) return undefined;
+  const relPath = icons[iconName];
+  if (!relPath?.toLowerCase().endsWith(".svg")) return undefined;
+  try {
+    const iconPath = resolveDeclaredAssetPath(manifest, installPath, "icons", iconName);
+    const stat = await fs.stat(iconPath);
+    if (!stat.isFile() || stat.size > pluginIconDataUrlMaxBytes) return undefined;
+    const bytes = await fs.readFile(iconPath);
+    if (bytes.byteLength > pluginIconDataUrlMaxBytes) return undefined;
+    return `data:image/svg+xml;base64,${bytes.toString("base64")}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function choosePluginIconAssetName(pluginId: string, manifestIcon: PluginIcon | undefined, icons: Record<string, string>): string | undefined {
+  const names = Object.keys(icons).sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) return undefined;
+  if (names.length === 1) return names[0];
+  const tail = pluginId.split(".").at(-1)?.toLowerCase();
+  const manifestIconName = manifestIcon?.toLowerCase();
+  return names.find((name) => name.toLowerCase() === tail)
+    ?? names.find((name) => name.toLowerCase() === manifestIconName)
+    ?? names.find((name) => tail && name.toLowerCase().includes(tail))
+    ?? names.find((name) => manifestIconName && name.toLowerCase().includes(manifestIconName))
+    ?? names[0];
+}
+
 function safeSoundError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Plugin sound import failed.";
   if (/format is not supported|unsupported format|unsupported audio/i.test(message)) return "Plugin sound format is not supported.";
@@ -614,6 +650,10 @@ function resolveConfigFieldText(pluginId: string, field: PluginConfigField): Plu
     options: field.options?.map((option) => ({ ...option, label: resolvePluginText(pluginId, option.label) ?? option.label })),
     itemSchema: field.itemSchema ? Object.fromEntries(Object.entries(field.itemSchema).map(([key, sub]) => [key, resolveConfigFieldText(pluginId, sub)])) : field.itemSchema,
   };
+}
+
+function resolveConfigValueText(pluginId: string, config: PluginConfig): PluginConfig {
+  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, typeof value === "string" ? resolvePluginText(pluginId, value) ?? value : value]));
 }
 
 /** Walk a manifest's `configSchema`, resolving every `$t:` display string against the plugin's catalogs. */

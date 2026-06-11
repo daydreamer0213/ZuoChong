@@ -40,6 +40,7 @@ const plugin: OpenPetsPluginDefinition = {
     await ctx.status.set({ text: "Ready", tone: "info" });
     await ctx.pet.speak("Hello!");
     await ctx.pet.react("waving");
+    await ctx.pet.react("waving", { showMessage: false });
     await ctx.pet.setStatusReaction("thinking");
     const alert = await ctx.ui.alert({ text: "Heads up", markdown: "**Check complete**", icon: "bell", tone: "info", sound: "alert" });
     alert.onAction(() => undefined);
@@ -80,7 +81,8 @@ harness.files.provide([{ name: "bell.wav", bytes: new Uint8Array([1, 2, 3]) }]);
 await plugin.start(ctx);
 
 assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00"]);
-assert.deepEqual(calls.react, ["waving"]);
+assert.deepEqual(calls.react, ["waving", "waving"]);
+assert.deepEqual(calls.reactions[1]?.options, { showMessage: false });
 assert.deepEqual(calls.statusReactions, ["thinking"]);
 assert.equal(calls.status.length, 2);
 assert.ok(calls.schedules.has("tick"));
@@ -106,7 +108,7 @@ assert.equal(calls.storage.get("lastTick"), "now");
 
 // Curated events reach subscribers.
 await harness.emit("pet:clicked", { petId: "default" });
-assert.deepEqual(calls.react, ["waving", "celebrating"]);
+assert.deepEqual(calls.react, ["waving", "waving", "celebrating"]);
 
 await calls.commands.get("greet")?.handler();
 assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00", "Hi again!"]);

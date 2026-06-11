@@ -54,8 +54,8 @@ type PluginCommand = { id: string; title: string; description?: string; form?: P
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
 type PluginCategory = "Companion" | "Wellness" | "Focus" | "Developer" | "Advanced";
-type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; source: "catalog" | "local"; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
-type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string };
+type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; iconDataUrl?: string; source: "catalog" | "local"; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
+type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; iconDataUrl?: string; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
@@ -1313,6 +1313,16 @@ function PluginIcon({ icon = "plugin", className = "plugin-glyph" }: { icon?: Pl
   return <PluginGlyph className={className} />;
 }
 
+function isPluginIconDataUrl(value: string | undefined): value is string {
+  return typeof value === "string" && /^data:image\/svg\+xml;base64,[a-z0-9+/=]+$/iu.test(value);
+}
+
+function PluginIconImage({ entry, className = "plugin-glyph" }: { entry: PluginEntry; className?: string }) {
+  const iconDataUrl = isPluginIconDataUrl(entry.installed?.iconDataUrl) ? entry.installed.iconDataUrl : isPluginIconDataUrl(entry.catalog?.iconDataUrl) ? entry.catalog.iconDataUrl : undefined;
+  if (iconDataUrl) return <img className={`${className} plugin-icon-img`} src={iconDataUrl} alt="" aria-hidden="true" draggable="false" />;
+  return <PluginIcon icon={pluginIcon(entry)} className={className} />;
+}
+
 function pluginIcon(entry: PluginEntry): PluginIconName {
   return entry.installed?.icon || entry.catalog?.icon || "plugin";
 }
@@ -2103,7 +2113,7 @@ function PluginsView() {
           {filteredEntries.map((entry) => (
             <article key={entry.id} className={`plugin-card ${entry.installed?.brokenReason ? "broken" : ""}`}>
               <div className="plugin-card-body">
-                <span className="plugin-card-icon"><PluginIcon icon={pluginIcon(entry)} /></span>
+                <span className="plugin-card-icon"><PluginIconImage entry={entry} /></span>
                 <div className="plugin-card-content">
                   <strong>{pluginName(entry)}</strong>
                   <small>{pluginDescription(entry, t)}</small>
@@ -2167,7 +2177,7 @@ function PluginsView() {
         <GlassCard className="plugin-inspector">
         {selected ? <>
           <div className="plugin-inspector-head">
-            <span className="plugin-inspector-icon"><PluginIcon icon={pluginIcon(selected)} /></span>
+            <span className="plugin-inspector-icon"><PluginIconImage entry={selected} /></span>
             <div className="flex-1 min-w-0"><p className="eyebrow">{t("plugins.inspector.details")}</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected, t)}</p></div>
             <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("plugins.inspector.close")}</Button>
           </div>

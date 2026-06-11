@@ -18,6 +18,9 @@ try {
 } catch {
   ({ createTestHarness } = await import(new URL("../../../packages/sdk/dist/testing.js", import.meta.url)));
 }
+if (typeof createTestHarness !== "function") {
+  ({ createTestHarness } = await import(new URL("../../../packages/sdk/dist/testing.js", import.meta.url)));
+}
 
 assert.equal(normalizeTime("7:05"), "07:05");
 assert.equal(normalizeTime("26:00"), "16:00");

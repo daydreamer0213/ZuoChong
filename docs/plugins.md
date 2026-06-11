@@ -118,6 +118,10 @@ when `notify` is set. The returned handle behaves like a bubble handle and adds
 
 Quotas live in `pluginSdkQuotas` (`plugin-sdk-bridge.ts`).
 
+Reactions require `pet:reaction`: `ctx.pet.react(reaction)` preserves the built-in
+reaction/status bubble, while `ctx.pet.react(reaction, { showMessage: false })`
+plays the animation without generating that default text.
+
 ## Plugin i18n
 
 A plugin ships its translations as `locales/<locale>.json` — one file per
@@ -141,8 +145,9 @@ Two ways to use those keys:
   current locale string. Example: `ctx.t("reminder.due", { message })`.
 
 Keep placeholders intact across locales and leave brand names untranslated. The
-reference implementation is the `openpets.reminders` ("Quick Reminders") default
-plugin, mirrored by the CLI `reminder` template.
+reference implementations include `openpets.reminders` ("Quick Reminders") and
+`openpets.launch-buddy` ("Launch Buddy"), with the reminder flow mirrored by the
+CLI `reminder` template.
 
 ## Bubbles & the arbiter
 

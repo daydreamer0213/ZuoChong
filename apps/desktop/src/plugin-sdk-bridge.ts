@@ -109,6 +109,7 @@ export interface PluginBubbleHostHandle {
 export type PluginPetInfo = { id: string; name: string; kind: "default" | "agent" | "plugin"; visible: boolean };
 export type PluginPetState = { position: { x: number; y: number }; bounds: { x: number; y: number; width: number; height: number }; currentAnimation: string; visible: boolean; dragging: boolean };
 export type PluginAnimationSpec = { kind: "reaction"; reaction: OpenPetsReaction } | { kind: "sprite"; spritePath: string; loop: boolean; fps: number };
+export type PluginReactOptions = { showMessage?: boolean };
 export type PluginPickedFileHost = { fileId: string; name: string; sizeBytes: number };
 export type PluginAiRequest = { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }>; maxTokens?: number; temperature?: number; tools?: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }> };
 export type PluginAiResult = { text: string; toolCalls?: Array<{ name: string; input: Record<string, unknown> }> };
@@ -135,7 +136,7 @@ export interface PluginHostCapabilities {
     close(pluginId: string, petHandleId: string): Promise<void>;
     show(petHandleId: string): Promise<void>;
     hide(petHandleId: string): Promise<void>;
-    react(petHandleId: string, reaction: OpenPetsReaction): Promise<void>;
+    react(petHandleId: string, reaction: OpenPetsReaction, options?: PluginReactOptions): Promise<void>;
     setAnimation(petHandleId: string, spec: PluginAnimationSpec): Promise<void>;
     setScale(petHandleId: string, scale: number): Promise<void>;
     setStatusReaction(petHandleId: string, reaction: OpenPetsReaction | null): Promise<void>;
@@ -226,7 +227,7 @@ export function createDefaultPluginHostCapabilities(petApi: PluginPetApi): Plugi
       close: unavailable("pets.close"),
       show: async () => undefined,
       hide: async () => undefined,
-      react: async (_petId, reaction) => { await petApi.react(reaction); },
+      react: async (_petId, reaction, options) => { await petApi.react(reaction, options); },
       setAnimation: async (_petId, spec) => { if (spec.kind === "reaction") await petApi.react(spec.reaction); },
       setScale: async () => undefined,
       setStatusReaction: async () => undefined,
@@ -462,11 +463,12 @@ export class PluginSdkBridge {
 
     const petNamespace = (petHandleId: string) => ({
       speak: (spec: unknown) => ui.showBubble(petHandleId, spec),
-      react: async (reaction: OpenPetsReaction) => {
+      react: async (reaction: OpenPetsReaction, options?: unknown) => {
         requirePermission("pet:reaction");
         state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
-        if (petHandleId === "default") await this.#petApi.react(validateReaction(reaction));
-        else await caps.pets.react(validatePetHandleId(petHandleId), validateReaction(reaction));
+        const opts = validateReactOptions(options);
+        if (petHandleId === "default") await this.#petApi.react(validateReaction(reaction), opts);
+        else await caps.pets.react(validatePetHandleId(petHandleId), validateReaction(reaction), opts);
       },
       setAnimation: async (animation: unknown) => {
         state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
@@ -927,6 +929,7 @@ function clampNumber(value: number, min: number, max: number): number { if (!Num
 function validateCssColor(value: unknown, message: string): string { const color = String(value).trim(); check(color.length <= 48 && safeCssColorPattern.test(color), message); return color; }
 function validateStorageKey(key: string): string { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(String(key))) throw new Error("Invalid plugin storage key."); return String(key); }
 function validatePetHandleId(value: unknown): string { const id = String(value); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id)) throw new Error("Invalid pet handle id."); return id; }
+function validateReactOptions(value: unknown): PluginReactOptions | undefined { if (value === undefined) return undefined; if (!isRecord(value)) throw new Error("Invalid pet reaction options."); const keys = Object.keys(value); check(keys.every((key) => key === "showMessage"), "Invalid pet reaction option."); if (value.showMessage !== undefined && typeof value.showMessage !== "boolean") throw new Error("Invalid pet reaction showMessage option."); return value.showMessage === undefined ? {} : { showMessage: value.showMessage }; }
 function validatePoint(value: unknown): { x: number; y: number } { if (!isRecord(value)) throw new Error("Invalid point."); const x = Number(value.x); const y = Number(value.y); if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Invalid point."); return { x, y }; }
 function validateMoveToOptions(value: unknown): { durationMs?: number; easing?: string } { const opts = isRecord(value) ? value : {}; const durationMs = opts.durationMs === undefined ? undefined : clampNumber(Number(opts.durationMs), 100, 10_000); const easing = opts.easing === undefined ? undefined : (check(["linear", "ease-in", "ease-out", "ease-in-out"].includes(String(opts.easing)), "Invalid easing."), String(opts.easing)); return { durationMs, easing }; }
 

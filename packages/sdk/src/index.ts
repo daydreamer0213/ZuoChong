@@ -448,13 +448,18 @@ export interface OpenPetsPetInfo {
   visible: boolean;
 }
 
+export interface OpenPetsReactOptions {
+  /** Set false to animate without showing the built-in reaction/status message. */
+  showMessage?: boolean;
+}
+
 /** Addressable handle to a single pet. */
 export interface OpenPetsPetHandle {
   readonly id: string;
   /** Requires `pet:speak`. Accepts plain text or a full bubble descriptor. */
   speak(spec: string | OpenPetsBubble): Promise<OpenPetsBubbleHandle>;
   /** Requires `pet:reaction`. */
-  react(reaction: OpenPetsReaction): Promise<void>;
+  react(reaction: OpenPetsReaction, options?: OpenPetsReactOptions): Promise<void>;
   /** Requires `pet:animate` for sprite states; named reactions need `pet:reaction`. */
   setAnimation(state: OpenPetsAnimationState): Promise<void>;
   /** Bounded by the host (0.5–2). Requires `pet:animate`. */

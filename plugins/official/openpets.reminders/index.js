@@ -234,16 +234,6 @@ export function register(OpenPetsPlugin) {
 
       await ctx.commands.register(
         {
-          id: "test-reminder",
-          title: "$t:command.testReminder.title",
-          description: "$t:command.testReminder.description",
-          icon: "bell",
-        },
-        () => deliver(ctx, ctx.t("reminder.testMessage")),
-      );
-
-      await ctx.commands.register(
-        {
           id: "set-reminder",
           title: "$t:command.setReminder.title",
           description: "$t:command.setReminder.description",
@@ -316,6 +306,16 @@ export function register(OpenPetsPlugin) {
           icon: "bell",
         },
         () => showReminderList(ctx),
+      );
+
+      await ctx.commands.register(
+        {
+          id: "test-reminder",
+          title: "$t:command.testReminder.title",
+          description: "$t:command.testReminder.description",
+          icon: "bell",
+        },
+        () => deliver(ctx, ctx.t("reminder.testMessage")),
       );
 
       await ctx.commands.register(

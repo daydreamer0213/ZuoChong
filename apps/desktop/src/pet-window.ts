@@ -56,6 +56,7 @@ export interface PetTransientDisplay {
   readonly reaction?: OpenPetsReaction;
   readonly message?: string;
   readonly reactionMessage?: string;
+  readonly suppressReactionMessage?: boolean;
   readonly dismissToken?: string;
 }
 
@@ -170,15 +171,17 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
 async function openPluginCommandForm(command: { readonly pluginId: string; readonly commandId: string; readonly commandTitle: string; readonly form?: PluginCommandForm }): Promise<void> {
   if (!command.form) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) ?? screen.getPrimaryDisplay();
-  const width = 380;
-  const height = Math.min(420, 150 + command.form.fields.length * 72);
+  const maxWidth = Math.max(420, display.workArea.width - 48);
+  const maxHeight = Math.max(360, display.workArea.height - 48);
+  const width = Math.min(620, maxWidth);
+  const height = Math.min(Math.max(380, estimatePluginCommandFormHeight(command.form)), maxHeight);
   const window = new BrowserWindow({
     title: command.commandTitle,
     width,
     height,
     x: Math.round(display.workArea.x + (display.workArea.width - width) / 2),
     y: Math.round(display.workArea.y + (display.workArea.height - height) / 2),
-    resizable: false,
+    resizable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -191,21 +194,47 @@ async function openPluginCommandForm(command: { readonly pluginId: string; reado
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   const token = `plugin-command-form-${window.id}`;
+  const resizeToken = `plugin-command-form-resize-${window.id}`;
   ipcMain.handle(token, async (event, values: unknown) => {
     if (event.sender !== window.webContents) throw new Error("Invalid command form sender.");
     const result = await executeDefaultPetPluginCommand(command.pluginId, command.commandId, isRecord(values) ? values : {});
     if (!window.isDestroyed()) window.close();
     return result;
   });
-  window.once("closed", () => ipcMain.removeHandler(token));
-  await window.loadURL(buildPluginCommandFormUrl(command.commandTitle, command.form, token));
+  ipcMain.on(resizeToken, (event, size: unknown) => {
+    if (event.sender !== window.webContents || window.isDestroyed() || !isRecord(size)) return;
+    const nextWidth = clampNumber(Number(size.width), 420, maxWidth);
+    const nextHeight = clampNumber(Number(size.height), 260, maxHeight);
+    const [currentWidth, currentHeight] = window.getContentSize();
+    if (Math.abs(currentWidth - nextWidth) < 8 && Math.abs(currentHeight - nextHeight) < 8) return;
+    window.setContentSize(Math.round(nextWidth), Math.round(nextHeight));
+    const bounds = window.getBounds();
+    const nextX = Math.min(Math.max(bounds.x, display.workArea.x), display.workArea.x + display.workArea.width - bounds.width);
+    const nextY = Math.min(Math.max(bounds.y, display.workArea.y), display.workArea.y + display.workArea.height - bounds.height);
+    if (nextX !== bounds.x || nextY !== bounds.y) window.setPosition(Math.round(nextX), Math.round(nextY));
+  });
+  window.once("closed", () => {
+    ipcMain.removeHandler(token);
+    ipcMain.removeAllListeners(resizeToken);
+  });
+  await window.loadURL(buildPluginCommandFormUrl(command.commandTitle, command.form, token, resizeToken));
   window.show();
 }
 
-function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, channel: string): string {
+function estimatePluginCommandFormHeight(form: PluginCommandForm): number {
+  const fieldHeight = form.fields.reduce((total, field) => total + (field.type === "textarea" || field.type === "list" ? 170 : field.type === "boolean" ? 76 : 100), 0);
+  return 170 + fieldHeight;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, channel: string, resizeChannel: string): string {
   const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'";
-  const data = JSON.stringify({ title, form, channel }).replace(/</g, "\\u003c");
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>body{margin:0;font:13px system-ui,"Hiragino Sans","Yu Gothic","Malgun Gothic","Apple SD Gothic Neo","PingFang SC","PingFang TC","Microsoft YaHei","Microsoft JhengHei","Noto Sans CJK JP","Noto Sans CJK KR","Noto Sans CJK SC","Noto Sans CJK TC",sans-serif;background:#fff;color:#161616}.wrap{padding:18px}h1{font-size:16px;margin:0 0 14px}label{display:block;font-weight:600;margin:10px 0 5px}input,textarea{box-sizing:border-box;width:100%;border:1px solid #bbb;border-radius:8px;padding:8px;font:inherit}textarea{min-height:74px;resize:vertical}.error{color:#b00020;min-height:18px;margin-top:8px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}button{border:0;border-radius:8px;padding:8px 12px;font:inherit}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">${escapeHtml(t("common.cancel"))}</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';for(const f of data.form.fields){const box=document.createElement('div');const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input=f.type==='textarea'?document.createElement('textarea'):document.createElement('input');input.id=f.id;input.name=f.id;if(f.type==='number')input.type='number';else input.type='text';if(f.default!==undefined)input.value=f.default;if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;box.append(label,input);fields.append(box);}document.getElementById('cancel').onclick=()=>api.close();window.addEventListener('keydown',e=>{if(e.key==='Escape')api.close()});form.onsubmit=async e=>{e.preventDefault();err.textContent='';const values={};for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=f.type==='number'?Number(el.value):String(el.value||'').trim();}try{await api.submit(data.channel,values)}catch(error){err.textContent=(error&&error.message)||'Command failed.'}};</script></body></html>`;
+  const data = JSON.stringify({ title, form, channel, resizeChannel }).replace(/</g, "\\u003c");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}html,body{margin:0;min-width:0}body{font:14px system-ui,"Hiragino Sans","Yu Gothic","Malgun Gothic","Apple SD Gothic Neo","PingFang SC","PingFang TC","Microsoft YaHei","Microsoft JhengHei","Noto Sans CJK JP","Noto Sans CJK KR","Noto Sans CJK SC","Noto Sans CJK TC",sans-serif;background:#fff;color:#161616;overflow:hidden}.wrap{padding:24px}h1{font-size:20px;line-height:1.2;margin:0 0 18px}.field{margin-top:14px}label{display:block;font-weight:700;margin:0 0 7px}.hint{display:block;color:#64748b;font-size:12px;line-height:1.35;margin-top:5px}input,textarea,select{width:100%;border:1px solid #aeb8c8;border-radius:10px;padding:11px 12px;font:inherit;outline:none;background:white;color:#161616}input:focus,textarea:focus,select:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.16)}textarea{min-height:148px;resize:vertical}.check{display:flex;align-items:center;gap:10px;font-weight:700}.check input{width:auto}.error{color:#b00020;min-height:20px;margin-top:10px}.buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}button{border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:700}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">${escapeHtml(t("common.cancel"))}</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';const values={};function resize(){requestAnimationFrame(()=>{const root=document.documentElement;api.resize(data.resizeChannel,{width:Math.ceil(Math.max(root.scrollWidth,document.body.scrollWidth)+2),height:Math.ceil(Math.max(root.scrollHeight,document.body.scrollHeight)+2)});});}function addOption(select,option){const el=document.createElement('option');el.value=option.value;el.textContent=option.label||option.value;select.appendChild(el);}for(const f of data.form.fields){const box=document.createElement('div');box.className='field';const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input;if(f.type==='textarea'){input=document.createElement('textarea');}else if(f.type==='select'){input=document.createElement('select');for(const option of f.options||[])addOption(input,option);}else if(f.type==='boolean'){label.className='check';input=document.createElement('input');input.type='checkbox';label.prepend(input);}else{input=document.createElement('input');if(f.type==='number')input.type='number';else if(f.type==='time')input.type='time';else if(f.type==='date')input.type='date';else input.type='text';}input.id=f.id;input.name=f.id;if(f.default!==undefined){if(input.type==='checkbox')input.checked=Boolean(f.default);else input.value=f.default;}if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;if(f.type==='boolean'){box.append(label);}else{box.append(label,input);}fields.append(box);input.addEventListener('input',resize);}new ResizeObserver(resize).observe(document.body);resize();form.addEventListener('submit',async(event)=>{event.preventDefault();err.textContent='';for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=el.type==='number'?Number(el.value):el.type==='checkbox'?Boolean(el.checked):el.value;}try{await api.submit(data.channel,values);}catch(error){err.textContent=String(error&&error.message||error);resize();}});document.getElementById('cancel').addEventListener('click',()=>api.close());</script></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -609,6 +638,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
 }
 
 export function preparePetTransientDisplay(display: PetTransientDisplay): PetTransientDisplay {
+  if (display.suppressReactionMessage) return display;
   if (!display.reaction || display.message || display.reactionMessage) return display;
   return { ...display, reactionMessage: pickReactionMessage(display.reaction, Math.random, getActiveLocale()) };
 }
@@ -1111,8 +1141,9 @@ export function pluginBubblesCacheKey(pluginBubbles: PetPluginBubbles | null): s
 
 function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): string {
   if (pluginBubbles?.transient) return createPluginBubbleMarkup(pluginBubbles.transient, false);
-  const text = display?.message ?? display?.reactionMessage ?? (display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
-  const status = !paused && badgeReaction ? getStatusBadge(badgeReaction) : null;
+  const suppressReactionMessage = display?.suppressReactionMessage === true;
+  const text = display?.message ?? display?.reactionMessage ?? (!suppressReactionMessage && display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
+  const status = !paused && !suppressReactionMessage && badgeReaction ? getStatusBadge(badgeReaction) : null;
   if (!text && !status) return "";
   const isExplicitMessage = Boolean(display?.message && !display?.reactionMessage);
   const className = getBubbleClassName(text, isExplicitMessage, status?.className);

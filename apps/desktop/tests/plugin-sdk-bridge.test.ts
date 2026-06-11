@@ -84,6 +84,12 @@ await scenario("commands accept declared icon asset refs and reject raw svg stri
   );
 });
 
+await scenario("pet.react validates silent reaction options", async ({ api }) => {
+  await api.pet.react("waving", { showMessage: false });
+  await assert.rejects(() => api.pet.react("waving", { showMessage: "no" }), /Invalid pet reaction showMessage option\./);
+  await assert.rejects(() => api.pet.react("waving", { showMessage: false, extra: true }), /Invalid pet reaction option\./);
+});
+
 type ScenarioContext = {
   api: ReturnType<PluginSdkBridge["createApi"]>;
   bridge: PluginSdkBridge;
@@ -106,7 +112,7 @@ async function scenario(name: string, run: (context: ScenarioContext) => Promise
       runtime: "javascript",
       sdkVersion: "3.0.0",
       enabled: true,
-      approvedPermissions: ["commands", "events", "storage"],
+      approvedPermissions: ["commands", "events", "storage", "pet:reaction"],
       config: {},
     };
     store.upsertRecord(record);
