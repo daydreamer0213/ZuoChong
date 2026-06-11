@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 @layer base {
-  body { margin:0; min-height:100vh; overflow:hidden; color:#102149; background: radial-gradient(circle at 12% 8%, rgba(219, 234, 254, 0.9), transparent 24%), linear-gradient(180deg, #f8fbff 0%, #eff7ff 54%, #e9f3ff 100%); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { margin:0; min-height:100vh; overflow:hidden; color:#102149; background: radial-gradient(circle at 12% 8%, rgba(219, 234, 254, 0.9), transparent 24%), linear-gradient(180deg, #f8fbff 0%, #eff7ff 54%, #e9f3ff 100%); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; -webkit-font-smoothing: antialiased; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(96, 165, 250, 0.25); border-radius: 100px; }
@@ -142,21 +142,21 @@
   .plugins-layout { @apply relative flex min-h-0 flex-1; }
   .plugins-hub { @apply flex min-h-0 flex-col overflow-hidden; }
   .plugins-layout .plugins-hub { @apply w-full; }
-  .plugin-grid { @apply grid min-h-0 flex-1 grid-cols-2 gap-4 overflow-y-auto p-1.5 pr-2.5 pb-3 max-[850px]:grid-cols-1; overscroll-behavior: contain; }
-  .plugin-card { @apply flex w-full flex-col rounded-[24px] border border-slate-200 bg-white/80 p-0 text-left shadow-sm transition-[border-color,background-color,box-shadow]; }
+  .plugin-grid { @apply grid min-h-0 flex-1 grid-cols-2 items-start content-start gap-3.5 overflow-y-auto p-1.5 pr-2.5 pb-3 max-[850px]:grid-cols-1; grid-auto-rows: max-content; overscroll-behavior: contain; }
+  .plugin-card { @apply flex w-full flex-col rounded-2xl border border-slate-200 bg-white/80 p-0 text-left shadow-sm transition-[border-color,background-color,box-shadow]; }
   .plugin-card:hover { @apply border-brand/40 bg-white; }
   .plugin-card.broken { @apply border-red-200 bg-red-50/60; }
 
-  .plugin-card-body { @apply flex items-start gap-4 p-4; }
-  .plugin-card-icon { @apply grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-blue-100/60 bg-gradient-to-br from-white to-blue-100 text-brand shadow-sm; }
-  .plugin-card-icon .plugin-glyph { @apply h-7 w-7; }
+  .plugin-card-body { @apply flex items-start gap-3 p-3; }
+  .plugin-card-icon { @apply grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-blue-100/60 bg-gradient-to-br from-white to-blue-100 text-brand shadow-sm; }
+  .plugin-card-icon .plugin-glyph { @apply h-6 w-6; }
   .plugin-glyph { @apply h-7 w-7 stroke-[2.5]; }
 
-  .plugin-card-content { @apply flex min-w-0 flex-1 flex-col gap-1; }
-  .plugin-card-content strong { @apply truncate text-base font-black text-navy tracking-tight; }
-  .plugin-card-content small { @apply line-clamp-2 text-xs leading-relaxed text-slatecopy; }
+  .plugin-card-content { @apply flex min-w-0 flex-1 flex-col gap-0.5; }
+  .plugin-card-content strong { @apply truncate text-[15px] font-bold text-navy tracking-tight; }
+  .plugin-card-content small { @apply line-clamp-2 text-xs leading-snug text-slatecopy; }
 
-  .plugin-card-footer { @apply flex items-center justify-between border-t border-blue-50/50 bg-blue-50/10 px-4 py-3 rounded-b-[24px]; }
+  .plugin-card-footer { @apply flex items-center justify-between border-t border-blue-50/50 bg-blue-50/10 px-3 py-2 rounded-b-2xl; }
   .plugin-card-meta { @apply flex items-center gap-2; }
 
   .plugin-card-actions { @apply flex items-center gap-3; }
@@ -214,18 +214,20 @@
   .plugin-list-item { @apply flex flex-col gap-3 rounded-2xl border border-blue-100/70 bg-blue-50/25 p-3; }
   .plugin-list-item-header { @apply flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slatecopy; }
   .plugin-command-list { @apply flex flex-wrap gap-2; }
+  .plugin-command-form-panel { @apply flex flex-col gap-3 rounded-2xl border border-blue-100/50 bg-blue-50/15 p-3; }
+  .plugin-command-form { @apply grid gap-2; }
   .plugin-actions-section { @apply grid grid-cols-3 gap-2; }
   .plugin-actions-section .btn-secondary { @apply bg-blue-50/70; }
   .plugin-actions-section .btn-primary { @apply min-w-[96px]; }
   .plugin-actions-section .btn-danger { @apply min-w-[112px]; }
   @media (max-width: 900px) { .plugins-layout, .plugins-hub, .plugin-grid { @apply overflow-visible; } .plugin-actions-section { @apply grid-cols-1; } }
 
-  .integration-grid { @apply grid grid-cols-2 gap-4 max-[850px]:grid-cols-1; }
-  .integration-card { @apply flex min-h-[190px] flex-col justify-between rounded-3xl border border-blue-100/70 bg-white/70 p-4 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] active:scale-[0.96]; }
+  .integration-grid { @apply grid grid-cols-2 gap-3.5 max-[850px]:grid-cols-1; }
+  .integration-card { @apply flex min-h-[138px] flex-col justify-between rounded-2xl border border-blue-100/70 bg-white/70 p-0 text-left shadow-sm transition-[transform,border-color,background-color,box-shadow] active:scale-[0.96]; }
   .integration-card:hover { @apply border-brand/45 bg-white/90 shadow-md; }
-  .integration-icon { @apply grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
-  .integration-logo { @apply h-9 w-9 object-contain; }
-  .integration-icon svg { @apply w-8 h-8; }
+  .integration-icon { @apply grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-blue-100/70 bg-blue-50/70 text-brand shadow-sm; }
+  .integration-logo { @apply h-8 w-8 object-contain; }
+  .integration-icon svg { @apply w-6 h-6; }
 
   /* Dashboard */
   .dashboard-layout { @apply flex flex-col gap-6 overflow-y-auto pr-2 pb-8 h-full; overscroll-behavior: contain; }

@@ -1,13 +1,15 @@
 import { existsSync, mkdirSync, promises as fs } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 
 import { getCatalogPlugin, getPluginCatalog, type PluginCatalogOptions } from "./plugin-catalog.js";
 import type { PluginCatalogEntryV2 } from "./plugin-catalog-validation.js";
 import { getEffectivePluginConfig, validatePluginConfigReplacement, type PluginConfigValidationError, type PluginConfig } from "./plugin-config.js";
 import { publishLocalPluginSnapshot, readLocalPluginSourceManifest } from "./plugin-local-loader.js";
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
+import type { OpenDialogOptions } from "electron";
 import type { PluginJsHost } from "./plugin-js-host.js";
-import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginIcon, type PluginPermission } from "./plugin-manifest.js";
+import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginConfigField, type PluginIcon, type PluginPermission } from "./plugin-manifest.js";
+import { ensureLoaded as ensurePluginLocales, resolvePluginText } from "./plugin-i18n.js";
 import { downloadCatalogPluginZip, installCatalogPluginPackage, readCatalogPluginManifestFromZip, resolveSafePluginInstallDir } from "./plugin-package.js";
 import type { PluginPetApi } from "./plugin-pet-api.js";
 import { JsonPluginStorageStore, type PluginCommand, type PluginHostCapabilities, type PluginLogLevel, type PluginStatus } from "./plugin-sdk-bridge.js";
@@ -41,8 +43,9 @@ export type PluginServiceSnapshot = { readonly plugins: readonly SafePluginRecor
 export type SafeCatalogPluginRecord = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative" | "javascript"; readonly icon?: PluginIcon; readonly sdkVersion?: string; readonly permissions: readonly PluginPermission[]; readonly installed: boolean; readonly bundled?: boolean; readonly deprecated?: boolean; readonly statusReason?: string };
 export type PluginCatalogSnapshot = { readonly plugins: readonly SafeCatalogPluginRecord[] };
 export type PluginServiceResult = { readonly ok: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
+export type PluginConfigSoundPickResult = { readonly ok: true; readonly sound: { readonly kind: "user-sound"; readonly id: string; readonly name?: string }; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type DevPluginLoadResult = { readonly path: string; readonly id?: string; readonly ok: true } | { readonly path: string; readonly ok: false; readonly error: string };
-export type PluginFolderDialog = () => Promise<{ readonly canceled: boolean; readonly filePaths: readonly string[] }>;
+export type PluginFolderDialog = (options?: unknown) => Promise<{ readonly canceled: boolean; readonly filePaths: readonly string[] }>;
 export type PluginPermissionDialog = (manifest: OpenPetsPluginManifest) => Promise<boolean>;
 
 export type PluginServiceOptions = {
@@ -55,6 +58,7 @@ export type PluginServiceOptions = {
   readonly allowedPluginRoots?: readonly string[];
   readonly maxManifestBytes?: number;
   readonly showOpenDialog?: PluginFolderDialog;
+  readonly showSoundOpenDialog?: PluginFolderDialog;
   readonly confirmPermissions?: PluginPermissionDialog;
   readonly catalogOptions?: PluginCatalogOptions;
   readonly fetchImpl?: typeof fetch;
@@ -66,9 +70,9 @@ export type PluginServiceOptions = {
   readonly capabilities?: PluginHostCapabilities;
 };
 
-export const bundledOfficialPluginIds = ["openpets.ambient-companion", "openpets.break-buddy", "openpets.pet-pal", "openpets.focus-buddy", "openpets.wander-buddy", "openpets.quick-reminders", "openpets.github-notifications"] as const;
-const bundledEnabledByDefault = new Set<string>(["openpets.ambient-companion", "openpets.break-buddy", "openpets.pet-pal", "openpets.focus-buddy", "openpets.wander-buddy", "openpets.quick-reminders"]);
-const staleBundledPluginIds = ["openpets.daily-reminders", "openpets.pomodoro"] as const;
+export const bundledOfficialPluginIds = ["openpets.reminders"] as const;
+const bundledEnabledByDefault = new Set<string>(["openpets.reminders"]);
+const staleBundledPluginIds = ["openpets.daily-reminders", "openpets.pomodoro", "openpets.ambient-companion", "openpets.break-buddy", "openpets.focus-buddy", "openpets.github-notifications", "openpets.pet-pal", "openpets.quick-reminders", "openpets.wander-buddy"] as const;
 
 export class PluginService {
   readonly stateStore: PluginStateStore;
@@ -77,6 +81,7 @@ export class PluginService {
   readonly #maxManifestBytes?: number;
   readonly #userDataPath?: string;
   readonly #showOpenDialog?: PluginFolderDialog;
+  readonly #showSoundOpenDialog?: PluginFolderDialog;
   readonly #confirmPermissions?: PluginPermissionDialog;
   readonly #catalogOptions?: PluginCatalogOptions;
   readonly #fetchImpl?: typeof fetch;
@@ -84,6 +89,7 @@ export class PluginService {
   readonly #disableCatalog: boolean;
   readonly #seedBundledPlugins: boolean;
   readonly #bundledPluginSourceDirs: readonly string[];
+  readonly #capabilities?: PluginHostCapabilities;
 
   constructor(options: PluginServiceOptions) {
     if (!options.stateStore && !options.userDataPath) throw new Error("Plugin service requires userDataPath or stateStore.");
@@ -91,6 +97,7 @@ export class PluginService {
     this.allowedPluginRoots = options.allowedPluginRoots ?? [join(options.userDataPath ?? "", "plugins"), join(options.userDataPath ?? "", "plugins-dev")];
     this.#userDataPath = options.userDataPath;
     this.#showOpenDialog = options.showOpenDialog;
+    this.#showSoundOpenDialog = options.showSoundOpenDialog;
     this.#confirmPermissions = options.confirmPermissions;
     this.#catalogOptions = options.catalogOptions;
     this.#fetchImpl = options.fetchImpl;
@@ -98,6 +105,7 @@ export class PluginService {
     this.#disableCatalog = options.disableCatalog === true;
     this.#seedBundledPlugins = options.seedBundledPlugins !== false;
     this.#bundledPluginSourceDirs = options.bundledPluginSourceDirs ?? [];
+    this.#capabilities = options.capabilities;
     this.stateStore = options.stateStore ?? new PluginStateStore({ userDataPath: options.userDataPath ?? "" });
     if (options.runtime) {
       this.runtime = options.runtime;
@@ -111,11 +119,14 @@ export class PluginService {
   async start(): Promise<void> {
     this.#ensureRoots();
     this.stateStore.initialize();
+    // Always purge retired ids — even in dev mode (where seeding is off) — so
+    // a previously-seeded plugin that was removed from the lineup disappears.
     if (this.#seedBundledPlugins) await this.seedBundledPlugins();
+    else await this.#pruneStaleBundledPlugins();
     await this.runtime.start();
   }
 
-  async seedBundledPlugins(): Promise<void> {
+  async #pruneStaleBundledPlugins(): Promise<void> {
     if (!this.#userDataPath) return;
     for (const id of staleBundledPluginIds) {
       const stale = this.stateStore.getRecord(id);
@@ -123,12 +134,19 @@ export class PluginService {
         try {
           const safeInstall = await resolveSafePluginInstallDir(this.#userDataPath, id, stale.installPath, stale.source);
           this.stateStore.removeRecord(id);
+          this.#capabilities?.clearPlugin?.(id);
+          await fs.rm(join(this.#userDataPath, "plugin-user-sounds", id), { recursive: true, force: true }).catch(() => undefined);
           await fs.rm(safeInstall, { recursive: true, force: true });
         } catch (error) {
           this.#log("warn", "Refused to prune stale bundled plugin.", { pluginId: id, reason: safeError(error) });
         }
       }
     }
+  }
+
+  async seedBundledPlugins(): Promise<void> {
+    if (!this.#userDataPath) return;
+    await this.#pruneStaleBundledPlugins();
     for (const id of bundledOfficialPluginIds) {
       const sourceFolder = this.#findBundledSourceFolder(id);
       if (!sourceFolder) continue;
@@ -181,11 +199,37 @@ export class PluginService {
     return { ok: true, snapshot: await this.getSnapshot() };
   }
 
+  async pickConfigSound(id: string): Promise<PluginConfigSoundPickResult> {
+    this.#log("debug", "Plugin config sound pick requested.", { pluginId: id });
+    const record = this.stateStore.getRecord(id);
+    if (!record) { this.#log("warn", "Plugin config sound pick unavailable.", { pluginId: id, reason: "not-installed" }); return this.#soundError("Plugin is not installed."); }
+    let manifest: OpenPetsPluginManifest;
+    try { manifest = await this.#readManifest(record); }
+    catch { this.#log("warn", "Plugin config sound pick unavailable.", { pluginId: id, reason: "manifest-unavailable" }); return this.#soundError("Plugin manifest is unavailable."); }
+    if (!Object.values(manifest.configSchema ?? {}).some((field) => field.type === "sound")) { this.#log("warn", "Plugin config sound pick unavailable.", { pluginId: id, reason: "no-sound-field" }); return this.#soundError("Plugin does not declare a sound config field."); }
+    const importer = this.#capabilities?.audio.importUserSoundFromPath;
+    if (!importer) { this.#log("warn", "Plugin config sound pick unavailable.", { pluginId: id, reason: "importer-unavailable" }); return this.#soundError("Plugin sound import is unavailable."); }
+    const picker = this.#showSoundOpenDialog ?? this.#showOpenDialog ?? defaultSoundOpenDialog;
+    this.#log("debug", "Plugin config sound picker opened.", { pluginId: id });
+    const selection = await picker({ properties: ["openFile"], filters: [{ name: "Audio", extensions: ["ogg", "mp3", "wav"] }] });
+    if (selection.canceled || selection.filePaths.length === 0) { this.#log("debug", "Plugin config sound pick canceled.", { pluginId: id, canceled: true }); return { ok: true, sound: { kind: "user-sound", id: "" }, snapshot: await this.getSnapshot() }; }
+    const selectedPath = selection.filePaths[0] ?? "";
+    const selectedFields: Record<string, unknown> = { pluginId: id, basename: basename(selectedPath), ext: extname(selectedPath).toLowerCase() };
+    try { selectedFields.sizeBytes = (await fs.stat(selectedPath)).size; } catch { selectedFields.reason = "stat-unavailable"; }
+    this.#log("debug", "Plugin config sound file selected.", selectedFields);
+    try {
+      const sound = await importer(record.id, selectedPath);
+      this.#log("info", "Plugin config sound import succeeded.", { pluginId: id, soundId: sound.id, name: sound.name });
+      return { ok: true, sound, snapshot: await this.getSnapshot() };
+    } catch (error) { const reason = safeSoundError(error); this.#log("warn", "Plugin config sound import failed.", { pluginId: id, reason }); return this.#soundError(reason); }
+  }
+
   async executeCommand(id: string, commandId: string, args?: Record<string, unknown>): Promise<PluginServiceResult> {
     const record = this.stateStore.getRecord(id);
     if (!record) return this.#error("Plugin is not installed.");
+    await ensurePluginLocales(id, record.installPath).catch(() => undefined);
     try { await this.runtime.executeCommand(id, commandId, args); }
-    catch (error) { return this.#error(safeError(error)); }
+    catch (error) { return this.#error(safeCommandError(error, id)); }
     return { ok: true, snapshot: await this.getSnapshot() };
   }
 
@@ -220,7 +264,7 @@ export class PluginService {
     catch (error) { return this.#error(safeError(error)); }
     this.stateStore.removeRecord(id);
     await this.runtime.reloadPlugin(id);
-    try { await fs.rm(realInstall, { recursive: true, force: true }); await fs.rm(join(this.#userDataPath, "plugin-storage", `${id}.json`), { force: true }); }
+    try { this.#capabilities?.clearPlugin?.(id); await fs.rm(join(this.#userDataPath, "plugin-user-sounds", id), { recursive: true, force: true }); await fs.rm(realInstall, { recursive: true, force: true }); await fs.rm(join(this.#userDataPath, "plugin-storage", `${id}.json`), { force: true }); }
     catch (error) { return this.#error(safeError(error)); }
     return { ok: true, snapshot: await this.getSnapshot() };
   }
@@ -252,7 +296,7 @@ export class PluginService {
     }
     let loaded: Awaited<ReturnType<typeof publishLocalPluginSnapshot>>;
     try {
-      loaded = await publishLocalPluginSnapshot({ manifest: source.manifest, manifestText: source.manifestText, entryText: source.entryText, userDataPath: this.#userDataPath, maxManifestBytes: this.#maxManifestBytes });
+      loaded = await publishLocalPluginSnapshot({ manifest: source.manifest, manifestText: source.manifestText, entryText: source.entryText, declaredFiles: source.declaredFiles, userDataPath: this.#userDataPath, maxManifestBytes: this.#maxManifestBytes });
     } catch (error) {
       return this.#error(safeError(error));
     }
@@ -320,6 +364,8 @@ export class PluginService {
       if (!isDevRecord) continue;
       this.stateStore.removeRecord(record.id);
       await this.runtime.reloadPlugin(record.id);
+      this.#capabilities?.clearPlugin?.(record.id);
+      await fs.rm(join(this.#userDataPath, "plugin-user-sounds", record.id), { recursive: true, force: true }).catch(() => undefined);
       await fs.rm(record.installPath, { recursive: true, force: true }).catch(() => undefined);
       await fs.rm(join(this.#userDataPath, "plugin-storage", `${record.id}.json`), { force: true }).catch(() => undefined);
     }
@@ -367,7 +413,8 @@ export class PluginService {
       const manifest = await this.#readManifest(record);
       const config = getEffectivePluginConfig(manifest, record.config);
       const runtimeState = typeof (this.runtime as unknown as { getPluginState?: unknown }).getPluginState === "function" ? this.runtime.getPluginState(record.id) : { commands: [] };
-      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: manifest.name, description: manifest.description, icon: manifest.icon, configSchema: manifest.configSchema, effectiveConfig: config.ok ? config.config : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands, status: runtimeState.status };
+      await ensurePluginLocales(record.id, record.installPath).catch(() => undefined);
+      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: resolvePluginText(record.id, manifest.name) ?? manifest.name, description: resolvePluginText(record.id, manifest.description), icon: manifest.icon, configSchema: resolveConfigSchemaText(record.id, manifest.configSchema), effectiveConfig: config.ok ? config.config : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands.map((command) => resolveCommandText(record.id, command)), status: runtimeState.status };
     } catch (error) {
       return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason) ?? safeError(error) };
     }
@@ -386,6 +433,10 @@ export class PluginService {
   }
 
   async #error(error: string): Promise<PluginServiceResult> {
+    return { ok: false, error, snapshot: await this.getSnapshot() };
+  }
+
+  async #soundError(error: string): Promise<PluginConfigSoundPickResult> {
     return { ok: false, error, snapshot: await this.getSnapshot() };
   }
 
@@ -450,12 +501,36 @@ export function initializePluginService(userDataPath: string, petApi: PluginPetA
 export type PluginCommandMenuItem = { readonly pluginId: string; readonly pluginName: string; readonly commandId: string; readonly commandTitle: string; readonly form?: PluginCommand["form"]; readonly placement?: "top" | "submenu"; readonly priority?: number; readonly featured?: boolean };
 export type PluginDynamicMenuItem = { readonly pluginId: string; readonly pluginName: string; readonly itemId: string; readonly title: string; readonly enabled?: boolean; readonly checked?: boolean };
 
+/** Resolve `$t:` references in a command form's field labels and submit label against the owning plugin's catalogs. */
+function resolveCommandFormText(pluginId: string, form: PluginCommand["form"]): PluginCommand["form"] {
+  if (!form) return form;
+  return {
+    ...form,
+    submitLabel: resolvePluginText(pluginId, form.submitLabel),
+    fields: form.fields.map((field) => ({
+      ...field,
+      label: resolvePluginText(pluginId, field.label) ?? field.label,
+      options: field.options?.map((option) => ({ ...option, label: resolvePluginText(pluginId, option.label) ?? option.label })),
+    })),
+  };
+}
+
+/** Resolve `$t:` references in command titles/descriptions/forms for Control Center snapshots and pet menus. */
+function resolveCommandText(pluginId: string, command: PluginCommand): PluginCommand {
+  return {
+    ...command,
+    title: resolvePluginText(pluginId, command.title) ?? command.title,
+    description: resolvePluginText(pluginId, command.description),
+    form: resolveCommandFormText(pluginId, command.form),
+  };
+}
+
 export async function getDefaultPetPluginCommands(maxPlugins = 8, maxCommandsPerPlugin = 8): Promise<PluginCommandMenuItem[]> {
   if (!appPluginService) return [];
   const snapshot = await appPluginService.getSnapshot();
   return snapshot.plugins.filter((plugin) => plugin.enabled && !plugin.brokenReason && plugin.commands && plugin.commands.length > 0)
     .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id) || a.id.localeCompare(b.id)).slice(0, maxPlugins)
-    .flatMap((plugin) => [...(plugin.commands ?? [])].slice(0, maxCommandsPerPlugin).map((command) => ({ pluginId: plugin.id, pluginName: plugin.name ?? plugin.id, commandId: command.id, commandTitle: command.title, form: command.form, placement: command.placement, priority: command.priority, featured: command.featured })));
+    .flatMap((plugin) => [...(plugin.commands ?? [])].slice(0, maxCommandsPerPlugin).map((command) => ({ pluginId: plugin.id, pluginName: resolvePluginText(plugin.id, plugin.name) ?? plugin.id, commandId: command.id, commandTitle: command.title, form: command.form, placement: command.placement, priority: command.priority, featured: command.featured })));
 }
 
 export async function getDefaultPetPluginMenuItems(maxPlugins = 8, maxItemsPerPlugin = 8): Promise<PluginDynamicMenuItem[]> {
@@ -465,7 +540,7 @@ export async function getDefaultPetPluginMenuItems(maxPlugins = 8, maxItemsPerPl
     .sort((a, b) => (a.name ?? a.id).localeCompare(b.name ?? b.id) || a.id.localeCompare(b.id)).slice(0, maxPlugins)
     .flatMap((plugin) => {
       const items = appPluginService!.runtime.getPluginState(plugin.id).menuItems ?? [];
-      return [...items].slice(0, maxItemsPerPlugin).map((item) => ({ pluginId: plugin.id, pluginName: plugin.name ?? plugin.id, itemId: item.id, title: item.title, enabled: item.enabled, checked: item.checked }));
+      return [...items].slice(0, maxItemsPerPlugin).map((item) => ({ pluginId: plugin.id, pluginName: resolvePluginText(plugin.id, plugin.name) ?? plugin.id, itemId: item.id, title: resolvePluginText(plugin.id, item.title) ?? item.title, enabled: item.enabled, checked: item.checked }));
     });
 }
 
@@ -504,6 +579,22 @@ function safeError(error: unknown): string {
   return "Plugin manifest is unavailable.";
 }
 
+function safeSoundError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Plugin sound import failed.";
+  if (/format is not supported|unsupported format|unsupported audio/i.test(message)) return "Plugin sound format is not supported.";
+  if (/too large|size/i.test(message)) return "Plugin sound file is too large.";
+  if (/missing|not found|ENOENT/i.test(message)) return "Plugin sound file is missing.";
+  if (/permission|EACCES|EPERM/i.test(message)) return "Plugin sound file cannot be read.";
+  if (looksPathLike(message)) return "Plugin sound import failed.";
+  return message.slice(0, 160) || "Plugin sound import failed.";
+}
+
+function safeCommandError(error: unknown, pluginId: string): string {
+  const message = error instanceof Error ? error.message : "Plugin command failed.";
+  if (looksPathLike(message)) return "Plugin command failed. Check logs for details.";
+  return message.replace(/\$t:([A-Za-z0-9._:-]+)/g, (_match, key: string) => resolvePluginText(pluginId, `$t:${key}`) ?? key).slice(0, 180) || "Plugin command failed.";
+}
+
 function sanitizePluginUiMessage(value: string | undefined): string | undefined {
   if (!value) return undefined;
   if (looksPathLike(value)) return "Plugin needs attention. Check logs for details.";
@@ -512,6 +603,23 @@ function sanitizePluginUiMessage(value: string | undefined): string | undefined 
 
 function looksPathLike(value: string): boolean {
   return /(?:[A-Za-z]:\\|\/[^\s]+|\\[^\s]+|file:\/\/|ENOENT|EACCES|EPERM)/.test(value);
+}
+
+/** Resolve `$t:` references in a config field's display strings (label/description/options/nested itemSchema). */
+function resolveConfigFieldText(pluginId: string, field: PluginConfigField): PluginConfigField {
+  return {
+    ...field,
+    label: resolvePluginText(pluginId, field.label),
+    description: resolvePluginText(pluginId, field.description),
+    options: field.options?.map((option) => ({ ...option, label: resolvePluginText(pluginId, option.label) ?? option.label })),
+    itemSchema: field.itemSchema ? Object.fromEntries(Object.entries(field.itemSchema).map(([key, sub]) => [key, resolveConfigFieldText(pluginId, sub)])) : field.itemSchema,
+  };
+}
+
+/** Walk a manifest's `configSchema`, resolving every `$t:` display string against the plugin's catalogs. */
+function resolveConfigSchemaText(pluginId: string, schema: OpenPetsPluginManifest["configSchema"]): OpenPetsPluginManifest["configSchema"] {
+  if (!schema) return schema;
+  return Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, resolveConfigFieldText(pluginId, field)]));
 }
 
 function isPermissionSubset(next: readonly PluginPermission[], approved: readonly PluginPermission[]): boolean {
@@ -582,6 +690,15 @@ function parseCoreVersion(version: string): [number, number, number] {
 async function defaultOpenDialog(): Promise<{ canceled: boolean; filePaths: string[] }> {
   const { dialog } = await import("electron");
   return dialog.showOpenDialog({ properties: ["openDirectory"] });
+}
+
+async function defaultSoundOpenDialog(options?: unknown): Promise<{ canceled: boolean; filePaths: string[] }> {
+  const { dialog } = await import("electron");
+  return dialog.showOpenDialog(isDialogOptions(options) ? options : { properties: ["openFile"], filters: [{ name: "Audio", extensions: ["ogg", "mp3", "wav"] }] });
+}
+
+function isDialogOptions(value: unknown): value is OpenDialogOptions {
+  return typeof value === "object" && value !== null;
 }
 
 async function defaultConfirmPermissions(manifest: OpenPetsPluginManifest): Promise<boolean> {

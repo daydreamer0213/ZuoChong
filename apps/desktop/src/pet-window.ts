@@ -7,9 +7,10 @@ import { getAppStateSnapshot, markPetBroken, type PetScaleValue } from "./app-st
 import { clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, type Point } from "./display.js";
 import { builtInPet } from "./built-in-pet.js";
 import { getInstalledPetDir } from "./pet-paths.js";
+import { getActiveLocale, getActiveLocaleLang, t } from "./i18n/index.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { pickReactionMessage } from "./reaction-messages.js";
-import { debug, error as logError, info } from "./logger.js";
+import { debug, error as logError, info, warn } from "./logger.js";
 import { executeDefaultPetPluginCommand, executeDefaultPetPluginMenuSelect, getDefaultPetPluginCommands, getDefaultPetPluginMenuItems } from "./plugin-service.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
 import type { PluginCommandForm } from "./plugin-sdk-bridge.js";
@@ -82,7 +83,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismiss
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: "Hide pet", click: options.onHideRequested, defaultPet: true });
+  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true });
 
   const savePosition = debounce(() => {
     if (window.isDestroyed()) {
@@ -109,7 +110,7 @@ export function createAgentPetWindow(options: AgentPetWindowOptions, dismissToke
   info("pet.window", "agent window create", { windowId: window.id, petId: options.petId, displayName: options.displayName, position: options.position, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: "Close pet", click: options.onCloseRequested });
+  installPetContextMenu(window, { label: t("pet.menu.closePet"), click: options.onCloseRequested });
   void loadExplicitPetContent(window, options.petId, options.display, options.badge, dismissToken, options.scale);
   return window;
 }
@@ -161,7 +162,7 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
   const template: Electron.MenuItemConstructorOptions[] = [];
   if (topLevel.length > 0) template.push(...topLevel.slice(0, 8), { type: "separator" });
   if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
-  template.push({ label: "Open Control Center", click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } }, { label: action.label, click: action.click });
+  template.push({ label: t("pet.menu.openControlCenter"), click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } }, { label: action.label, click: action.click });
   return template;
 }
 
@@ -203,7 +204,7 @@ async function openPluginCommandForm(command: { readonly pluginId: string; reado
 function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, channel: string): string {
   const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'";
   const data = JSON.stringify({ title, form, channel }).replace(/</g, "\\u003c");
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>body{margin:0;font:13px system-ui,sans-serif;background:#fff;color:#161616}.wrap{padding:18px}h1{font-size:16px;margin:0 0 14px}label{display:block;font-weight:600;margin:10px 0 5px}input,textarea{box-sizing:border-box;width:100%;border:1px solid #bbb;border-radius:8px;padding:8px;font:inherit}textarea{min-height:74px;resize:vertical}.error{color:#b00020;min-height:18px;margin-top:8px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}button{border:0;border-radius:8px;padding:8px 12px;font:inherit}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">Cancel</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';for(const f of data.form.fields){const box=document.createElement('div');const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input=f.type==='textarea'?document.createElement('textarea'):document.createElement('input');input.id=f.id;input.name=f.id;if(f.type==='number')input.type='number';else input.type='text';if(f.default!==undefined)input.value=f.default;if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;box.append(label,input);fields.append(box);}document.getElementById('cancel').onclick=()=>api.close();window.addEventListener('keydown',e=>{if(e.key==='Escape')api.close()});form.onsubmit=async e=>{e.preventDefault();err.textContent='';const values={};for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=f.type==='number'?Number(el.value):String(el.value||'').trim();}try{await api.submit(data.channel,values)}catch(error){err.textContent=(error&&error.message)||'Command failed.'}};</script></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>body{margin:0;font:13px system-ui,"Hiragino Sans","Yu Gothic","Malgun Gothic","Apple SD Gothic Neo","PingFang SC","PingFang TC","Microsoft YaHei","Microsoft JhengHei","Noto Sans CJK JP","Noto Sans CJK KR","Noto Sans CJK SC","Noto Sans CJK TC",sans-serif;background:#fff;color:#161616}.wrap{padding:18px}h1{font-size:16px;margin:0 0 14px}label{display:block;font-weight:600;margin:10px 0 5px}input,textarea{box-sizing:border-box;width:100%;border:1px solid #bbb;border-radius:8px;padding:8px;font:inherit}textarea{min-height:74px;resize:vertical}.error{color:#b00020;min-height:18px;margin-top:8px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}button{border:0;border-radius:8px;padding:8px 12px;font:inherit}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">${escapeHtml(t("common.cancel"))}</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';for(const f of data.form.fields){const box=document.createElement('div');const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input=f.type==='textarea'?document.createElement('textarea'):document.createElement('input');input.id=f.id;input.name=f.id;if(f.type==='number')input.type='number';else input.type='text';if(f.default!==undefined)input.value=f.default;if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;box.append(label,input);fields.append(box);}document.getElementById('cancel').onclick=()=>api.close();window.addEventListener('keydown',e=>{if(e.key==='Escape')api.close()});form.onsubmit=async e=>{e.preventDefault();err.textContent='';const values={};for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=f.type==='number'?Number(el.value):String(el.value||'').trim();}try{await api.submit(data.channel,values)}catch(error){err.textContent=(error&&error.message)||'Command failed.'}};</script></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -547,6 +548,12 @@ function createBasePetWindow(title: string, position: Point): BrowserWindow {
     logError("pet.window", "renderer load failed", { windowId: window.id, errorCode, errorDescription });
     console.error("Failed to load default pet window.", { errorCode, errorDescription });
   });
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const fields = { windowId: window.id, level, line, sourceId, message };
+    if (level >= 3) logError("pet.window", "renderer console", fields);
+    else if (level === 2) warn("pet.window", "renderer console", fields);
+    else debug("pet.window", "renderer console", fields);
+  });
   window.webContents.on("render-process-gone", (_event, details) => {
     logError("pet.window", "renderer process gone", { windowId: window.id, details });
     console.error("Default pet renderer process gone.", details);
@@ -602,7 +609,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
 
 export function preparePetTransientDisplay(display: PetTransientDisplay): PetTransientDisplay {
   if (!display.reaction || display.message || display.reactionMessage) return display;
-  return { ...display, reactionMessage: pickReactionMessage(display.reaction) };
+  return { ...display, reactionMessage: pickReactionMessage(display.reaction, Math.random, getActiveLocale()) };
 }
 
 export function mergePetTransientDisplay(current: PetTransientDisplay | null, next: PetTransientDisplay): PetTransientDisplay {
@@ -739,11 +746,11 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   const scale = getAppStateSnapshot().preferences.petScale as PetScaleValue;
 
   return {
-    cacheKey: `default:builtin:${paused}:${scale}`,
+    cacheKey: `default:builtin:${paused}:${scale}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
     html: `<!doctype html>
-    <html lang="en" data-reaction-state="${reactionState}" data-motion-state="idle">
+    <html lang="${getActiveLocaleLang()}" data-reaction-state="${reactionState}" data-motion-state="idle">
       <head>
         <meta charset="utf-8" />
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
@@ -815,11 +822,11 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   const stateRows = defaultPetSprite.states;
 
   return {
-    cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}`,
+    cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
     html: `<!doctype html>
-      <html lang="en" data-reaction-state="${reactionState}" data-motion-state="idle">
+      <html lang="${getActiveLocaleLang()}" data-reaction-state="${reactionState}" data-motion-state="idle">
         <head>
           <meta charset="utf-8" />
           <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
@@ -901,7 +908,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
-    .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
     .bubble-text { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical; text-wrap: normal; overflow-wrap: break-word; }
     .bubble.is-status-only { max-width: min(156px, calc(100vw - 18px)); padding: 8px 11px; border-radius: 999px; }
     .bubble.is-status-only .bubble-header { display: grid; grid-template-columns: 18px minmax(0, auto); align-items: center; justify-content: center; }
@@ -1021,7 +1028,7 @@ export function pluginBubblesCacheKey(pluginBubbles: PetPluginBubbles | null): s
 
 function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): string {
   if (pluginBubbles?.transient) return createPluginBubbleMarkup(pluginBubbles.transient, false);
-  const text = display?.message ?? display?.reactionMessage ?? (display?.reaction ? pickReactionMessage(display.reaction) : undefined) ?? (paused ? "Paused" : "");
+  const text = display?.message ?? display?.reactionMessage ?? (display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
   const status = !paused && badgeReaction ? getStatusBadge(badgeReaction) : null;
   if (!text && !status) return "";
   const isExplicitMessage = Boolean(display?.message && !display?.reactionMessage);
@@ -1042,14 +1049,14 @@ const statusBadgeIcons = {
 } as const;
 
 function getStatusBadge(reaction: PetStatusBadgeReaction): { readonly className: string; readonly icon?: string; readonly iconSvg?: string; readonly label: string } | null {
-  if (reaction === "thinking") return { className: "is-busy", icon: "", label: "Thinking" };
-  if (reaction === "working" || reaction === "running") return { className: "is-busy", icon: "", label: "Working" };
-  if (reaction === "editing") return { className: "is-busy", icon: "", label: "Editing" };
-  if (reaction === "testing") return { className: "is-busy", icon: "", label: "Testing" };
-  if (reaction === "waiting") return { className: "is-waiting", icon: "", label: "Waiting" };
-  if (reaction === "success" || reaction === "celebrating") return { className: "is-success", iconSvg: statusBadgeIcons.check, label: "Done" };
-  if (reaction === "error") return { className: "is-error", iconSvg: statusBadgeIcons.alert, label: "Oops" };
-  if (reaction === "waving") return { className: "is-info", iconSvg: statusBadgeIcons.wavingHand, label: "Hi" };
+  if (reaction === "thinking") return { className: "is-busy", icon: "", label: t("pet.status.thinking") };
+  if (reaction === "working" || reaction === "running") return { className: "is-busy", icon: "", label: t("pet.status.working") };
+  if (reaction === "editing") return { className: "is-busy", icon: "", label: t("pet.status.editing") };
+  if (reaction === "testing") return { className: "is-busy", icon: "", label: t("pet.status.testing") };
+  if (reaction === "waiting") return { className: "is-waiting", icon: "", label: t("pet.status.waiting") };
+  if (reaction === "success" || reaction === "celebrating") return { className: "is-success", iconSvg: statusBadgeIcons.check, label: t("pet.status.done") };
+  if (reaction === "error") return { className: "is-error", iconSvg: statusBadgeIcons.alert, label: t("pet.status.oops") };
+  if (reaction === "waving") return { className: "is-info", iconSvg: statusBadgeIcons.wavingHand, label: t("pet.status.hi") };
   return null;
 }
 

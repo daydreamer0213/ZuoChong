@@ -16,6 +16,12 @@ export type PluginTemplate = {
   readonly configSchema: Record<string, unknown>;
   readonly entry: (ctx: PluginTemplateContext) => string;
   readonly test: (ctx: PluginTemplateContext) => string;
+  /**
+   * Templates that localize host-rendered strings (`$t:` manifest refs) and
+   * runtime-composed bodies (`ctx.t(...)`) ship a source `locales/en.json`.
+   * Returns the flat dotted key map; the scaffolder writes it verbatim.
+   */
+  readonly locales?: (ctx: PluginTemplateContext) => Record<string, string>;
 };
 
 const sharedTestHeader = `import assert from "node:assert/strict";
@@ -59,70 +65,372 @@ console.log("blank template tests passed.");
   },
 
   reminder: {
-    description: "One-shot reminders with a form, notifications, and cron routines.",
-    permissions: ["pet:speak", "pet:reaction", "commands", "status", "schedule", "storage", "notify"],
+    description:
+      "Quick local reminders delivered with ctx.ui.alert: sound, a sticky bubble you can snooze, and optional notification. Fully localized via $t: + ctx.t().",
+    permissions: ["pet:speak", "pet:interact", "audio", "schedule", "storage", "commands", "status", "notify"],
     configSchema: {
-      morningSummary: { type: "boolean", label: "Morning summary", default: false },
+      soundEnabled: { type: "boolean", label: "$t:config.soundEnabled.label", description: "$t:config.soundEnabled.description", default: true },
+      osNotification: { type: "boolean", label: "$t:config.osNotification.label", description: "$t:config.osNotification.description", default: true },
+      customSound: { type: "sound", label: "$t:config.customSound.label", description: "$t:config.customSound.description" },
     },
-    entry: ({ name }) => `/// <reference types="@open-pets/plugin-sdk" />
+    entry: () => `/// <reference types="@open-pets/plugin-sdk" />
+//
+// Quick reminders that mirror the shipped openpets.reminders reference plugin.
+// Keeps a "Set reminder…" form plus 15/30/60-minute presets, but delivers with
+// the acknowledge pattern: ctx.ui.alert(...) with Done / Snooze 5m actions,
+// optional custom sound, and optional OS notification. Host-rendered
+// static strings use $t: manifest refs; every runtime-composed body flows
+// through ctx.t(key, vars) so the host can localize it.
+
+export const MAX_REMINDERS = 10;
+export const MAX_MESSAGE_LENGTH = 140;
+export const MAX_DELAY_MS = 24 * 60 * 60 * 1000;
+export const SNOOZE_MS = 5 * 60 * 1000;
+
+export function cleanMessage(value, fallback = "Reminder time.") {
+  const text =
+    typeof value === "string"
+      ? value.trim().replace(/[\\r\\n]+/g, " ").replace(/\\s+/g, " ")
+      : "";
+  return (text || fallback).slice(0, MAX_MESSAGE_LENGTH).trim() || fallback;
+}
+
+export function durationMs(values = {}) {
+  const hours = Math.max(0, Math.min(23, Math.round(Number(values.hours ?? 0))));
+  const minutes = Math.max(0, Math.min(59, Math.round(Number(values.minutes ?? 0))));
+  const ms = (hours * 60 + minutes) * 60_000;
+  if (ms < 60_000 || ms > MAX_DELAY_MS) {
+    throw new Error("Reminder duration must be 1 minute to 24 hours.");
+  }
+  return ms;
+}
+
+export async function getReminders(ctx) {
+  const reminders = await ctx.storage.get("reminders");
+  return Array.isArray(reminders)
+    ? reminders
+        .filter(
+          (r) =>
+            r &&
+            typeof r.id === "string" &&
+            typeof r.dueAt === "number" &&
+            typeof r.message === "string",
+        )
+        .slice(0, MAX_REMINDERS)
+    : [];
+}
+
+async function saveReminders(ctx, reminders) {
+  const list = reminders.slice(0, MAX_REMINDERS);
+  await ctx.storage.set("reminders", list);
+  await updateStatus(ctx, list.length);
+  return list;
+}
+
+async function updateStatus(ctx, count) {
+  const text = count > 0 ? ctx.t("status.active", { count }) : ctx.t("status.none");
+  await ctx.status.set({ text, tone: "info" });
+}
+
+export async function scheduleReminder(ctx, reminder) {
+  const delay = Math.max(1, reminder.dueAt - Date.now());
+  await ctx.schedule.once(reminder.id, delay, () => fireReminder(ctx, reminder.id));
+}
+
+export async function addReminder(ctx, message, delayMs) {
+  const reminders = (await getReminders(ctx)).filter((r) => r.dueAt > Date.now());
+  if (reminders.length >= MAX_REMINDERS) {
+    throw new Error(ctx.t("error.tooMany", { max: MAX_REMINDERS }));
+  }
+  const reminder = {
+    id: \`reminder-\${Date.now().toString(36)}-\${Math.floor(Math.random() * 1e6).toString(36)}\`.slice(0, 64),
+    message: cleanMessage(message, ctx.t("reminder.defaultMessage")),
+    dueAt: Date.now() + delayMs,
+  };
+  reminders.push(reminder);
+  await saveReminders(ctx, reminders);
+  await scheduleReminder(ctx, reminder);
+  await ctx.pet.speak(ctx.t("speech.set", { minutes: Math.max(1, Math.round(delayMs / 60_000)) }));
+  return reminder;
+}
+
+async function deliver(ctx, message, { missed = false } = {}) {
+  const config = (await ctx.config.get()) ?? {};
+  const soundEnabled = config.soundEnabled !== false;
+  const osNotification = config.osNotification !== false;
+
+  const text = missed ? ctx.t("bubble.missed", { message }) : ctx.t("bubble.due", { message });
+
+  let alert;
+  try {
+    alert = await ctx.ui.alert({
+      text,
+      icon: "bell",
+      tone: "info",
+      sound: soundEnabled ? config.customSound || "alert" : undefined,
+      notify: osNotification
+        ? { title: ctx.t("notify.title"), body: missed ? ctx.t("notify.bodyMissed", { message }) : message }
+        : undefined,
+      dismissOn: ["petClick", "click", "action"],
+      actions: [
+        { id: "done", label: ctx.t("action.done"), style: "primary" },
+        { id: "snooze", label: ctx.t("action.snooze") },
+      ],
+    });
+  } catch {
+    try {
+      await ctx.pet.speak(text);
+    } catch {
+      // last resort already attempted.
+    }
+  }
+
+  if (alert) {
+    alert.onAction(async (actionId) => {
+      if (actionId === "snooze") {
+        await addReminder(ctx, message, SNOOZE_MS);
+      }
+    });
+  }
+
+}
+
+export async function fireReminder(ctx, id) {
+  const reminders = await getReminders(ctx);
+  const item = reminders.find((r) => r.id === id);
+  await saveReminders(ctx, reminders.filter((r) => r.id !== id));
+  if (!item) return false;
+  await deliver(ctx, item.message);
+  return true;
+}
+
+export async function reconcile(ctx) {
+  await ctx.schedule.cancelAll();
+  const now = Date.now();
+  const reminders = await getReminders(ctx);
+  const future = reminders.filter((r) => r.dueAt > now);
+  const overdue = reminders.filter((r) => r.dueAt <= now);
+  await saveReminders(ctx, future);
+  for (const item of future) await scheduleReminder(ctx, item);
+  for (const item of overdue) await deliver(ctx, item.message, { missed: true });
+}
+
+async function showReminderList(ctx) {
+  const reminders = await getReminders(ctx);
+  const now = Date.now();
+  const pending = reminders.filter((r) => r.dueAt > now);
+  if (!pending.length) {
+    await ctx.pet.speak(ctx.t("speech.none"));
+    await ctx.ui.menu.setItems([]);
+    return;
+  }
+  await ctx.ui.menu.setItems(
+    pending.slice(0, MAX_REMINDERS).map((reminder) => ({
+      id: \`cancel:\${reminder.id}\`.slice(0, 64),
+      title: ctx.t("menu.item", {
+        minutes: Math.max(1, Math.ceil((reminder.dueAt - now) / 60_000)),
+        message: reminder.message,
+      }),
+      icon: "bell",
+      onSelect: async () => {
+        await ctx.schedule.cancel(reminder.id);
+        const remaining = (await getReminders(ctx)).filter((r) => r.id !== reminder.id);
+        await saveReminders(ctx, remaining);
+        await ctx.pet.speak(ctx.t("speech.cancelled", { message: reminder.message }));
+        await showReminderList(ctx);
+      },
+    })),
+  );
+}
 
 export function register(OpenPetsPlugin) {
   OpenPetsPlugin.register({
     async start(ctx) {
-      await ctx.status.set({ text: "Reminders ready", tone: "info" });
+      await reconcile(ctx);
 
       await ctx.commands.register(
         {
-          id: "remind-me",
-          title: "Remind me…",
-          description: "Set a one-shot reminder.",
+          id: "set-reminder",
+          title: "$t:command.setReminder.title",
+          description: "$t:command.setReminder.description",
           form: {
+            submitLabel: "$t:command.setReminder.submit",
             fields: [
-              { id: "message", type: "text", label: "Reminder", maxLength: 120, required: true },
-              { id: "minutes", type: "number", label: "In minutes", default: 10, min: 1, max: 720 },
+              { id: "message", type: "textarea", label: "$t:form.message.label", required: true, maxLength: MAX_MESSAGE_LENGTH },
+              { id: "hours", type: "number", label: "$t:form.hours.label", default: 0, min: 0, max: 23 },
+              { id: "minutes", type: "number", label: "$t:form.minutes.label", default: 15, min: 0, max: 59 },
             ],
-            submitLabel: "Set reminder",
           },
         },
-        async (values) => {
-          const minutes = Number(values?.minutes ?? 10);
-          const message = String(values?.message ?? "Reminder");
-          const id = "reminder-" + Math.random().toString(36).slice(2, 8);
-          await ctx.schedule.once(id, minutes * 60_000, async () => {
-            await ctx.notify.notify({ title: ${JSON.stringify(name)}, body: message });
-            const bubble = await ctx.pet.speak({ text: message, sticky: true, icon: "bell", actions: [{ id: "ok", label: "Done", style: "primary" }] });
-            bubble.onAction(() => bubble.dismiss());
-            await ctx.pet.react("waving");
-          });
-          await ctx.pet.speak("Reminder set.");
-        },
+        async (values) => addReminder(ctx, values.message, durationMs(values)),
       );
 
-      const config = await ctx.config.get();
-      if (config.morningSummary) {
-        await ctx.schedule.cron("morning-summary", "0 9 * * 1-5", async () => {
-          await ctx.pet.speak("Good morning. Ready when you are.");
-        });
-      }
+      await ctx.commands.register(
+        { id: "reminder-15", title: "$t:command.reminder15.title", description: "$t:command.reminder15.description" },
+        () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 15 * 60_000),
+      );
+      await ctx.commands.register(
+        { id: "reminder-30", title: "$t:command.reminder30.title", description: "$t:command.reminder30.description" },
+        () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 30 * 60_000),
+      );
+      await ctx.commands.register(
+        { id: "reminder-60", title: "$t:command.reminder60.title", description: "$t:command.reminder60.description" },
+        () => addReminder(ctx, ctx.t("reminder.defaultMessage"), 60 * 60_000),
+      );
+
+      await ctx.commands.register(
+        { id: "view-reminders", title: "$t:command.viewReminders.title", description: "$t:command.viewReminders.description" },
+        () => showReminderList(ctx),
+      );
+
+      await ctx.commands.register(
+        { id: "clear-reminders", title: "$t:command.clearReminders.title", description: "$t:command.clearReminders.description" },
+        async () => {
+          await ctx.schedule.cancelAll();
+          await saveReminders(ctx, []);
+          await ctx.ui.menu.setItems([]);
+          await ctx.pet.speak(ctx.t("speech.cleared"));
+        },
+      );
     },
+    async stop() {},
   });
 }
 `,
-    test: () => `${sharedTestHeader}
-const h = createTestHarness(register, {
-  permissions: ["pet:speak", "pet:reaction", "commands", "status", "schedule", "storage", "notify", "pet:interact"],
-  config: { morningSummary: true },
-});
-await h.start();
-h.expectScheduled("morning-summary");
-await h.runCommand("remind-me", { message: "Stretch!", minutes: 5 });
-h.expectSpoke(/reminder set/i);
-await h.clock.advance("5m");
-h.expectNotified(/stretch/i);
-h.expectSpoke(/stretch/i);
-h.expectNoErrors();
+    test: () => `import assert from "node:assert/strict";
+import { createTestHarness } from "@open-pets/plugin-sdk/testing";
+import { register, cleanMessage, durationMs, MAX_REMINDERS } from "./index.js";
+
+const PERMISSIONS = [
+  "pet:speak",
+  "pet:interact",
+  "audio",
+  "schedule",
+  "storage",
+  "commands",
+  "status",
+  "notify",
+];
+
+const LOCALES = {
+  en: JSON.parse(
+    await (await import("node:fs/promises")).readFile(new URL("./locales/en.json", import.meta.url), "utf8"),
+  ),
+};
+
+// --- pure helper unit checks --------------------------------------------
+assert.equal(cleanMessage("  hello\\nthere  "), "hello there");
+assert.equal(cleanMessage("", "fallback"), "fallback");
+assert.equal(durationMs({ hours: 1, minutes: 30 }), 90 * 60_000);
+assert.throws(() => durationMs({ hours: 0, minutes: 0 }));
+assert.equal(MAX_REMINDERS, 10);
+
+// 1) Setting a reminder via the form schedules it, then fires with the
+//    acknowledge pattern (sound + bubble + notification).
+{
+  const h = createTestHarness(register, {
+    permissions: PERMISSIONS,
+    config: { soundEnabled: true, osNotification: true, customSound: "gong" },
+    locales: LOCALES,
+    nowMs: 1_000_000,
+  });
+  await h.start();
+
+  await h.runCommand("set-reminder", { message: "Drink water", hours: 0, minutes: 30 });
+  h.expectStored("reminders", (v) => Array.isArray(v) && v.length === 1 && v[0].message === "Drink water");
+
+  await h.clock.advance("31m");
+  h.expectBubble({ icon: "bell", tone: "info", sticky: true, priority: "high" });
+  h.expectBubble({ textMatch: /Drink water/ });
+  h.expectNotified(/Drink water/);
+  assert.equal(h.calls.alerts.length, 1, "expected ctx.ui.alert delivery");
+  assert.ok(h.calls.sounds.some((s) => s.sound === "gong"), "expected the custom alert sound to play");
+  h.expectStored("reminders", (v) => Array.isArray(v) && v.length === 0);
+  h.expectNoErrors();
+}
+
+// 2) A preset fires and the Snooze action reschedules +5m.
+{
+  const h = createTestHarness(register, {
+    permissions: PERMISSIONS,
+    config: { soundEnabled: false, osNotification: false },
+    locales: LOCALES,
+    nowMs: 2_000_000,
+  });
+  await h.start();
+  await h.runCommand("reminder-15");
+  h.expectStored("reminders", (v) => v.length === 1);
+
+  await h.clock.advance("16m");
+  const bubble = h.calls.bubbles[h.calls.bubbles.length - 1];
+  assert.deepEqual(bubble.spec.actions?.map((a) => a.id), ["done", "snooze"]);
+  await h.fireBubbleAction(bubble.handle.id, "snooze");
+  h.expectStored("reminders", (v) => v.length === 1 && v[0].dueAt > h.clock.now());
+  h.expectNoErrors();
+}
+
+// 3) clear-reminders cancels everything.
+{
+  const h = createTestHarness(register, { permissions: PERMISSIONS, locales: LOCALES });
+  await h.start();
+  await h.runCommand("reminder-15");
+  await h.runCommand("clear-reminders");
+  h.expectStored("reminders", (v) => Array.isArray(v) && v.length === 0);
+  h.expectSpoke(/cleared/i);
+  h.expectNoErrors();
+}
+
 console.log("reminder template tests passed.");
 `,
+    locales: () => ({
+      "config.soundEnabled.label": "Play a sound",
+      "config.soundEnabled.description": "Play an alert sound when a reminder is due.",
+      "config.osNotification.label": "Show a system notification",
+      "config.osNotification.description": "Also post a desktop notification when a reminder is due.",
+      "config.customSound.label": "Custom alert sound",
+      "config.customSound.description": "Optional sound to play instead of the default alert sound.",
+
+      "command.setReminder.title": "Set reminder…",
+      "command.setReminder.description": "Create a quick local reminder.",
+      "command.setReminder.submit": "Set Reminder",
+      "command.reminder15.title": "15 min reminder",
+      "command.reminder15.description": "Set a reminder for 15 minutes from now.",
+      "command.reminder30.title": "30 min reminder",
+      "command.reminder30.description": "Set a reminder for 30 minutes from now.",
+      "command.reminder60.title": "1 hour reminder",
+      "command.reminder60.description": "Set a reminder for 1 hour from now.",
+      "command.viewReminders.title": "View reminders",
+      "command.viewReminders.description": "List pending reminders and cancel any of them.",
+      "command.clearReminders.title": "Clear reminders",
+      "command.clearReminders.description": "Cancel all pending reminders.",
+
+      "form.message.label": "Message",
+      "form.hours.label": "Hours",
+      "form.minutes.label": "Minutes",
+
+      "reminder.defaultMessage": "Reminder time.",
+
+      "status.active": "{count} reminder(s) active",
+      "status.none": "No active reminders",
+
+      "speech.set": "Reminder set for {minutes} min from now.",
+      "speech.none": "No active reminders.",
+      "speech.cleared": "Reminders cleared.",
+      "speech.cancelled": "Cancelled: {message}",
+
+      "bubble.due": "{message}",
+      "bubble.missed": "Missed while away: {message}",
+
+      "action.done": "Done",
+      "action.snooze": "Snooze 5m",
+
+      "menu.item": "in {minutes} min: {message}",
+
+      "notify.title": "Quick Reminders",
+      "notify.bodyMissed": "Missed while away: {message}",
+
+      "error.tooMany": "Quick Reminders can keep up to {max} active reminders.",
+    }),
   },
 
   ambient: {

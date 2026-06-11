@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, ipcMain, session, type Event, type IpcMainInvokeEvent, type RenderProcessGoneDetails, type Session, type WebContents } from "electron";
+import { app, BrowserWindow, ipcMain, session, type Event, type IpcMainEvent, type IpcMainInvokeEvent, type RenderProcessGoneDetails, type Session, type WebContents } from "electron";
 
 import type { OpenPetsJavascriptPluginManifest } from "./plugin-manifest.js";
-import type { PluginSdkApi } from "./plugin-sdk-bridge.js";
+import { classifyPluginError, logPluginDiagnostic, truncatePluginConsoleMessage } from "./plugin-diagnostics.js";
+import type { PluginRuntimeLogger, PluginSdkApi } from "./plugin-sdk-bridge.js";
+import { isPluginSdkRoute, type PluginSdkRoute } from "./plugin-sdk-routes.js";
 import type { PluginStateRecord } from "./plugin-state.js";
 
 export type PluginJsHostStartOptions = {
@@ -20,6 +22,7 @@ export interface PluginJsHostInstance { stop(): void }
 
 export interface PluginJsHost { startPlugin(options: PluginJsHostStartOptions): Promise<PluginJsHostInstance> }
 const configDisposers = new WeakMap<WebContents, Map<string, () => void>>();
+type SdkWithLogger = PluginSdkApi & { __logger?: PluginRuntimeLogger };
 
 export class ElectronPluginJsHost implements PluginJsHost {
   readonly #startupTimeoutMs: number;
@@ -30,8 +33,12 @@ export class ElectronPluginJsHost implements PluginJsHost {
 
   async startPlugin(options: PluginJsHostStartOptions): Promise<PluginJsHostInstance> {
     const partition = `openpets-plugin:${encodeURIComponent(options.record.id)}:${Date.now()}`;
+    const logger = (options.sdk as SdkWithLogger | undefined)?.__logger;
+    logPluginDiagnostic(logger, "debug", "plugin js host start", { pluginId: options.record.id, runtime: "javascript", phase: "begin" });
     const pluginSession = session.fromPartition(partition, { cache: false });
+    logPluginDiagnostic(logger, "debug", "plugin js host session created", { pluginId: options.record.id, runtime: "javascript" });
     const entryUrl = pathToFileURL(options.entryPath).toString();
+    logPluginDiagnostic(logger, "debug", "plugin js host entry read", { pluginId: options.record.id, runtime: "javascript", phase: "begin", source: options.entryPath });
     const moduleUrl = buildPluginModuleUrl(await readFile(options.entryPath, "utf8"), entryUrl);
     const htmlUrl = buildPluginHtmlUrl(moduleUrl);
     const token = `${options.record.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -55,10 +62,13 @@ export class ElectronPluginJsHost implements PluginJsHost {
     });
 
     hardenWebContents(window.webContents, options.onBroken);
-    installSdkHandler(sdkChannel, window.webContents, options.sdk);
+    window.webContents.on("console-message", (_event, level, message, line, sourceId) => logPluginDiagnostic(logger, level >= 2 ? "warn" : "debug", "plugin renderer console", { pluginId: options.record.id, runtime: "javascript", level, reason: truncatePluginConsoleMessage(message), line, source: sourceId }));
+    window.webContents.on("render-process-gone", (_event, details) => logPluginDiagnostic(logger, "warn", "plugin renderer gone", { pluginId: options.record.id, runtime: "javascript", reason: details.reason }));
+    window.webContents.on("unresponsive", () => logPluginDiagnostic(logger, "warn", "plugin renderer unresponsive", { pluginId: options.record.id, runtime: "javascript" }));
+    const removeSdkHandler = installSdkHandler(sdkChannel, window.webContents, options.sdk, options.record.id);
 
     const stopped = { value: false };
-    const instance: PluginJsHostInstance = { stop: () => { stopped.value = true; ipcMain.removeHandler(sdkChannel); void stopRegisteredPlugin(window.webContents).catch(() => undefined); cleanupSession(pluginSession); if (!window.isDestroyed()) window.destroy(); } };
+    const instance: PluginJsHostInstance = { stop: () => { logPluginDiagnostic(logger, "debug", "plugin js host stop", { pluginId: options.record.id, runtime: "javascript", phase: "begin" }); stopped.value = true; removeSdkHandler(); void stopRegisteredPlugin(window.webContents).catch(() => undefined); cleanupSession(pluginSession); if (!window.isDestroyed()) window.destroy(); logPluginDiagnostic(logger, "debug", "plugin js host stop", { pluginId: options.record.id, runtime: "javascript", phase: "end" }); } };
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -66,14 +76,16 @@ export class ElectronPluginJsHost implements PluginJsHost {
       const cleanup = () => { clearTimeout(timeout); window.webContents.removeListener("did-finish-load", loaded); window.webContents.removeListener("render-process-gone", gone); window.webContents.removeListener("unresponsive", unresponsive); };
       const fail = (error: Error) => { if (settled) return; settled = true; cleanup(); instance.stop(); reject(error); };
       const loaded = () => {
-        void runRegistrationHandshake(window.webContents, moduleUrl, options.sdk).then(() => { if (settled) return; settled = true; cleanup(); resolve(); }, (error: unknown) => fail(error instanceof Error ? error : new Error("JavaScript plugin registration failed.")));
+        logPluginDiagnostic(logger, "debug", "plugin js host registration", { pluginId: options.record.id, runtime: "javascript", phase: "begin" });
+        void runRegistrationHandshake(window.webContents, moduleUrl, options.sdk).then(() => { logPluginDiagnostic(logger, "info", "plugin js host registration", { pluginId: options.record.id, runtime: "javascript", phase: "success" }); if (settled) return; settled = true; cleanup(); resolve(); }, (error: unknown) => { logPluginDiagnostic(logger, "warn", "plugin js host registration", { pluginId: options.record.id, runtime: "javascript", phase: "fail", reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error) }); fail(error instanceof Error ? error : new Error("JavaScript plugin registration failed.")); });
       };
       const gone = (_event: Event, details: RenderProcessGoneDetails) => fail(new Error(`JavaScript plugin renderer exited: ${details.reason}`));
       const unresponsive = () => fail(new Error("JavaScript plugin renderer became unresponsive."));
       window.webContents.once("did-finish-load", loaded);
       window.webContents.once("render-process-gone", gone);
       window.webContents.once("unresponsive", unresponsive);
-      window.loadURL(htmlUrl).catch((error: unknown) => fail(error instanceof Error ? error : new Error("JavaScript plugin failed to load.")));
+      logPluginDiagnostic(logger, "debug", "plugin js host load", { pluginId: options.record.id, runtime: "javascript", phase: "begin" });
+      window.loadURL(htmlUrl).then(() => logPluginDiagnostic(logger, "debug", "plugin js host load", { pluginId: options.record.id, runtime: "javascript", phase: "success" })).catch((error: unknown) => { logPluginDiagnostic(logger, "warn", "plugin js host load", { pluginId: options.record.id, runtime: "javascript", phase: "fail", reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error) }); fail(error instanceof Error ? error : new Error("JavaScript plugin failed to load.")); });
     });
 
     if (stopped.value) throw new Error("JavaScript plugin stopped during startup.");
@@ -85,12 +97,32 @@ function getPluginSdkPreloadPath(): string {
   return `${app.getAppPath()}/plugin-sdk-preload.cjs`;
 }
 
-function installSdkHandler(channel: string, contents: WebContents, sdk: PluginSdkApi | undefined): void {
+function installSdkHandler(channel: string, contents: WebContents, sdk: PluginSdkApi | undefined, pluginId: string): () => void {
+  const logger = (sdk as SdkWithLogger | undefined)?.__logger;
+  const syncListener = (event: IpcMainEvent, path: unknown, args: unknown[]) => {
+    const started = Date.now();
+    try {
+      if (event.sender !== contents) throw new Error("Invalid plugin SDK sender.");
+      if (!sdk || typeof path !== "string" || !isPluginSdkRoute(path) || !Array.isArray(args)) throw new Error("Invalid plugin SDK call.");
+      event.returnValue = dispatchSyncSdkCall(sdk, path, args);
+    } catch (error) {
+      logPluginDiagnostic(logger, "warn", "plugin sdk dispatch failed", { pluginId, route: typeof path === "string" ? path : "invalid", ok: false, reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started });
+      event.returnValue = { __openPetsError: error instanceof Error ? error.message : String(error) };
+    }
+  };
   ipcMain.handle(channel, async (event: IpcMainInvokeEvent, path: unknown, args: unknown[]) => {
-    if (event.sender !== contents) throw new Error("Invalid plugin SDK sender.");
-    if (!sdk || typeof path !== "string" || !Array.isArray(args)) throw new Error("Invalid plugin SDK call.");
-    return dispatchSdkCall(contents, sdk, path, args);
+    const started = Date.now();
+    try {
+      if (event.sender !== contents) throw new Error("Invalid plugin SDK sender.");
+      if (!sdk || typeof path !== "string" || !isPluginSdkRoute(path) || !Array.isArray(args)) throw new Error("Invalid plugin SDK call.");
+      return await dispatchSdkCall(contents, sdk, path, args);
+    } catch (error) {
+      logPluginDiagnostic(logger, "warn", "plugin sdk dispatch failed", { pluginId, route: typeof path === "string" ? path : "invalid", ok: false, reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started });
+      throw error;
+    }
   });
+  ipcMain.on(channel, syncListener);
+  return () => { ipcMain.removeHandler(channel); ipcMain.off(channel, syncListener); };
 }
 
 type RunCallback = (id: unknown) => ((...callbackArgs: unknown[]) => Promise<unknown>) | undefined;
@@ -99,13 +131,13 @@ type SdkCallHandler = (sdk: PluginSdkApi, args: unknown[], runCallback: RunCallb
 const noop = (): void => undefined;
 const callbackOf = (runCallback: RunCallback, id: unknown): ((...callbackArgs: unknown[]) => unknown) => runCallback(id) ?? noop;
 
-const sdkCallHandlers: Record<string, SdkCallHandler> = {
+export const sdkCallHandlers: Record<PluginSdkRoute, SdkCallHandler> = {
   // Pet handles (first arg is the pet handle id; "default" targets the default pet).
   "pet.speak": (sdk, args) => sdk.pets.forPet(args[0]).speak(args[1]),
   "pet.react": (sdk, args) => sdk.pets.forPet(args[0]).react(args[1] as never),
   "pet.setAnimation": (sdk, args) => sdk.pets.forPet(args[0]).setAnimation(args[1]),
   "pet.setScale": (sdk, args) => sdk.pets.forPet(args[0]).setScale(args[1]),
-  "pet.badge": (sdk, args) => sdk.pets.forPet(args[0]).badge(args[1]),
+  "pet.setStatusReaction": (sdk, args) => sdk.pets.forPet(args[0]).setStatusReaction(args[1]),
   "pet.moveBy": (sdk, args) => sdk.pets.forPet(args[0]).moveBy(args[1]),
   "pet.wander": (sdk, args) => sdk.pets.forPet(args[0]).wander(args[1]),
   "pet.moveToHome": (sdk, args) => sdk.pets.forPet(args[0]).moveToHome(),
@@ -124,6 +156,7 @@ const sdkCallHandlers: Record<string, SdkCallHandler> = {
   "pets.offChange": (sdk, args) => sdk.pets.offChange(args[0]),
   // UI: bubbles, toasts, panels, menus.
   "ui.bubble": (sdk, args) => sdk.ui.bubble(args[0]),
+  "ui.alert": (sdk, args) => sdk.ui.alert(args[0]),
   "ui.bubbleUpdate": (sdk, args) => sdk.ui.bubbleUpdate(args[0], args[1]),
   "ui.bubbleDismiss": (sdk, args) => sdk.ui.bubbleDismiss(args[0]),
   "ui.bubblePin": (sdk, args) => sdk.ui.bubblePin(args[0]),
@@ -141,11 +174,15 @@ const sdkCallHandlers: Record<string, SdkCallHandler> = {
   "ui.menuOffSelect": (sdk, args) => sdk.ui.menuOffSelect(args[0]),
   // Audio.
   "audio.play": (sdk, args) => sdk.audio.play(args[0], args[1]),
+  "audio.importUserSound": (sdk, args) => sdk.audio.importUserSound(args[0], args[1]),
+  "audio.forgetUserSound": (sdk, args) => sdk.audio.forgetUserSound(args[0]),
   "audio.stop": (sdk) => sdk.audio.stop(),
   // Senses bus.
   "events.on": (sdk, args, runCallback) => sdk.events.on(args[0], callbackOf(runCallback, args[1])),
   "events.off": (sdk, args) => sdk.events.off(args[0]),
   // Assets.
+  // Preload currently constructs asset refs locally, but keep this route in the
+  // canonical table for host-side parity and future explicit asset resolution.
   "assets.resolve": (sdk, args) => sdk.assets.resolve(args[0], args[1]),
   // Inter-plugin bus.
   "bus.publish": (sdk, args) => sdk.bus.publish(args[0], args[1]),
@@ -212,9 +249,18 @@ const sdkCallHandlers: Record<string, SdkCallHandler> = {
   "log.info": (sdk, args) => sdk.log.info(...args),
   "log.warn": (sdk, args) => sdk.log.warn(...args),
   "log.error": (sdk, args) => sdk.log.error(...args),
+  "i18n.t": (sdk, args) => sdk.t(String(args[0] ?? ""), args[1] as never),
+  "i18n.locale": (sdk) => sdk.locale,
 };
 
-async function dispatchSdkCall(contents: WebContents, sdk: PluginSdkApi, path: string, args: unknown[]): Promise<unknown> {
+function dispatchSyncSdkCall(sdk: PluginSdkApi, path: PluginSdkRoute, args: unknown[]): unknown {
+  if (path !== "i18n.t" && path !== "i18n.locale") throw new Error("Plugin SDK call is not synchronous.");
+  const handler = sdkCallHandlers[path];
+  if (!handler) throw new Error("Unknown plugin SDK call.");
+  return handler(sdk, args, () => undefined, undefined as never);
+}
+
+async function dispatchSdkCall(contents: WebContents, sdk: PluginSdkApi, path: PluginSdkRoute, args: unknown[]): Promise<unknown> {
   const runCallback: RunCallback = (id) => typeof id === "string" ? (...callbackArgs: unknown[]) => contents.executeJavaScript(`globalThis.__openPetsRunCallback(${JSON.stringify(id)}, ${JSON.stringify(callbackArgs)})`, true) : undefined;
   const handler = sdkCallHandlers[path];
   if (!handler) throw new Error("Unknown plugin SDK call.");

@@ -2,6 +2,10 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 
 import { pluginAssetMaxBytes, pluginPanelMaxBytes, type OpenPetsJavascriptPluginManifest, type PluginAssetKind } from "./plugin-manifest.js";
+import { SUPPORTED_LOCALES } from "./i18n/catalog.js";
+
+/** Per-locale size cap for bundled `locales/<locale>.json` catalogs. */
+const pluginLocaleMaxBytes = 256 * 1024;
 
 /** One file a v3 manifest declares (asset or panel page). */
 export type DeclaredPluginFile = {
@@ -89,6 +93,19 @@ export async function readDeclaredPluginFiles(manifest: OpenPetsJavascriptPlugin
     const realPath = await fs.realpath(filePath);
     if (realPath !== filePath) throw new Error(`Plugin declared file is invalid: ${file.relPath}`);
     out.set(file.relPath, preparePluginFileBytes(file, await fs.readFile(filePath)));
+  }
+  // Plugin i18n catalogs live under `locales/<locale>.json` by convention (not
+  // manifest-declared); copy any that exist so install dirs ship translations.
+  for (const locale of SUPPORTED_LOCALES) {
+    const relPath = `locales/${locale}.json`;
+    const filePath = join(realSourceFolder, relPath);
+    let stat;
+    try { stat = await fs.lstat(filePath); } catch { continue; }
+    if (!stat.isFile() || stat.isSymbolicLink()) continue;
+    if (stat.size > pluginLocaleMaxBytes) throw new Error(`Plugin locale file is too large: ${relPath}`);
+    const realPath = await fs.realpath(filePath);
+    if (realPath !== filePath) throw new Error(`Plugin locale file is invalid: ${relPath}`);
+    out.set(relPath, await fs.readFile(filePath));
   }
   return out;
 }

@@ -9,11 +9,13 @@ import { getAppStateSnapshot, normalizePetScale, petScaleOptions, updatePreferen
 import { createAppIcon } from "./assets.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
+import { getActiveLocale, getActiveMessages, isSupportedLocale, LOCALE_LABELS, SUPPORTED_LOCALES, setLocaleFromPreference, t, type Locale, type LocalePreference } from "./i18n/index.js";
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, installPetFromFolder, installPetFromZipFile, removePet, setDefaultInstalledPet } from "./pet-installation.js";
 import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { debug, error as logError, warn } from "./logger.js";
-import { getPluginService, type PluginServiceResult } from "./plugin-service.js";
+import { classifyPluginError, logPluginDiagnostic } from "./plugin-diagnostics.js";
+import { getPluginService, type PluginConfigSoundPickResult, type PluginServiceResult } from "./plugin-service.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata, validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
@@ -74,6 +76,20 @@ function getSettingsStateSnapshot(): {
       reactionAnimationOverrides: state.preferences.reactionAnimationOverrides,
     },
     petScaleOptions,
+  };
+}
+
+function getI18nSnapshot(): {
+  locale: Locale;
+  localePreference: LocalePreference;
+  availableLocales: { value: Locale; label: string }[];
+  messages: ReturnType<typeof getActiveMessages>;
+} {
+  return {
+    locale: getActiveLocale(),
+    localePreference: getAppStateSnapshot().preferences.locale,
+    availableLocales: SUPPORTED_LOCALES.map((value) => ({ value, label: LOCALE_LABELS[value] })),
+    messages: getActiveMessages(),
   };
 }
 
@@ -138,6 +154,11 @@ export function installInternalUiHandlers(): void {
     return getSettingsStateSnapshot();
   });
 
+  ipcMain.handle("openpets:get-i18n", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getI18nSnapshot();
+  });
+
   ipcMain.handle("openpets:get-dashboard-snapshot", async (event) => {
     assertAllowedSender(event, ["control-center"]);
     return getDashboardSnapshot();
@@ -165,16 +186,35 @@ export function installInternalUiHandlers(): void {
     return getPluginService().saveConfig(id, config);
   });
 
+  ipcMain.handle("openpets:plugins-pick-config-sound", async (event, id: unknown): Promise<PluginConfigSoundPickResult> => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) {
+      warn("ui", "Plugin sound pick invalid request.", { ok: false, reason: "invalid-plugin-id" });
+      return pluginUiSoundError("Invalid plugin sound request.");
+    }
+    debug("ui", "Plugin sound pick requested.", { pluginId: id });
+    try {
+      const result = await getPluginService().pickConfigSound(id);
+      if (result.ok && result.sound.id) debug("ui", "Plugin sound pick succeeded.", { pluginId: id, ok: true, soundId: result.sound.id });
+      else if (result.ok) debug("ui", "Plugin sound pick canceled.", { pluginId: id, ok: true, canceled: true });
+      else warn("ui", "Plugin sound pick failed.", { pluginId: id, ok: false, reason: result.error });
+      return result;
+    } catch (error) {
+      logError("ui", "Plugin sound pick errored.", { pluginId: id, ok: false, reason: error instanceof Error ? error.message : "unknown" });
+      throw error;
+    }
+  });
+
   ipcMain.handle("openpets:plugins-reload", async (event, id: unknown): Promise<PluginServiceResult> => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin reload request.");
     return getPluginService().reload(id);
   });
 
-  ipcMain.handle("openpets:plugins-execute-command", async (event, id: unknown, commandId: unknown): Promise<PluginServiceResult> => {
+  ipcMain.handle("openpets:plugins-execute-command", async (event, id: unknown, commandId: unknown, args: unknown): Promise<PluginServiceResult> => {
     assertAllowedSender(event, ["control-center"]);
-    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id) || typeof commandId !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(commandId)) return pluginUiError("Invalid plugin command request.");
-    return getPluginService().executeCommand(id, commandId);
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id) || typeof commandId !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(commandId) || (args !== undefined && !isPlainObject(args))) return pluginUiError("Invalid plugin command request.");
+    return getPluginService().executeCommand(id, commandId, isPlainObject(args) ? args as Record<string, unknown> : undefined);
   });
 
   ipcMain.handle("openpets:plugins-load-local", async (event): Promise<PluginServiceResult> => {
@@ -270,11 +310,19 @@ export function installInternalUiHandlers(): void {
     assertAllowedSender(event, ["control-center"]);
     const previousScale = getAppStateSnapshot().preferences.petScale;
     const previousOverrides = JSON.stringify(getAppStateSnapshot().preferences.reactionAnimationOverrides ?? {});
+    const previousLocale = getActiveLocale();
     const state = updatePreferences(validatePreferencePatch(patch));
     const nextOverrides = JSON.stringify(state.preferences.reactionAnimationOverrides ?? {});
     if (state.preferences.petScale !== previousScale || nextOverrides !== previousOverrides) {
       refreshDefaultPetContent();
       refreshAgentPetContent();
+    }
+    if (setLocaleFromPreference(state.preferences.locale) !== previousLocale) {
+      // Tray labels are rendered eagerly, so rebuild the menu in the new language.
+      void import("./tray.js").then(({ refreshTrayMenu }) => refreshTrayMenu());
+      // Control Center plugin labels are resolved at display time; nudge it to re-fetch the
+      // SafePluginRecords so manifest/config labels re-render in the new language.
+      broadcastPluginRecordsRefresh();
     }
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getSettingsStateSnapshot() : state;
   });
@@ -572,6 +620,13 @@ function sendControlCenterRoute(window: BrowserWindow, route: ControlCenterRoute
   window.webContents.send("openpets:control-center-route", route);
 }
 
+/** Tell the open Control Center to re-fetch the plugin snapshot (e.g. after a locale change). */
+function broadcastPluginRecordsRefresh(): void {
+  if (controlCenterWindow && !controlCenterWindow.isDestroyed()) {
+    controlCenterWindow.webContents.send("openpets:plugins-refresh");
+  }
+}
+
 function routeControlCenterWindow(window: BrowserWindow, route: ControlCenterRoute): void {
   pendingControlCenterRoute = route;
   if (window.webContents.isLoading()) return;
@@ -592,6 +647,24 @@ function withControlCenterRoute(rawUrl: string, route: ControlCenterRoute): stri
 }
 
 function pluginUiError(error: string): PluginServiceResult {
+  return { ok: false, error, snapshot: { plugins: [] } };
+}
+
+async function logUiAction<T>(operation: string, pluginId: string | undefined, fn: () => Promise<T>, extra: Record<string, unknown> = {}): Promise<T> {
+  const started = Date.now();
+  logPluginDiagnostic((level, message, fields) => (level === "warn" || level === "error" ? warn("ui", message, fields) : debug("ui", message, fields)), "debug", "plugin ui action", { operation, pluginId, phase: "request", ...extra });
+  try {
+    const result = await fn();
+    const ok = typeof result === "object" && result !== null && "ok" in result ? Boolean((result as { ok?: unknown }).ok) : true;
+    logPluginDiagnostic((level, message, fields) => (level === "warn" || level === "error" ? warn("ui", message, fields) : debug("ui", message, fields)), ok ? "debug" : "warn", "plugin ui action", { operation, pluginId, phase: "result", ok, durationMs: Date.now() - started, reason: ok ? undefined : (result as { error?: string }).error, ...extra });
+    return result;
+  } catch (error) {
+    logPluginDiagnostic((level, message, fields) => (level === "warn" || level === "error" ? warn("ui", message, fields) : debug("ui", message, fields)), "warn", "plugin ui action", { operation, pluginId, phase: "fail", ok: false, durationMs: Date.now() - started, reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), ...extra });
+    throw error;
+  }
+}
+
+function pluginUiSoundError(error: string): PluginConfigSoundPickResult {
   return { ok: false, error, snapshot: { plugins: [] } };
 }
 
@@ -639,8 +712,16 @@ async function getReactionAnimationSettingsSnapshot(): Promise<unknown> {
   const state = getAppStateSnapshot();
   const preview = await getDefaultPetPreviewSpriteInfo();
   return {
-    reactions: reactionAnimationMetadata,
-    animations: selectableAnimationMetadata,
+    reactions: reactionAnimationMetadata.map((reaction) => ({
+      ...reaction,
+      label: t(`settings.reaction.${reaction.id}.label`),
+      description: t(`settings.reaction.${reaction.id}.description`),
+    })),
+    animations: selectableAnimationMetadata.map((animation) => ({
+      ...animation,
+      label: t(`settings.animation.${animation.id}.label`),
+      description: t(`settings.animation.${animation.id}.description`),
+    })),
     sprite: defaultPetSprite,
     overrides: state.preferences.reactionAnimationOverrides ?? {},
     previewSpriteUrl: `openpets-pet-preview://spritesheet/default?v=${encodeURIComponent(preview.version)}`,
@@ -666,16 +747,21 @@ async function getDefaultPetPreviewSpriteInfo(): Promise<{ readonly path: string
   return { path: builtInPath, version: `builtin-${Math.round(fallback.mtimeMs)}-${fallback.size}` };
 }
 
-function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } {
+function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } {
   if (!isRecord(value)) {
     throw new Error("Invalid preferences patch.");
   }
 
-  const patch: { openDefaultPetOnLaunch?: boolean; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } = {};
+  const patch: { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides> } = {};
 
   if ("openDefaultPetOnLaunch" in value) {
     if (typeof value.openDefaultPetOnLaunch !== "boolean") throw new Error("Invalid open-on-launch value.");
     patch.openDefaultPetOnLaunch = value.openDefaultPetOnLaunch;
+  }
+
+  if ("locale" in value) {
+    if (value.locale !== "system" && !isSupportedLocale(value.locale)) throw new Error("Invalid locale value.");
+    patch.locale = value.locale;
   }
 
   if ("petScale" in value) {

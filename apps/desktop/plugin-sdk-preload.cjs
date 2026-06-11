@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Keep SDK route strings in sync with src/plugin-sdk-routes.ts. The desktop
+// conformance check extracts call()/callSync()/subscription() route literals
+// from this preload and compares them to the canonical route table.
+
 const tokenArg = process.argv.find((arg) => arg.startsWith("--openpets-plugin-token="));
 const channel = tokenArg ? `openpets:plugin-sdk:${tokenArg.slice("--openpets-plugin-token=".length)}` : "";
 let callbackId = 0;
@@ -8,6 +12,13 @@ const callbacks = new Map();
 async function call(path, args) {
   if (!channel) throw new Error("OpenPets plugin SDK is unavailable.");
   return ipcRenderer.invoke(channel, path, normalizeForIpc(args));
+}
+
+function callSync(path, args) {
+  if (!channel) throw new Error("OpenPets plugin SDK is unavailable.");
+  const result = ipcRenderer.sendSync(channel, path, normalizeForIpc(args));
+  if (result && typeof result === "object" && typeof result.__openPetsError === "string") throw new Error(result.__openPetsError);
+  return result;
 }
 
 function normalizeForIpc(value, depth = 0) {
@@ -104,7 +115,7 @@ function makePetHandle(petId) {
     react: (reaction) => call("pet.react", [petId, reaction]),
     setAnimation: (state) => call("pet.setAnimation", [petId, state]),
     setScale: (scale) => call("pet.setScale", [petId, scale]),
-    badge: (badge) => call("pet.badge", [petId, badge]),
+    setStatusReaction: (reaction) => call("pet.setStatusReaction", [petId, reaction]),
     moveBy: (options) => call("pet.moveBy", [petId, options]),
     wander: (options) => call("pet.wander", [petId, options]),
     moveToHome: () => call("pet.moveToHome", [petId]),
@@ -132,6 +143,11 @@ const sdk = {
   },
   ui: {
     bubble: (spec) => call("ui.bubble", [spec]).then(makeBubbleHandle),
+    alert: (spec) => call("ui.alert", [spec]).then((handle) => {
+      const bubble = makeBubbleHandle(handle);
+      bubble.acknowledge = () => call("ui.bubbleDismiss", [handle && handle.bubbleId]);
+      return bubble;
+    }),
     toast: (spec) => call("ui.toast", [spec]),
     panel: (spec) => call("ui.panel", [spec]).then(makePanelHandle),
     menu: {
@@ -141,6 +157,8 @@ const sdk = {
   },
   audio: {
     play: (sound, options) => call("audio.play", [sound, options]),
+    importUserSound: (file, opts) => call("audio.importUserSound", [file && file.fileId ? file.fileId : file, opts]),
+    forgetUserSound: (ref) => call("audio.forgetUserSound", [ref]),
     stop: (handle) => call("audio.stop", [handle]),
   },
   events: {
@@ -232,7 +250,13 @@ const sdk = {
     fetch: (url, options) => call("http.fetch", [url, options]),
   },
   log: Object.fromEntries(["debug", "info", "warn", "error"].map((level) => [level, (...args) => call(`log.${level}`, args)])),
+  t: (key, vars) => callSync("i18n.t", [key, vars]),
 };
+
+Object.defineProperty(sdk, "locale", {
+  enumerable: true,
+  get: () => callSync("i18n.locale", []),
+});
 
 contextBridge.exposeInMainWorld("__openPetsSdk", sdk);
 contextBridge.exposeInMainWorld("__openPetsRunCallback", async (id, args) => {

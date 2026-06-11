@@ -3,14 +3,26 @@ import { lookup } from "node:dns/promises";
 import * as net from "node:net";
 import { join } from "node:path";
 
+import { getActiveLocaleLang } from "./i18n/index.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { validateReaction, validateSayMessage } from "./local-ipc-protocol.js";
+import { makePluginT } from "./plugin-i18n.js";
 import { resolveDeclaredAssetPath, resolveDeclaredPanelPath } from "./plugin-assets.js";
 import type { PluginConfig } from "./plugin-config.js";
 import type { OpenPetsJavascriptPluginManifest, PluginAssetKind, PluginPermission } from "./plugin-manifest.js";
 import type { PluginPetApi } from "./plugin-pet-api.js";
-import type { PluginRuntimeScheduler, PluginTimerHandle } from "./plugin-runtime.js";
+import type { PluginRuntimeScheduler } from "./plugin-runtime.js";
+import { createPluginAudioApi } from "./plugin-sdk-audio.js";
+import { createPluginBusApi, type PluginBusTopicEntry } from "./plugin-sdk-bus.js";
+import { createPluginConfigApi } from "./plugin-sdk-config.js";
+import { createPluginEventsApi } from "./plugin-sdk-events.js";
+import { pluginSdkQuotas } from "./plugin-sdk-quotas.js";
+import type { ScheduleSpec, PluginInspectorState } from "./plugin-sdk-state.js";
+import { WindowCounter, type PluginRuntimeState } from "./plugin-sdk-state.js";
+import { createPluginStorageApi } from "./plugin-sdk-storage.js";
+import { createPluginUiApi } from "./plugin-sdk-ui.js";
 import type { PluginStateRecord, PluginStateStore } from "./plugin-state.js";
+import { classifyPluginError, logPluginDiagnostic } from "./plugin-diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Public bridge types
@@ -34,7 +46,7 @@ export type PluginStatus = { text: string; tone?: "info" | "success" | "warning"
 export type PluginRuntimePublicState = { commands: readonly PluginCommand[]; status?: PluginStatus; menuItems?: readonly PluginMenuItem[] };
 export type PluginLogLevel = "debug" | "info" | "warn" | "error";
 export type PluginRuntimeLogger = (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
-export type PluginSdkApi = ReturnType<PluginSdkBridge["createApi"]>;
+export type PluginSdkApi = Omit<ReturnType<PluginSdkBridge["createApi"]>, "__logger">;
 export interface PluginStorageStore { get(pluginId: string, key: string): unknown; set(pluginId: string, key: string, value: unknown): void; delete(pluginId: string, key: string): void; keys?(pluginId: string): string[] }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +107,10 @@ export interface PluginHostCapabilities {
     show(opts: { petId: string; pluginId: string; bubble: PluginBubbleDescriptor; callbacks: PluginBubbleCallbacks }): Promise<PluginBubbleHostHandle>;
   };
   audio: {
-    play(spec: { kind: "named"; name: string } | { kind: "file"; path: string }, volume: number): Promise<void>;
+    play(spec: { kind: "named"; name: string } | { kind: "file"; path: string } | { kind: "user-sound"; pluginId: string; id: string }, volume: number): Promise<void>;
+    importUserSound(pluginId: string, fileId: string, opts?: { name?: string }): Promise<{ kind: "user-sound"; id: string; name?: string }>;
+    importUserSoundFromPath?(pluginId: string, path: string, opts?: { name?: string }): Promise<{ kind: "user-sound"; id: string; name?: string }>;
+    forgetUserSound(pluginId: string, ref: { kind: "user-sound"; id: string }): Promise<void>;
     stop(): Promise<void>;
   };
   events: {
@@ -110,7 +125,7 @@ export interface PluginHostCapabilities {
     react(petHandleId: string, reaction: OpenPetsReaction): Promise<void>;
     setAnimation(petHandleId: string, spec: PluginAnimationSpec): Promise<void>;
     setScale(petHandleId: string, scale: number): Promise<void>;
-    badge(petHandleId: string, reaction: OpenPetsReaction | null): Promise<void>;
+    setStatusReaction(petHandleId: string, reaction: OpenPetsReaction | null): Promise<void>;
     moveBy(petHandleId: string, opts: { x: number; y: number; durationMs?: number }): Promise<void>;
     wander(petHandleId: string, opts: { distance?: number; durationMs?: number }): Promise<void>;
     moveToHome(petHandleId: string): Promise<void>;
@@ -165,10 +180,9 @@ export interface PluginHostCapabilities {
     listenAllowed(): boolean;
     inQuietHours(): boolean;
   };
+  /** Trusted host lifecycle hook; not exposed through the plugin SDK. */
+  clearPlugin?(pluginId: string): void;
 }
-
-const namedHostSounds = new Set(["chime", "pop", "nom", "alert", "level-up", "tick", "success", "error"]);
-export const pluginNamedHostSounds = namedHostSounds;
 
 /**
  * Capability defaults used when the Electron layer is not wired (contract
@@ -191,7 +205,7 @@ export function createDefaultPluginHostCapabilities(petApi: PluginPetApi): Plugi
         };
       },
     },
-    audio: { play: async () => undefined, stop: async () => undefined },
+    audio: { play: async () => undefined, importUserSound: async (_pluginId, _fileId, opts) => ({ kind: "user-sound", id: "0".repeat(32), name: opts?.name }), importUserSoundFromPath: async (_pluginId, _path, opts) => ({ kind: "user-sound", id: "0".repeat(32), name: opts?.name }), forgetUserSound: async () => undefined, stop: async () => undefined },
     events: { subscribe: () => () => undefined },
     pets: {
       list: () => [{ id: "default", name: "Default pet", kind: "default", visible: true }],
@@ -202,7 +216,7 @@ export function createDefaultPluginHostCapabilities(petApi: PluginPetApi): Plugi
       react: async (_petId, reaction) => { await petApi.react(reaction); },
       setAnimation: async (_petId, spec) => { if (spec.kind === "reaction") await petApi.react(spec.reaction); },
       setScale: async () => undefined,
-      badge: async () => undefined,
+      setStatusReaction: async () => undefined,
       moveBy: async (_petId, opts) => { await petApi.moveBy(opts); },
       wander: async (_petId, opts) => { await petApi.wander(opts); },
       moveToHome: async () => { await petApi.moveToHome(); },
@@ -244,39 +258,10 @@ export function createDefaultPluginHostCapabilities(petApi: PluginPetApi): Plugi
 // Quotas
 // ---------------------------------------------------------------------------
 
-const quotas = {
-  petActionsPerMinute: 60,
-  schedules: 64,
-  commands: 32,
-  menuItems: 16,
-  storageBytes: 5 * 1024 * 1024,
-  storageSubscriptions: 64,
-  logsPerMinute: 200,
-  httpPerMinute: 30,
-  httpResponseBytes: 4 * 1024 * 1024,
-  httpRequestBodyBytes: 256 * 1024,
-  streamResponseBytes: 10 * 1024 * 1024,
-  busPerMinute: 120,
-  busPayloadBytes: 32 * 1024,
-  busSubscriptions: 64,
-  eventSubscriptions: 64,
-  audioPerMinute: 20,
-  notifyPerMinute: 10,
-  toastPerMinute: 20,
-  aiPerMinute: 20,
-  voicePerMinute: 10,
-  activeBubbles: 8,
-  activePanels: 3,
-  spawnedPets: 4,
-  secretBytes: 8 * 1024,
-  dynamicTextChars: 2000,
-  markdownChars: 1000,
-};
-export const pluginSdkQuotas: Readonly<typeof quotas> = quotas;
+const quotas = pluginSdkQuotas;
 
 const commandIdPattern = /^[A-Za-z0-9._:-]{1,64}$/;
 const scheduleIdPattern = /^[A-Za-z0-9._:-]{1,64}$/;
-const busTopicPattern = /^[A-Za-z0-9._:/-]{1,128}$/;
 const allowedEventNames = new Set([
   "pet:clicked", "pet:doubleClicked", "pet:dragStart", "pet:dragEnd", "pet:hover", "pet:drop",
   "idle:enter", "idle:exit", "agent:activity", "config:changed",
@@ -315,56 +300,6 @@ export class MemoryPluginStorageStore implements PluginStorageStore {
 // Per-plugin runtime state
 // ---------------------------------------------------------------------------
 
-type ScheduleSpec =
-  | { type: "once"; delayMs: number }
-  | { type: "every"; intervalMs: number }
-  | { type: "daily"; daily: { time: string; days?: number[] } }
-  | { type: "cron"; expr: string }
-  | { type: "at"; timestamp: number };
-type ScheduleSlot = { spec: ScheduleSpec; callback: () => unknown; handle: PluginTimerHandle; nextRunMs: number };
-
-type BubbleSlot = { host: PluginBubbleHostHandle; onAction?: (actionId: string) => void; onSubmit?: (values: Record<string, string | number>) => void; onDismiss?: (reason: PluginBubbleDismissReason) => void; dismissed: boolean };
-
-type PluginRuntimeState = {
-  commands: Map<string, { meta: PluginCommand; handler: (values?: Record<string, unknown>) => unknown | Promise<unknown> }>;
-  menuItems: PluginMenuItem[];
-  menuHandlers: Set<(id: string) => void>;
-  status?: PluginStatus;
-  schedules: Map<string, ScheduleSlot>;
-  configListeners: Set<(config: PluginConfig) => void>;
-  storageSubscriptions: Map<string, { key: string; handler: (value: unknown) => void }>;
-  busSubscriptions: Map<string, { topic: string; handler: (payload: unknown) => void }>;
-  eventSubscriptions: Map<string, () => void>;
-  tickSubscriptions: Map<string, () => void>;
-  bubbles: Map<string, BubbleSlot>;
-  panels: Map<string, PluginPanelHostHandle & { onMessage?: (msg: unknown) => void }>;
-  spawnedPets: Set<string>;
-  pickedFiles: Set<string>;
-  userCommandDepth: number;
-  lastError?: string;
-  petWindow: WindowCounter;
-  logWindow: WindowCounter;
-  httpWindow: WindowCounter;
-  busWindow: WindowCounter;
-  audioWindow: WindowCounter;
-  notifyWindow: WindowCounter;
-  toastWindow: WindowCounter;
-  aiWindow: WindowCounter;
-  voiceWindow: WindowCounter;
-};
-
-export type PluginInspectorState = {
-  schedules: Array<{ id: string; type: ScheduleSpec["type"]; nextRunMs: number }>;
-  commands: readonly PluginCommand[];
-  menuItems: readonly PluginMenuItem[];
-  status?: PluginStatus;
-  activeBubbles: number;
-  activePanels: number;
-  eventSubscriptions: number;
-  lastError?: string;
-  quotaCounters: Record<string, number>;
-};
-
 // ---------------------------------------------------------------------------
 // The bridge
 // ---------------------------------------------------------------------------
@@ -381,7 +316,7 @@ export class PluginSdkBridge {
   readonly #logger: PluginRuntimeLogger;
   readonly #capabilities: PluginHostCapabilities;
   readonly #states = new Map<string, PluginRuntimeState>();
-  readonly #busTopics = new Map<string, Set<{ pluginId: string; handler: (payload: unknown) => void }>>();
+  readonly #busTopics = new Map<string, Set<PluginBusTopicEntry>>();
 
   constructor(options: { stateStore: PluginStateStore; petApi: PluginPetApi; scheduler: PluginRuntimeScheduler; storage?: PluginStorageStore; onError?: (id: string, reason: string) => void; logger?: PluginRuntimeLogger; capabilities?: PluginHostCapabilities }) {
     this.#stateStore = options.stateStore;
@@ -476,27 +411,15 @@ export class PluginSdkBridge {
       return out;
     };
 
-    const showBubble = async (petHandleId: string, spec: unknown): Promise<{ bubbleId: string }> => {
-      requirePermission("pet:speak");
-      state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
-      const bubble = validateBubbleSpec(spec);
-      check(countActiveBubbles(state) < quotas.activeBubbles, "Plugin active bubble quota exceeded.");
-      const bubbleId = opaqueId("bubble");
-      const slot: BubbleSlot = { host: undefined as unknown as PluginBubbleHostHandle, dismissed: false };
-      const callbacks: PluginBubbleCallbacks = {
-        onAction: (actionId) => { try { slot.onAction?.(actionId); } catch (error) { this.#onError(pluginId, safeError(error)); } },
-        onSubmit: (values) => { try { slot.onSubmit?.(values); } catch (error) { this.#onError(pluginId, safeError(error)); } },
-        onDismiss: (reason) => { slot.dismissed = true; state.bubbles.delete(bubbleId); try { slot.onDismiss?.(reason); } catch (error) { this.#onError(pluginId, safeError(error)); } },
-      };
-      slot.host = await caps.bubbles.show({ petId: validatePetHandleId(petHandleId), pluginId, bubble, callbacks });
-      if (!slot.dismissed) state.bubbles.set(bubbleId, slot);
-      return { bubbleId };
-    };
-
-    const requireBubble = (bubbleId: unknown): BubbleSlot => { const slot = state.bubbles.get(String(bubbleId)); if (!slot) throw new Error("Plugin bubble is no longer live."); return slot; };
+    const audio = createPluginAudioApi({ pluginId, state, capabilities: caps, requirePermission, audioPerMinute: quotas.audioPerMinute, resolveAssetRef });
+    const ui = createPluginUiApi({ pluginId, manifest, installPath: record.installPath, state, capabilities: caps, audio, requirePermission, guardCallback, validateBubbleSpec, validatePetHandleId, resolvePanelPath: (name) => resolveDeclaredPanelPath(manifest, record.installPath, name), normalizeJson, validateMenuItems, validateSayMessage, safeError, logger: this.#logger, onError: (reason) => this.#onError(pluginId, reason), quotas });
+    const storage = createPluginStorageApi({ pluginId, state, storage: this.#storage, requirePermission, guardCallback, validateStorageKey, onError: (reason) => this.#onError(pluginId, reason), safeError, storageSubscriptionsQuota: quotas.storageSubscriptions });
+    const config = createPluginConfigApi({ state, getConfig });
+    const events = createPluginEventsApi({ state, capabilities: caps, requirePermission, guardCallback, allowedEventNames, eventSubscriptionsQuota: quotas.eventSubscriptions });
+    const bus = createPluginBusApi({ pluginId, state, topics: this.#busTopics, requirePermission, guardCallback, normalizeJson, busPerMinute: quotas.busPerMinute, busPayloadBytes: quotas.busPayloadBytes, busSubscriptionsQuota: quotas.busSubscriptions });
 
     const petNamespace = (petHandleId: string) => ({
-      speak: (spec: unknown) => showBubble(petHandleId, spec),
+      speak: (spec: unknown) => ui.showBubble(petHandleId, spec),
       react: async (reaction: OpenPetsReaction) => {
         requirePermission("pet:reaction");
         state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
@@ -514,7 +437,7 @@ export class PluginSdkBridge {
         await caps.pets.setAnimation(validatePetHandleId(petHandleId), { kind: "sprite", spritePath: sprite.path, loop: animation.loop !== false, fps });
       },
       setScale: async (scale: unknown) => { requirePermission("pet:animate"); const value = Number(scale); check(Number.isFinite(value) && value >= 0.5 && value <= 2, "Pet scale must be between 0.5 and 2."); await caps.pets.setScale(validatePetHandleId(petHandleId), value); },
-      badge: async (badge: unknown) => { requirePermission("pet:reaction"); state.petWindow.tick(quotas.petActionsPerMinute, "pet action"); await caps.pets.badge(validatePetHandleId(petHandleId), badge === null ? null : validateReaction(badge)); },
+      setStatusReaction: async (reaction: unknown) => { requirePermission("pet:reaction"); state.petWindow.tick(quotas.petActionsPerMinute, "pet action"); await caps.pets.setStatusReaction(validatePetHandleId(petHandleId), reaction === null || reaction === "idle" ? null : validateReaction(reaction)); },
       moveBy: async (options: unknown) => { requirePermission("pet:move"); state.petWindow.tick(quotas.petActionsPerMinute, "pet action"); const opts = validateMoveBy(options); if (petHandleId === "default") await this.#petApi.moveBy(opts); else await caps.pets.moveBy(validatePetHandleId(petHandleId), opts); },
       wander: async (options: unknown) => { requirePermission("pet:move"); state.petWindow.tick(quotas.petActionsPerMinute, "pet action"); const opts = validateWander(options); if (petHandleId === "default") await this.#petApi.wander(opts); else await caps.pets.wander(validatePetHandleId(petHandleId), opts); },
       moveToHome: async () => { requirePermission("pet:move"); state.petWindow.tick(quotas.petActionsPerMinute, "pet action"); if (petHandleId === "default") await this.#petApi.moveToHome(); else await caps.pets.moveToHome(validatePetHandleId(petHandleId)); },
@@ -542,6 +465,7 @@ export class PluginSdkBridge {
     });
 
     return {
+      __logger: this.#logger,
       pet: petNamespace("default"),
       pets: {
         list: async () => { requirePermission("pets:read"); return caps.pets.list(); },
@@ -565,93 +489,9 @@ export class PluginSdkBridge {
         },
         offChange: (subscriptionId: unknown) => { state.eventSubscriptions.get(String(subscriptionId))?.(); state.eventSubscriptions.delete(String(subscriptionId)); },
       },
-      ui: {
-        bubble: (spec: unknown) => showBubble("default", spec),
-        bubbleUpdate: async (bubbleId: unknown, patch: unknown) => { const slot = requireBubble(bubbleId); await slot.host.update(validateBubbleSpec(patch, true)); },
-        bubbleDismiss: async (bubbleId: unknown) => { const slot = state.bubbles.get(String(bubbleId)); if (slot) await slot.host.dismiss(); },
-        bubblePin: async (bubbleId: unknown) => { requirePermission("pet:pin"); await requireBubble(bubbleId).host.pin(); },
-        bubbleUnpin: async (bubbleId: unknown) => { const slot = state.bubbles.get(String(bubbleId)); if (slot) await slot.host.unpin(); },
-        bubbleSubscribe: (bubbleId: unknown, kind: unknown, handler: (...args: never[]) => void) => {
-          const slot = requireBubble(bubbleId);
-          if (kind === "action") slot.onAction = handler as (actionId: string) => void;
-          else if (kind === "submit") slot.onSubmit = handler as (values: Record<string, string | number>) => void;
-          else if (kind === "dismiss") slot.onDismiss = handler as (reason: PluginBubbleDismissReason) => void;
-          else throw new Error("Invalid bubble subscription kind.");
-        },
-        toast: async (spec: unknown) => {
-          requirePermission("ui:toast");
-          state.toastWindow.tick(quotas.toastPerMinute, "toast");
-          if (!isRecord(spec)) throw new Error("Invalid toast spec.");
-          const text = validateSayMessage(String(spec.text ?? ""));
-          const tone = spec.tone === undefined ? undefined : (check(["info", "success", "warning", "error"].includes(String(spec.tone)), "Invalid toast tone."), spec.tone as PluginStatus["tone"]);
-          const durationMs = spec.durationMs === undefined ? undefined : clampNumber(Number(spec.durationMs), 1_000, 15_000);
-          await caps.toast({ text, tone, durationMs });
-        },
-        panel: async (spec: unknown) => {
-          requirePermission("ui:panel");
-          check(state.panels.size < quotas.activePanels, "Plugin panel quota exceeded.");
-          if (!isRecord(spec) || typeof spec.panel !== "string") throw new Error("Invalid panel spec.");
-          const panelPath = resolveDeclaredPanelPath(manifest, record.installPath, spec.panel);
-          const width = spec.width === undefined ? 420 : clampNumber(Number(spec.width), 200, 1200);
-          const height = spec.height === undefined ? 480 : clampNumber(Number(spec.height), 160, 900);
-          const title = spec.title === undefined ? manifest.name : String(spec.title).slice(0, 80);
-          const panelId = opaqueId("panel");
-          const holder: { onMessage?: (msg: unknown) => void } = {};
-          const host = await caps.panels.open({
-            pluginId, installPath: record.installPath, panelPath, title, width, height,
-            onMessage: (msg) => { try { holder.onMessage?.(msg); } catch (error) { this.#onError(pluginId, safeError(error)); } },
-            onClosed: () => { state.panels.delete(panelId); },
-          });
-          state.panels.set(panelId, Object.assign(host, holder));
-          return { panelId };
-        },
-        panelShow: async (panelId: unknown) => { await requirePanel(state, panelId).show(); },
-        panelHide: async (panelId: unknown) => { await requirePanel(state, panelId).hide(); },
-        panelPost: async (panelId: unknown, msg: unknown) => { await requirePanel(state, panelId).postMessage(normalizeJson(msg, quotas.busPayloadBytes, "panel message")); },
-        panelClose: async (panelId: unknown) => { const panel = state.panels.get(String(panelId)); if (panel) { await panel.close(); state.panels.delete(String(panelId)); } },
-        panelOnMessage: (panelId: unknown, handler: (msg: unknown) => void) => { requirePanel(state, panelId).onMessage = guardCallback(handler); },
-        menuSetItems: async (items: unknown) => { requirePermission("commands"); state.menuItems = validateMenuItems(items); },
-        menuOnSelect: (handler: (id: string) => void) => { requirePermission("commands"); const wrapped = guardCallback(handler); state.menuHandlers.add(wrapped); return { subscriptionId: registerDisposer(state, () => state.menuHandlers.delete(wrapped)) }; },
-        menuOffSelect: (subscriptionId: unknown) => { state.eventSubscriptions.get(String(subscriptionId))?.(); state.eventSubscriptions.delete(String(subscriptionId)); },
-      },
-      audio: {
-        play: async (sound: unknown, options?: unknown) => {
-          requirePermission("audio");
-          state.audioWindow.tick(quotas.audioPerMinute, "audio");
-          check(caps.settings.audioAllowed(), "Plugin sound is disabled in settings.");
-          check(!caps.settings.inQuietHours(), "Quiet hours are active.");
-          const volume = clampNumber(Number(isRecord(options) && options.volume !== undefined ? options.volume : 0.6), 0, 1);
-          if (typeof sound === "string") { check(namedHostSounds.has(sound), `Unknown host sound: ${sound}`); await caps.audio.play({ kind: "named", name: sound }, volume); }
-          else await caps.audio.play({ kind: "file", path: resolveAssetRef(sound, ["sounds"]).path }, volume);
-        },
-        stop: async () => { requirePermission("audio"); await caps.audio.stop(); },
-      },
-      events: {
-        on: (event: unknown, handler: (payload: Record<string, unknown>) => void) => {
-          requirePermission("events");
-          const name = String(event);
-          check(allowedEventNames.has(name), `Unknown plugin event: ${name}`);
-          if (name === "pet:drop") requirePermission("pet:drop");
-          check(state.eventSubscriptions.size < quotas.eventSubscriptions, "Plugin event subscription quota exceeded.");
-          const subId = opaqueId("event");
-          if (name === "config:changed") {
-            const listener = (config: PluginConfig) => guardCallback(handler)(config as Record<string, unknown>);
-            state.configListeners.add(listener);
-            state.eventSubscriptions.set(subId, () => state.configListeners.delete(listener));
-          } else if (name === "pet:drop") {
-            // Register dropped-file handles so files.read accepts them.
-            const wrapped = guardCallback((payload: Record<string, unknown>) => {
-              if (Array.isArray(payload.files)) for (const file of payload.files) { if (isRecord(file) && typeof file.fileId === "string") state.pickedFiles.add(file.fileId); }
-              handler(payload);
-            });
-            state.eventSubscriptions.set(subId, caps.events.subscribe(name, wrapped));
-          } else {
-            state.eventSubscriptions.set(subId, caps.events.subscribe(name, guardCallback(handler)));
-          }
-          return { subscriptionId: subId };
-        },
-        off: (subscriptionId: unknown) => { state.eventSubscriptions.get(String(subscriptionId))?.(); state.eventSubscriptions.delete(String(subscriptionId)); },
-      },
+      ui: ui.api,
+      audio,
+      events,
       assets: {
         resolve: (kind: unknown, name: unknown) => {
           const kindMap: Record<string, PluginAssetKind> = { icon: "icons", image: "images", svg: "svgs", sprite: "sprites", sound: "sounds" };
@@ -661,34 +501,7 @@ export class PluginSdkBridge {
           return { kind: String(kind), name: String(name) };
         },
       },
-      bus: {
-        publish: async (topic: unknown, payload: unknown) => {
-          requirePermission("bus");
-          state.busWindow.tick(quotas.busPerMinute, "bus");
-          const topicName = String(topic);
-          check(busTopicPattern.test(topicName), "Invalid bus topic.");
-          const normalized = normalizeJson(payload, quotas.busPayloadBytes, "bus payload");
-          for (const subscriber of this.#busTopics.get(topicName) ?? []) {
-            if (subscriber.pluginId === pluginId) continue;
-            try { subscriber.handler(normalized); } catch { /* subscriber errors are isolated */ }
-          }
-        },
-        subscribe: (topic: unknown, handler: (payload: unknown) => void) => {
-          requirePermission("bus");
-          const topicName = String(topic);
-          check(busTopicPattern.test(topicName), "Invalid bus topic.");
-          check(state.busSubscriptions.size < quotas.busSubscriptions, "Plugin bus subscription quota exceeded.");
-          const entry = { pluginId, handler: guardCallback(handler) };
-          let subscribers = this.#busTopics.get(topicName);
-          if (!subscribers) { subscribers = new Set(); this.#busTopics.set(topicName, subscribers); }
-          subscribers.add(entry);
-          const subId = opaqueId("bus");
-          state.busSubscriptions.set(subId, { topic: topicName, handler: entry.handler });
-          state.eventSubscriptions.set(subId, () => { subscribers.delete(entry); state.busSubscriptions.delete(subId); });
-          return { subscriptionId: subId };
-        },
-        unsubscribe: (subscriptionId: unknown) => { state.eventSubscriptions.get(String(subscriptionId))?.(); state.eventSubscriptions.delete(String(subscriptionId)); },
-      },
+      bus,
       schedule: {
         once: (id: string, delayMs: number, callback: () => unknown) => { const delay = Number(delayMs); check(Number.isFinite(delay) && delay >= 1, "Invalid plugin schedule delay."); setSchedule(id, { type: "once", delayMs: delay }, callback); },
         every: (id: string, intervalMs: number, callback: () => unknown) => { const interval = Number(intervalMs); check(Number.isFinite(interval) && interval >= 10 * 60_000, "Invalid plugin schedule delay."); setSchedule(id, { type: "every", intervalMs: interval }, callback); },
@@ -699,43 +512,20 @@ export class PluginSdkBridge {
         cancel: (id: string) => { state.schedules.get(String(id))?.handle.cancel(); state.schedules.delete(String(id)); },
         cancelAll: () => { for (const slot of state.schedules.values()) slot.handle.cancel(); state.schedules.clear(); },
       },
-      storage: {
-        get: (key: string) => { requirePermission("storage"); return this.#storage.get(pluginId, validateStorageKey(key)); },
-        set: (key: string, value: unknown) => {
-          requirePermission("storage");
-          const storageKey = validateStorageKey(key);
-          this.#storage.set(pluginId, storageKey, value);
-          for (const sub of state.storageSubscriptions.values()) if (sub.key === storageKey) { try { sub.handler(value); } catch (error) { this.#onError(pluginId, safeError(error)); } }
-        },
-        delete: (key: string) => {
-          requirePermission("storage");
-          const storageKey = validateStorageKey(key);
-          this.#storage.delete(pluginId, storageKey);
-          for (const sub of state.storageSubscriptions.values()) if (sub.key === storageKey) { try { sub.handler(undefined); } catch (error) { this.#onError(pluginId, safeError(error)); } }
-        },
-        keys: () => { requirePermission("storage"); return this.#storage.keys?.(pluginId) ?? []; },
-        subscribe: (key: string, handler: (value: unknown) => void) => {
-          requirePermission("storage");
-          check(state.storageSubscriptions.size < quotas.storageSubscriptions, "Plugin storage subscription quota exceeded.");
-          const subId = opaqueId("storage");
-          state.storageSubscriptions.set(subId, { key: validateStorageKey(key), handler: guardCallback(handler) });
-          return { subscriptionId: subId };
-        },
-        unsubscribe: (subscriptionId: unknown) => { state.storageSubscriptions.delete(String(subscriptionId)); },
-      },
-      config: { get: getConfig, onChange: (listener: (config: PluginConfig) => void) => { state.configListeners.add(listener); return () => state.configListeners.delete(listener); } },
+      storage,
+      config,
       net: {
         fetch: async (url: string, options?: unknown) => {
           requirePermission("network");
           state.httpWindow.tick(quotas.httpPerMinute, "HTTP");
           const opts = validateNetOptions(options, approved);
-          return safeHttpFetch(String(url), opts, allowedNetworkHosts(record, manifest));
+          return safeHttpFetch(String(url), opts, allowedNetworkHosts(record, manifest), { logger: this.#logger, pluginId, route: "net.fetch" });
         },
         stream: async (url: string, options: unknown, onChunk: (chunk: string) => void) => {
           requirePermission("network");
           state.httpWindow.tick(quotas.httpPerMinute, "HTTP");
           const opts = validateNetOptions(options, approved);
-          return safeHttpStream(String(url), opts, allowedNetworkHosts(record, manifest), guardCallback(onChunk));
+          return safeHttpStream(String(url), opts, allowedNetworkHosts(record, manifest), guardCallback(onChunk), { logger: this.#logger, pluginId, route: "net.stream" });
         },
       },
       notify: {
@@ -840,8 +630,10 @@ export class PluginSdkBridge {
         unregister: (id: string) => { state.commands.delete(String(id)); },
       },
       status: { set: (status: PluginStatus | string) => { requirePermission("status"); state.status = validateStatus(status); }, clear: () => { state.status = undefined; } },
-      http: { fetch: async (url: string, options?: unknown) => { requirePermission("network"); state.httpWindow.tick(quotas.httpPerMinute, "HTTP"); const opts = isRecord(options) ? options : {}; check(opts.method === undefined || String(opts.method).toUpperCase() === "GET", "Plugin HTTP fetch only supports GET."); return safeHttpFetch(String(url), { method: "GET", headers: isRecord(opts.headers) ? opts.headers as Record<string, string> : undefined, timeoutMs: opts.timeoutMs === undefined ? undefined : Number(opts.timeoutMs) }, allowedNetworkHosts(record, manifest)); } },
+      http: { fetch: async (url: string, options?: unknown) => { requirePermission("network"); state.httpWindow.tick(quotas.httpPerMinute, "HTTP"); const opts = isRecord(options) ? options : {}; check(opts.method === undefined || String(opts.method).toUpperCase() === "GET", "Plugin HTTP fetch only supports GET."); return safeHttpFetch(String(url), { method: "GET", headers: isRecord(opts.headers) ? opts.headers as Record<string, string> : undefined, timeoutMs: opts.timeoutMs === undefined ? undefined : Number(opts.timeoutMs) }, allowedNetworkHosts(record, manifest), { logger: this.#logger, pluginId, route: "http.fetch" }); } },
       log: Object.fromEntries((["debug", "info", "warn", "error"] as PluginLogLevel[]).map((level) => [level, (...args: unknown[]) => { state.logWindow.tick(quotas.logsPerMinute, "log"); this.#logger(level, "plugin log", { id: manifest.id, args }); }])) as Record<PluginLogLevel, (...args: unknown[]) => void>,
+      t: makePluginT(manifest.id),
+      get locale(): string { return getActiveLocaleLang(); },
     };
   }
 
@@ -872,14 +664,14 @@ export class PluginSdkBridge {
     const values = command.meta.form ? validateCommandFormValues(command.meta.form, args) : undefined;
     state.userCommandDepth += 1;
     const release = () => { setTimeout(() => { state.userCommandDepth = Math.max(0, state.userCommandDepth - 1); }, 2_000).unref?.(); };
-    try { await withTimeout(Promise.resolve().then(() => command.handler(values)), timeoutMs); } finally { release(); }
+    try { await withTimeout(Promise.resolve().then(() => command.handler(values)), timeoutMs); } catch (error) { this.#logger("warn", "plugin callback failed", { pluginId: id, commandId, reason: safeError(error), errorCode: classifyPluginError(error) }); throw error; } finally { release(); }
   }
 
   async executeMenuSelect(id: string, itemId: string): Promise<void> {
     const state = this.#pluginState(id);
     if (!state.menuItems.some((item) => item.id === itemId)) throw new Error("Plugin menu item is not registered.");
     state.userCommandDepth += 1;
-    try { for (const handler of state.menuHandlers) await Promise.resolve(handler(itemId)); } finally { setTimeout(() => { state.userCommandDepth = Math.max(0, state.userCommandDepth - 1); }, 2_000).unref?.(); }
+    try { for (const handler of state.menuHandlers) await Promise.resolve(handler(itemId)); } catch (error) { this.#logger("warn", "plugin callback failed", { pluginId: id, menuItemId: itemId, reason: safeError(error), errorCode: classifyPluginError(error) }); throw error; } finally { setTimeout(() => { state.userCommandDepth = Math.max(0, state.userCommandDepth - 1); }, 2_000).unref?.(); }
   }
 
   notifyConfigChanged(id: string): void {
@@ -959,18 +751,6 @@ export class PluginSdkBridge {
   }
 }
 
-function requirePanel(state: PluginRuntimeState, panelId: unknown): PluginPanelHostHandle & { onMessage?: (msg: unknown) => void } {
-  const panel = state.panels.get(String(panelId));
-  if (!panel) throw new Error("Plugin panel is no longer open.");
-  return panel;
-}
-
-function registerDisposer(state: PluginRuntimeState, dispose: () => void): string {
-  const subId = opaqueId("sub");
-  state.eventSubscriptions.set(subId, dispose);
-  return subId;
-}
-
 function countActiveBubbles(state: PluginRuntimeState): number { return state.bubbles.size; }
 
 // ---------------------------------------------------------------------------
@@ -1024,9 +804,18 @@ async function prepareSafeRequest(urlText: string, opts: ValidatedNetOptions, al
   return { url, init, controller, timeout };
 }
 
-export async function safeHttpFetch(urlText: string, options: ValidatedNetOptions | unknown, allowedHosts: Set<string>): Promise<SimpleHttpResponse> {
+type NetworkDiagnostics = { logger?: PluginRuntimeLogger; pluginId?: string; route?: string };
+
+export async function safeHttpFetch(urlText: string, options: ValidatedNetOptions | unknown, allowedHosts: Set<string>, diagnostics?: NetworkDiagnostics): Promise<SimpleHttpResponse> {
   const opts: ValidatedNetOptions = isValidatedNetOptions(options) ? options : { method: "GET", headers: undefined, timeoutMs: undefined };
-  const { url, init, timeout } = await prepareSafeRequest(urlText, opts, allowedHosts);
+  const started = Date.now();
+  let host = "";
+  try { host = new URL(urlText).hostname.toLowerCase(); } catch { host = "invalid"; }
+  logPluginDiagnostic(diagnostics?.logger, "debug", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.fetch", method: opts.method, host, phase: "begin" });
+  let prepared: Awaited<ReturnType<typeof prepareSafeRequest>>;
+  try { prepared = await prepareSafeRequest(urlText, opts, allowedHosts); }
+  catch (error) { logPluginDiagnostic(diagnostics?.logger, "warn", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.fetch", method: opts.method, host, phase: "denied", reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started }); throw error; }
+  const { url, init, timeout } = prepared;
   try {
     const response = await fetch(url, init);
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) throw new Error("Plugin HTTP redirects are not allowed.");
@@ -1035,15 +824,24 @@ export async function safeHttpFetch(urlText: string, options: ValidatedNetOption
     for (const key of ["content-type", "etag", "last-modified", "retry-after", "x-ratelimit-remaining"]) { const value = response.headers.get(key); if (value) headers[key] = value; }
     let json: unknown;
     if ((headers["content-type"] ?? "").includes("application/json")) { try { json = JSON.parse(text); } catch { json = undefined; } }
+    logPluginDiagnostic(diagnostics?.logger, "debug", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.fetch", method: opts.method, host: url.hostname, phase: "success", status: response.status, sizeBytes: Buffer.byteLength(text), durationMs: Date.now() - started });
     return { status: response.status, ok: response.ok, headers, text, ...(json === undefined ? {} : { json }) };
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new Error("Plugin HTTP fetch timed out.");
+    const mapped = error instanceof Error && error.name === "AbortError" ? new Error("Plugin HTTP fetch timed out.") : error;
+    logPluginDiagnostic(diagnostics?.logger, "warn", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.fetch", method: opts.method, host: url.hostname, phase: "fail", reason: mapped instanceof Error ? mapped.message : String(mapped), errorCode: classifyPluginError(mapped), durationMs: Date.now() - started });
+    if (mapped instanceof Error) throw mapped;
     throw error;
   } finally { clearTimeout(timeout); }
 }
 
-export async function safeHttpStream(urlText: string, opts: ValidatedNetOptions, allowedHosts: Set<string>, onChunk: (chunk: string) => void): Promise<{ status: number; ok: boolean }> {
-  const { url, init, timeout } = await prepareSafeRequest(urlText, { ...opts, timeoutMs: opts.timeoutMs ?? 120_000 }, allowedHosts);
+export async function safeHttpStream(urlText: string, opts: ValidatedNetOptions, allowedHosts: Set<string>, onChunk: (chunk: string) => void, diagnostics?: NetworkDiagnostics): Promise<{ status: number; ok: boolean }> {
+  const started = Date.now();
+  let host = "";
+  try { host = new URL(urlText).hostname.toLowerCase(); } catch { host = "invalid"; }
+  let prepared: Awaited<ReturnType<typeof prepareSafeRequest>>;
+  try { prepared = await prepareSafeRequest(urlText, { ...opts, timeoutMs: opts.timeoutMs ?? 120_000 }, allowedHosts); }
+  catch (error) { logPluginDiagnostic(diagnostics?.logger, "warn", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.stream", method: opts.method, host, phase: "denied", reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started }); throw error; }
+  const { url, init, timeout } = prepared;
   try {
     const response = await fetch(url, init);
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) throw new Error("Plugin HTTP redirects are not allowed.");
@@ -1062,9 +860,12 @@ export async function safeHttpStream(urlText: string, opts: ValidatedNetOptions,
       const tail = decoder.decode();
       if (tail.length > 0) onChunk(tail);
     }
+    logPluginDiagnostic(diagnostics?.logger, "debug", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.stream", method: opts.method, host: url.hostname, phase: "success", status: response.status, durationMs: Date.now() - started });
     return { status: response.status, ok: response.ok };
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new Error("Plugin HTTP stream timed out.");
+    const mapped = error instanceof Error && error.name === "AbortError" ? new Error("Plugin HTTP stream timed out.") : error;
+    logPluginDiagnostic(diagnostics?.logger, "warn", "plugin network request", { pluginId: diagnostics?.pluginId, route: diagnostics?.route ?? "net.stream", method: opts.method, host: url.hostname, phase: "fail", reason: mapped instanceof Error ? mapped.message : String(mapped), errorCode: classifyPluginError(mapped), durationMs: Date.now() - started });
+    if (mapped instanceof Error) throw mapped;
     throw error;
   } finally { clearTimeout(timeout); }
 }
@@ -1079,7 +880,6 @@ export function isPrivateIp(address: string): boolean { if (net.isIPv4(address))
 // Validators
 // ---------------------------------------------------------------------------
 
-class WindowCounter { count = 0; started = Date.now(); tick(max: number, label: string): void { const now = Date.now(); if (now - this.started >= 60_000) this.reset(); this.count += 1; check(this.count <= max, `Plugin ${label} quota exceeded.`); } reset(): void { this.count = 0; this.started = Date.now(); } }
 function check(ok: boolean, message: string): void { if (!ok) throw new Error(message); }
 function clampNumber(value: number, min: number, max: number): number { if (!Number.isFinite(value)) return min; return Math.min(Math.max(value, min), max); }
 function validateStorageKey(key: string): string { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(String(key))) throw new Error("Invalid plugin storage key."); return String(key); }

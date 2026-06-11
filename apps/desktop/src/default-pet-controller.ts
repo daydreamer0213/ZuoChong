@@ -137,6 +137,12 @@ export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction
   return { shown: isDefaultPetVisible() };
 }
 
+export function applyExternalPetStatusReaction(reaction: OpenPetsReaction | null): void {
+  if (reaction === null || reaction === "idle") clearStatusBadge();
+  else setStatusBadge(reaction);
+  refreshDefaultPetContent();
+}
+
 export function applyExternalPetMoveBy(options: PetMoveOptions): Promise<{ readonly moved: boolean; readonly reason?: string }> {
   return moveDefaultPetBy(Number(options.x), Number(options.y), options.durationMs);
 }

@@ -15,11 +15,21 @@ Catalog v2 is legacy and exists only for old app versions/fallback compatibility
 For new work, migrations, and Control Center UI, do not optimize for v2 behavior.
 Use catalog v3 (`thumbnail`, `spritesheet`, paginated pages, and search index) as the source of truth.
 
+## Forward-Only Product Direction
+
+Move the current app forward; do not keep legacy compatibility code, duplicate
+paths, stale shims, or old behavior in current runtime code unless it is required
+so older released app versions can still open/use versioned catalogs or existing
+published data. Prefer clean migrations, versioned catalog/data boundaries, and
+removing obsolete code over preserving backwards-compatible branches. The bar is:
+old app versions should not break catastrophically, but the current app should
+not carry legacy bloat for deprecated plugin/catalog behavior.
+
 ## Plugin Docs
 
 Before changing plugin platform code, official plugins, plugin catalog generation, plugin packaging, plugin runtime behavior, or plugin-facing UI, read:
 - `docs/plugins.md` for the current plugin platform architecture, manifest/runtime rules, local development workflow, publishing commands, and troubleshooting notes.
-- `docs/new_plugins.md` for the companion-first Windows plugin direction, planned official plugin lineup, bundling defaults, and right-click plugin action strategy.
+- `docs/superplugins.md` for the companion-first plugin direction, planned official plugin lineup, bundling defaults, and right-click plugin action strategy.
 
 When plugin work is finished, update these docs if behavior, commands, manifests, plugin IDs, default bundled/enabled status, catalog workflow, permissions, or the planned plugin lineup changed. Do not leave plugin docs stale after implementation.
 

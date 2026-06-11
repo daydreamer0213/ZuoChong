@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsDeclarativePluginManifest } from "../src/plugin-manifest.js";
 import { PluginService, executeDefaultPetPluginCommand, getDefaultPetPluginCommands, setPluginServiceForTests, stopPluginService } from "../src/plugin-service.js";
@@ -13,14 +13,15 @@ let lastRoot = "";
 class FakeRuntime {
   reloads: string[] = [];
   logs: Array<{ level: string; message: string; fields?: Record<string, unknown> }> = [];
-  commandState: Record<string, Array<{ id: string; title: string }>> = {};
+  commandState: Record<string, Array<{ id: string; title: string; description?: string; form?: { submitLabel?: string; fields: Array<{ id: string; type: string; label: string }> } }>> = {};
   executed: Array<{ pluginId: string; commandId: string }> = [];
+  commandError: Error | null = null;
   stopped = false;
   async start(): Promise<void> {}
   stop(): void { this.stopped = true; }
   async reloadPlugin(id: string): Promise<void> { this.reloads.push(id); }
-  getPluginState(id: string): { commands: Array<{ id: string; title: string }> } { return { commands: this.commandState[id] ?? [] }; }
-  async executeCommand(pluginId: string, commandId: string): Promise<void> { this.executed.push({ pluginId, commandId }); }
+  getPluginState(id: string): { commands: Array<{ id: string; title: string; description?: string; form?: { submitLabel?: string; fields: Array<{ id: string; type: string; label: string }> } }> } { return { commands: this.commandState[id] ?? [] }; }
+  async executeCommand(pluginId: string, commandId: string): Promise<void> { this.executed.push({ pluginId, commandId }); if (this.commandError) throw this.commandError; }
   log(level: string, message: string, fields?: Record<string, unknown>): void { this.logs.push({ level, message, fields }); }
 }
 
@@ -90,6 +91,60 @@ await scenario("config save replaces and reloads", async ({ service, store, runt
   assert.deepEqual(runtime.reloads, ["plug"]);
 });
 
+await scenario("config save reload preserves plugin user sounds", async ({ root, userData, store, runtime }) => {
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, allowedPluginRoots: [root] });
+  addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0", config: { customSound: { kind: "user-sound", id: "a".repeat(32), name: "Bell" } } }, { manifestVersion: 3, id: "plug", name: "Plug", version: "1.0.0", runtime: "javascript", sdkVersion: "3.0.0", entry: "index.js", permissions: [], configSchema: { customSound: { type: "sound" } } });
+  const soundDir = join(userData, "plugin-user-sounds", "plug");
+  const soundPath = join(soundDir, `${"a".repeat(32)}.ogg`);
+  mkdirSync(soundDir, { recursive: true });
+  writeFileSync(soundPath, "sound");
+  const result = await service.saveConfig("plug", { customSound: { kind: "user-sound", id: "a".repeat(32), name: "Bell" } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(runtime.reloads, ["plug"]);
+  assert.equal(existsSync(soundPath), true);
+});
+
+await scenario("pickConfigSound logs stages and useful unsupported format error", async ({ root, store, runtime }) => {
+  const selectedPath = join(root, "tone.flac");
+  writeFileSync(selectedPath, "sound");
+  const service = new PluginService({
+    stateStore: store,
+    runtime: runtime as never,
+    allowedPluginRoots: [root],
+    showSoundOpenDialog: async () => ({ canceled: false, filePaths: [selectedPath] }),
+    capabilities: { audio: { importUserSoundFromPath: async () => { throw new Error("Plugin sound format is not supported."); } } } as never,
+  });
+  addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0" }, { manifestVersion: 3, id: "plug", name: "Plug", version: "1.0.0", runtime: "javascript", sdkVersion: "3.0.0", entry: "index.js", permissions: [], configSchema: { customSound: { type: "sound" } } });
+  const result = await service.pickConfigSound("plug");
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Plugin sound format is not supported.");
+  assert.equal(runtime.logs.some((entry) => entry.message === "Plugin config sound pick requested." && entry.fields?.pluginId === "plug"), true);
+  assert.equal(runtime.logs.some((entry) => entry.message === "Plugin config sound picker opened."), true);
+  const selectedLog = runtime.logs.find((entry) => entry.message === "Plugin config sound file selected.");
+  assert.equal(selectedLog?.fields?.basename, basename(selectedPath));
+  assert.equal(selectedLog?.fields?.ext, ".flac");
+  assert.equal(selectedLog?.fields?.sizeBytes, 5);
+  assert.equal(Object.values(selectedLog?.fields ?? {}).some((value) => typeof value === "string" && value.includes(root)), false);
+  assert.equal(runtime.logs.some((entry) => entry.message === "Plugin config sound import failed." && entry.fields?.reason === "Plugin sound format is not supported."), true);
+});
+
+await scenario("pickConfigSound returns opaque sound and logs success", async ({ root, store, runtime }) => {
+  const selectedPath = join(root, "ding.ogg");
+  writeFileSync(selectedPath, "sound");
+  const service = new PluginService({
+    stateStore: store,
+    runtime: runtime as never,
+    allowedPluginRoots: [root],
+    showSoundOpenDialog: async () => ({ canceled: false, filePaths: [selectedPath] }),
+    capabilities: { audio: { importUserSoundFromPath: async (pluginId: string, path: string) => ({ kind: "user-sound", id: "abc123", name: basename(path) }) } } as never,
+  });
+  addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0" }, { manifestVersion: 3, id: "plug", name: "Plug", version: "1.0.0", runtime: "javascript", sdkVersion: "3.0.0", entry: "index.js", permissions: [], configSchema: { customSound: { type: "sound" } } });
+  const result = await service.pickConfigSound("plug");
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.sound, { kind: "user-sound", id: "abc123", name: "ding.ogg" });
+  assert.equal(runtime.logs.some((entry) => entry.message === "Plugin config sound import succeeded." && entry.fields?.pluginId === "plug" && entry.fields?.soundId === "abc123" && entry.fields?.name === "ding.ogg"), true);
+});
+
 await scenario("enable disable persists and reloads", async ({ service, store, runtime }) => {
   addPlugin(store, { enabled: false });
   const result = await service.setEnabled("plug", true);
@@ -102,6 +157,20 @@ await scenario("reload unknown is safe error", async ({ service }) => {
   const result = await service.reload("missing");
   assert.equal(result.ok, false);
   assert.match(result.error, /not installed/);
+});
+
+await scenario("uninstall clears plugin user sounds", async ({ userData, root, store }) => {
+  mkdirSync(join(userData, "plugins"), { recursive: true });
+  mkdirSync(join(userData, "plugins-dev"), { recursive: true });
+  const runtime = new FakeRuntime();
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, allowedPluginRoots: [root] });
+  addPlugin(store, { source: "catalog", installPath: join(userData, "plugins", "plug") });
+  const soundDir = join(userData, "plugin-user-sounds", "plug");
+  mkdirSync(soundDir, { recursive: true });
+  writeFileSync(join(soundDir, "a".repeat(32) + ".ogg"), "sound");
+  const result = await service.uninstall("plug");
+  assert.equal(result.ok, true);
+  assert.equal(existsSync(soundDir), false);
 });
 
 await scenario("stop cancels runtime", async ({ service, runtime }) => {
@@ -246,23 +315,69 @@ await localScenario("loadLocal snapshots javascript entry", async ({ service, so
   assert.equal(readFileSync(join(install, "index.mjs"), "utf8"), "export default {};\n");
 });
 
+await localScenario("loadLocal snapshots v3 locale catalogs for translated UI", async ({ service, source, store, userData, runtime }) => {
+  writeManifest(source, {
+    manifestVersion: 3,
+    id: "i18n-local",
+    name: "$t:plugin.name",
+    description: "$t:plugin.description",
+    version: "1.0.0",
+    runtime: "javascript",
+    sdkVersion: "3.0.0",
+    entry: "index.js",
+    permissions: ["pet:speak"],
+    configSchema: {
+      enabled: { type: "boolean", default: true, label: "$t:config.enabled.label", description: "$t:config.enabled.description" },
+    },
+  });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  mkdirSync(join(source, "locales"), { recursive: true });
+  writeFileSync(join(source, "locales", "en.json"), JSON.stringify({
+    "plugin.name": "Translated Plugin",
+    "plugin.description": "Translated description.",
+    "config.enabled.label": "Translated toggle",
+    "config.enabled.description": "Translated toggle description.",
+    "command.run.title": "Translated command",
+    "command.run.description": "Translated command description.",
+    "command.run.submit": "Translated submit",
+    "form.message.label": "Translated message",
+  }), "utf8");
+
+  const result = await service.loadLocal();
+  assert.equal(result.ok, true);
+  const install = store.getRecord("i18n-local")?.installPath ?? join(userData, "plugins-dev", "i18n-local");
+  assert.equal(existsSync(join(install, "locales", "en.json")), true);
+  const plugin = result.snapshot.plugins[0];
+  assert.equal(plugin.name, "Translated Plugin");
+  assert.equal(plugin.description, "Translated description.");
+  assert.equal(plugin.configSchema?.enabled?.label, "Translated toggle");
+  assert.equal(plugin.configSchema?.enabled?.description, "Translated toggle description.");
+
+  runtime.commandState["i18n-local"] = [{ id: "run", title: "$t:command.run.title", description: "$t:command.run.description", form: { submitLabel: "$t:command.run.submit", fields: [{ id: "message", type: "text", label: "$t:form.message.label" }] } } as never];
+  const refreshed = (await service.getSnapshot()).plugins[0];
+  assert.equal(refreshed.commands?.[0]?.title, "Translated command");
+  assert.equal(refreshed.commands?.[0]?.description, "Translated command description.");
+  assert.equal(refreshed.commands?.[0]?.form?.submitLabel, "Translated submit");
+  assert.equal(refreshed.commands?.[0]?.form?.fields[0]?.label, "Translated message");
+});
+
 await localScenario("bundled seeding copies manifest and preserves user choices", async ({ userData, root, store }) => {
   const official = join(root, "official");
-  const source = join(official, "openpets.break-buddy");
-  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"], configSchema: { minutes: { type: "number", default: 30 } } });
+  const source = join(official, "openpets.reminders");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"], configSchema: { minutes: { type: "number", default: 30 } } });
   writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
   await service.start();
-  let record = store.getRecord("openpets.break-buddy");
+  let record = store.getRecord("openpets.reminders");
   assert.equal(record?.source, "catalog");
   assert.equal(record?.bundled, true);
   assert.equal(record?.enabled, true);
   assert.equal(readFileSync(join(record?.installPath ?? "", "index.js"), "utf8"), "OpenPetsPlugin.register({ start() {} });\n");
-  store.replaceConfig("openpets.break-buddy", { minutes: 45 });
-  store.setEnabled("openpets.break-buddy", false);
-  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "2.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak", "pet:reaction"] });
+  store.replaceConfig("openpets.reminders", { minutes: 45 });
+  store.setEnabled("openpets.reminders", false);
+  writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "2.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak", "pet:reaction"] });
   await service.seedBundledPlugins();
-  record = store.getRecord("openpets.break-buddy");
+  record = store.getRecord("openpets.reminders");
   assert.equal(record?.version, "2.0.0");
   assert.equal(record?.enabled, false);
   assert.deepEqual(record?.config, { minutes: 45 });
@@ -274,16 +389,16 @@ await localScenario("bundled seeding prunes stale ids and blocks uninstall updat
   const oldManifest = writeManifest(oldInstall, manifest({ id: "openpets.pomodoro" }));
   store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const official = join(root, "official");
-  const source = join(official, "openpets.github-notifications");
-  writeManifest(source, { manifestVersion: 2, id: "openpets.github-notifications", name: "GitHub", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["network"], network: { hosts: ["api.github.com"] } });
+  const source = join(official, "openpets.reminders");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["network"], network: { hosts: ["api.github.com"] } });
   writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
   await service.start();
   assert.equal(store.getRecord("openpets.pomodoro"), undefined);
-  assert.equal(store.getRecord("openpets.github-notifications")?.enabled, false);
-  assert.deepEqual(store.getRecord("openpets.github-notifications")?.approvedNetworkHosts, ["api.github.com"]);
-  assert.equal((await service.uninstall("openpets.github-notifications")).ok, false);
-  const update = await service.updateCatalog("openpets.github-notifications");
+  assert.equal(store.getRecord("openpets.reminders")?.enabled, true);
+  assert.deepEqual(store.getRecord("openpets.reminders")?.approvedNetworkHosts, ["api.github.com"]);
+  assert.equal((await service.uninstall("openpets.reminders")).ok, false);
+  const update = await service.updateCatalog("openpets.reminders");
   assert.equal(update.ok, false);
   assert.match(update.error, /Bundled plugins update/);
 });
@@ -318,25 +433,25 @@ await localScenario("bundled seeding rejects plugins root symlink", async ({ use
   mkdirSync(outsideRoot, { recursive: true });
   symlinkSync(outsideRoot, join(userData, "plugins"), "dir");
   const official = join(root, "official");
-  const source = join(official, "openpets.break-buddy");
-  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  const source = join(official, "openpets.reminders");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
   writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
   const runtime = new FakeRuntime();
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, bundledPluginSourceDirs: [official] });
   await service.seedBundledPlugins();
-  assert.equal(store.getRecord("openpets.break-buddy"), undefined);
-  assert.equal(existsSync(join(outsideRoot, "openpets.break-buddy")), false);
+  assert.equal(store.getRecord("openpets.reminders"), undefined);
+  assert.equal(existsSync(join(outsideRoot, "openpets.reminders")), false);
   assert.equal(runtime.logs.some((entry) => entry.message.includes("Bundled plugin seed failed")), true);
 });
 
 await localScenario("start skips bundled seeding when disabled", async ({ userData, root, store }) => {
   const official = join(root, "official");
-  const source = join(official, "openpets.break-buddy");
-  writeManifest(source, { manifestVersion: 2, id: "openpets.break-buddy", name: "Break Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  const source = join(official, "openpets.reminders");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
   writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official], seedBundledPlugins: false });
   await service.start();
-  assert.equal(store.getRecord("openpets.break-buddy"), undefined);
+  assert.equal(store.getRecord("openpets.reminders"), undefined);
 });
 
 await scenario("catalog metadata ignores bundled records", async ({ userData, store, runtime }) => {
@@ -483,6 +598,14 @@ await scenario("right-click command helper groups caps and ignores stale command
   await executeDefaultPetPluginCommand("alpha", "run");
   assert.deepEqual(runtime.executed, [{ pluginId: "alpha", commandId: "run" }]);
   stopPluginService();
+});
+
+await scenario("executeCommand returns plugin command validation errors", async ({ service, store, runtime }) => {
+  addPlugin(store);
+  runtime.commandError = new Error("Message is required.");
+  const result = await service.executeCommand("plug", "set-reminder");
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "Message is required.");
 });
 
 console.error("Plugin service validation passed.");

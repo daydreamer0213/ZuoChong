@@ -446,6 +446,14 @@ export function scaffoldPlugin(options: PluginNewOptions): { readonly dir: strin
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
   writeFileSync(entryPath, template.entry(templateContext), { encoding: "utf8", flag: "wx" });
   writeFileSync(join(targetDir, "test.js"), template.test(templateContext), { encoding: "utf8", flag: "wx" });
+  // Templates that localize host-rendered strings ($t:) or runtime bodies
+  // (ctx.t) ship a source locales/en.json; the host loads locales/<locale>.json
+  // and falls back to en. Write it whenever the template declares one.
+  if (template.locales) {
+    const localesDir = join(targetDir, "locales");
+    mkdirSync(localesDir, { recursive: true });
+    writeFileSync(join(localesDir, "en.json"), `${JSON.stringify(template.locales(templateContext), null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  }
   const packageJsonPath = join(targetDir, "package.json");
   if (!existsSync(packageJsonPath)) {
     writeFileSync(packageJsonPath, `${JSON.stringify({ name: slugifyPluginName(options.name) || "openpets-plugin", private: true, type: "module", scripts: { test: "node test.js" }, devDependencies: { "@open-pets/plugin-sdk": "^3.0.0" } }, null, 2)}\n`, { encoding: "utf8" });
