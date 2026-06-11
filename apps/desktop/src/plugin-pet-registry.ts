@@ -1,7 +1,7 @@
 import { BrowserWindow } from "electron";
 
 import { getAppStateSnapshot, type PetScaleValue } from "./app-state.js";
-import { applyExternalPetReaction, getDefaultPetPaused, getDefaultPetWindowForPlugins, defaultPetBubbleArbiter } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetStatusReaction, getDefaultPetPaused, getDefaultPetWindowForPlugins, defaultPetBubbleArbiter } from "./default-pet-controller.js";
 import { clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, type Point } from "./display.js";
 import { builtInPet } from "./built-in-pet.js";
 import { debug, info } from "./logger.js";
@@ -27,7 +27,7 @@ type SpawnedPet = {
   window: BrowserWindow | null;
   readonly arbiter: PetBubbleArbiter;
   bubbles: PetPluginBubbles;
-  badge: PetStatusBadgeReaction | null;
+  statusReaction: PetStatusBadgeReaction | null;
   currentAnimation: string;
   spriteOverride: { filePath: string; fps: number; loop: boolean } | null;
   scale: PetScaleValue;
@@ -78,7 +78,7 @@ export function onPluginPetsChange(listener: (pets: PluginPetInfo[]) => void): (
 
 function refreshSpawnedPet(pet: SpawnedPet): void {
   if (!pet.window || pet.window.isDestroyed()) return;
-  void loadExplicitPetContent(pet.window, pet.petId, null, pet.badge, undefined, pet.scale, pet.bubbles.transient || pet.bubbles.pinned ? pet.bubbles : null).then(() => {
+  void loadExplicitPetContent(pet.window, pet.petId, null, pet.statusReaction, undefined, pet.scale, pet.bubbles.transient || pet.bubbles.pinned ? pet.bubbles : null).then(() => {
     if (pet.window && !pet.window.isDestroyed() && pet.spriteOverride) setPetSpriteOverride(pet.window, pet.spriteOverride);
   });
 }
@@ -100,7 +100,7 @@ export async function spawnPluginPet(opts: { pluginId: string; petId: string; na
     window: null,
     arbiter: null as unknown as PetBubbleArbiter,
     bubbles: { transient: null, pinned: null },
-    badge: null,
+    statusReaction: null,
     currentAnimation: "idle",
     spriteOverride: null,
     scale: state.preferences.petScale as PetScaleValue,
@@ -223,15 +223,14 @@ export function setPluginPetScale(petHandleId: string, scale: number): void {
   if (pet) pet.scale = scale as PetScaleValue;
 }
 
-export function badgePluginPet(petHandleId: string, reaction: OpenPetsReaction | null): void {
+export function setPluginPetStatusReaction(petHandleId: string, reaction: OpenPetsReaction | null): void {
   if (petHandleId === "default") {
-    // The default pet's badge flows through its reaction pipeline.
-    if (reaction) applyExternalPetReaction(reaction);
+    applyExternalPetStatusReaction(reaction);
     return;
   }
   const pet = spawnedPets.get(petHandleId);
   if (!pet) throw new Error(`Pet is not available: ${petHandleId}`);
-  pet.badge = reaction === null || reaction === "idle" ? null : reaction as PetStatusBadgeReaction;
+  pet.statusReaction = reaction === null || reaction === "idle" ? null : reaction as PetStatusBadgeReaction;
   refreshSpawnedPet(pet);
 }
 

@@ -4,6 +4,7 @@ const api = {
   getPetsState: () => ipcRenderer.invoke("openpets:get-pets-state"),
   getDashboardSnapshot: () => ipcRenderer.invoke("openpets:get-dashboard-snapshot"),
   getSettingsState: () => ipcRenderer.invoke("openpets:get-settings-state"),
+  getI18n: () => ipcRenderer.invoke("openpets:get-i18n"),
   updatePreferences: (patch) => ipcRenderer.invoke("openpets:update-preferences", patch),
   getReactionAnimationSettings: () => ipcRenderer.invoke("openpets:get-reaction-animation-settings"),
   getLaunchAtLogin: () => ipcRenderer.invoke("openpets:get-launch-at-login"),
@@ -16,8 +17,9 @@ const api = {
   getPluginCatalogSnapshot: (refresh) => ipcRenderer.invoke("openpets:plugins-catalog-snapshot", refresh),
   setPluginEnabled: (id, enabled) => ipcRenderer.invoke("openpets:plugins-set-enabled", id, enabled),
   savePluginConfig: (id, config) => ipcRenderer.invoke("openpets:plugins-save-config", id, config),
+  pickPluginConfigSound: (id) => ipcRenderer.invoke("openpets:plugins-pick-config-sound", id),
   reloadPlugin: (id) => ipcRenderer.invoke("openpets:plugins-reload", id),
-  executePluginCommand: (id, commandId) => ipcRenderer.invoke("openpets:plugins-execute-command", id, commandId),
+  executePluginCommand: (id, commandId, args) => ipcRenderer.invoke("openpets:plugins-execute-command", id, commandId, args),
   loadLocalPlugin: () => ipcRenderer.invoke("openpets:plugins-load-local"),
   installCatalogPlugin: (id) => ipcRenderer.invoke("openpets:plugins-install-catalog", id),
   updateCatalogPlugin: (id) => ipcRenderer.invoke("openpets:plugins-update-catalog", id),
@@ -41,6 +43,11 @@ const api = {
     const listener = (_event, route) => callback(route);
     ipcRenderer.on("openpets:control-center-route", listener);
     return () => ipcRenderer.removeListener("openpets:control-center-route", listener);
+  },
+  onPluginsRefresh: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("openpets:plugins-refresh", listener);
+    return () => ipcRenderer.removeListener("openpets:plugins-refresh", listener);
   },
   getIntegrationsState: (selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-snapshot", selectedPetId, commandMode),
   runIntegrationAction: (action, selectedPetId, commandMode) => ipcRenderer.invoke("openpets:agent-setup-action", action, selectedPetId, commandMode),

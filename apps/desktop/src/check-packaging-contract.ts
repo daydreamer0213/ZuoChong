@@ -74,6 +74,7 @@ const reactionMessagesSource = readFileSync(join(appDir, "src", "reaction-messag
 const displaySource = readFileSync(join(appDir, "src", "display.ts"), "utf8");
 const updateCheckerSource = readFileSync(join(appDir, "src", "update-checker.ts"), "utf8");
 const traySource = readFileSync(join(appDir, "src", "tray.ts"), "utf8");
+const enCatalogSource = readFileSync(join(appDir, "src", "i18n", "locales", "en.ts"), "utf8");
 const windowsSource = readFileSync(join(appDir, "src", "windows.ts"), "utf8");
 const agentSetupSource = readFileSync(join(appDir, "src", "agent-setup.ts"), "utf8");
 const loggerSource = readFileSync(join(appDir, "src", "logger.ts"), "utf8");
@@ -92,7 +93,8 @@ assert.match(loggerSource, /redacted-token/, "desktop logger must redact token-l
 assert.match(mainSource, /initializeLogger\(\)/, "desktop startup must initialize logging before subsystem startup.");
 assert.match(mainSource, /process\.platform === "linux"[\s\S]*?appendSwitch\("ozone-platform", "x11"\)/, "Linux desktop pets must prefer X11/Xwayland because GNOME Wayland blocks always-on-top and programmatic window dragging.");
 assert.match(mainSource, /hasSwitch\("ozone-platform"\)/, "Linux X11 preference must let users override Electron's Ozone backend explicitly.");
-assert.match(traySource, /Open Logs Folder/, "desktop tray must expose user-sendable logs for bug reports.");
+assert.match(traySource, /t\("tray\.openLogsFolder"\)/, "desktop tray must expose user-sendable logs for bug reports.");
+assert.match(enCatalogSource, /Open Logs Folder/, "English catalog must keep the user-sendable logs label.");
 assert.match(localIpcSourceForLogging, /request received/, "desktop IPC must log request methods for diagnostics.");
 assert.match(localIpcPathsSource, /OPENPETS_IPC_BIND[\s\S]*?OPENPETS_IPC_ENDPOINT[\s\S]*?validateBindHost[\s\S]*?validateAdvertisedHost/, "WSL NAT IPC must separate bind and advertised endpoints with validation.");
 assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT only controls the advertised discovery endpoint[\s\S]*?OPENPETS_IPC_BIND to opt into TCP IPC listening/, "OPENPETS_IPC_ENDPOINT-only mode must not start TCP listening; OPENPETS_IPC_BIND is the explicit TCP opt-in.");
@@ -105,7 +107,7 @@ for (const reaction of ["idle", "thinking", "working", "editing", "running", "te
   assert.match(reactionMessagesSource, new RegExp(`${reaction}:\\s*\\[`), `reaction messages must define a pool for: ${reaction}`);
 }
 assert.match(reactionMessagesSource, /satisfies Record<OpenPetsReaction, readonly string\[\]>/, "reaction-only bubble message pools must be exhaustive over OpenPetsReaction.");
-assert.match(petWindowSource, /pickReactionMessage\(display\.reaction\)/, "reaction-only bubbles must render randomized messages instead of raw lowercase reaction ids.");
+assert.match(petWindowSource, /pickReactionMessage\(display\.reaction\b/, "reaction-only bubbles must render randomized messages instead of raw lowercase reaction ids.");
 assert.match(petWindowSource, /function preparePetTransientDisplay/, "reaction-only bubbles must prepare a stable random message before rerenders.");
 assert.match(petWindowSource, /function mergePetTransientDisplay/, "reaction-only events must not replace an active explicit message bubble.");
 assert.match(petWindowSource, /return \{ \.\.\.current, reaction: next\.reaction, dismissToken: next\.dismissToken \?\? current\.dismissToken \}/, "reaction-only updates merged into an active message must carry the latest dismiss token.");
@@ -169,7 +171,8 @@ assert.match(localIpcSource, /reason: applied\.reason/, "IPC responses must repo
 assert.match(updateCheckerSource, /alvinunreal\/openpets/, "GitHub release notice must check the public OpenPets repository.");
 assert.match(updateCheckerSource, /api\.github\.com\/repos\/\$\{githubRepository\}\/releases\/latest/, "update checker must use GitHub latest release API.");
 assert.match(updateCheckerSource, /shell\.openExternal\(url\)/, "update action must open the GitHub release page externally.");
-assert.match(traySource, /Update available:/, "tray menu must surface available updates.");
+assert.match(traySource, /t\("tray\.updateAvailable"/, "tray menu must surface available updates.");
+assert.match(enCatalogSource, /Update available:/, "English catalog must keep the update-available label.");
 assert.match(windowsSource, /openpets:check-for-updates/, "settings window must be able to trigger update checks.");
 assert.match(windowsSource, /openpets:get-reaction-animation-settings/, "settings window must be able to load reaction animation metadata.");
 assert.match(windowsSource, /reactionAnimationOverrides/, "settings window must be able to persist reaction animation overrides.");
@@ -209,10 +212,10 @@ for (const reaction of allowedReactions) {
 assert.equal(pickReactionMessage("success", () => 0), reactionMessagePools.success[0], "reaction message picking must be deterministic when random is injected.");
 assert.doesNotMatch(controlCenterRendererSource, /OnboardingView|getOnboardingSnapshot|completeOnboarding/, "Control Center must not include the removed onboarding route.");
 assert.match(controlCenterRendererSource, /function IntegrationsView\(\)/, "Control Center must include integrations.");
-assert.match(controlCenterRendererSource, /Claude Code/, "Control Center integrations must include Claude Code.");
-assert.match(controlCenterRendererSource, /OpenCode/, "Control Center integrations must include OpenCode.");
-assert.match(controlCenterRendererSource, /Cursor/, "Control Center integrations must include Cursor.");
-assert.match(controlCenterRendererSource, /Pi/, "Control Center integrations must include Pi.");
+assert.match(enCatalogSource, /Claude Code/, "Control Center integrations must include Claude Code.");
+assert.match(enCatalogSource, /OpenCode/, "Control Center integrations must include OpenCode.");
+assert.match(enCatalogSource, /Cursor/, "Control Center integrations must include Cursor.");
+assert.match(enCatalogSource, /Pi/, "Control Center integrations must include Pi.");
 assert.doesNotMatch(agentSetupSource, /JSON\.parse\(prepared\.configWrite\.content\)/, "OpenCode desktop preview must parse JSONC planned config safely, not JSON.parse.");
 assert.match(windowsSource, /refreshDefaultPetContent\(\);\s*refreshAgentPetContent\(\);/, "pet scale preference changes must refresh default and agent pet windows.");
 assert.ok(existsSync(join(appDir, "scripts", "clean-package-output.cjs")), "package output cleanup helper must exist.");
@@ -356,7 +359,7 @@ function assertNonEmptyFile(path: string, message: string): void {
 }
 
 function assertBundledOfficialPlugins(resourceDir: string): void {
-  for (const id of ["openpets.ambient-companion", "openpets.break-buddy", "openpets.pet-pal", "openpets.focus-buddy", "openpets.wander-buddy", "openpets.quick-reminders", "openpets.github-notifications"]) {
+  for (const id of ["openpets.reminders"]) {
     const dir = join(resourceDir, "plugins", "official", id);
     const manifestPath = join(dir, "openpets.plugin.json");
     assertNonEmptyFile(manifestPath, `packaged bundled plugin manifest is missing: ${id}`);

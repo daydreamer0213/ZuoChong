@@ -1,8 +1,9 @@
-import { Menu, Tray, type MenuItemConstructorOptions } from "electron";
+import { Menu, shell, Tray, type MenuItemConstructorOptions } from "electron";
 
 import { getAppStateSnapshot } from "./app-state.js";
 import { createTrayIcon } from "./assets.js";
 import { hideDefaultPet, isDefaultPetVisible, setDefaultPetPaused, showDefaultPet } from "./default-pet-controller.js";
+import { t } from "./i18n/index.js";
 import { quitOpenPets } from "./lifecycle.js";
 import { info, openLogsFolder } from "./logger.js";
 import { shellState, togglePaused } from "./state.js";
@@ -32,7 +33,7 @@ export function refreshTrayMenu(): void {
 
   const state = getAppStateSnapshot();
   const defaultPet = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId && !pet.broken) ?? state.pets.installed[0];
-  const defaultPetName = defaultPet?.displayName ?? "Built-in Pet";
+  const defaultPetName = defaultPet?.displayName ?? t("common.builtInPet");
 
   const menu = Menu.buildFromTemplate([
     {
@@ -42,11 +43,11 @@ export function refreshTrayMenu(): void {
     ...createUpdateMenuItems(),
     { type: "separator" },
     {
-      label: `Default Pet: ${defaultPetName}`,
+      label: t("tray.defaultPet", { name: defaultPetName }),
       click: () => openControlCenterWindow("pets"),
     },
     {
-      label: isDefaultPetVisible() ? "Hide Default Pet" : "Show Default Pet",
+      label: isDefaultPetVisible() ? t("tray.hideDefaultPet") : t("tray.showDefaultPet"),
       click: () => {
         if (isDefaultPetVisible()) {
           hideDefaultPet();
@@ -58,7 +59,7 @@ export function refreshTrayMenu(): void {
       },
     },
     {
-      label: shellState.paused ? "Resume All Pets" : "Pause All Pets",
+      label: shellState.paused ? t("tray.resumeAllPets") : t("tray.pauseAllPets"),
       click: () => {
         const paused = togglePaused();
         setDefaultPetPaused(paused);
@@ -69,32 +70,37 @@ export function refreshTrayMenu(): void {
     },
     { type: "separator" },
     {
-      label: "Manage Pets...",
+      label: t("tray.managePets"),
       click: () => openControlCenterWindow("pets"),
     },
     {
-      label: "Control Center...",
+      label: t("tray.controlCenter"),
       click: () => openControlCenterWindow(),
     },
     {
-      label: "Integrations...",
+      label: t("tray.integrations"),
       click: () => openControlCenterWindow("integrations"),
     },
     {
-      label: "Plugins...",
+      label: t("tray.plugins"),
       click: () => openControlCenterWindow("plugins"),
     },
     {
-      label: "Settings...",
+      label: t("tray.settings"),
       click: () => openControlCenterWindow("settings"),
     },
+    { type: "separator" },
     {
-      label: "Open Logs Folder...",
+      label: t("tray.website"),
+      click: () => { void shell.openExternal("https://openpets.dev/"); },
+    },
+    {
+      label: t("tray.openLogsFolder"),
       click: () => { void openLogsFolder(); },
     },
     { type: "separator" },
     {
-      label: "Quit OpenPets",
+      label: t("tray.quit"),
       click: () => quitOpenPets(),
     },
   ]);
@@ -107,7 +113,7 @@ function createUpdateMenuItems(): MenuItemConstructorOptions[] {
   if (status.state !== "available") return [];
   return [
     {
-      label: `Update available: ${status.latestVersion ?? "latest"}...`,
+      label: t("tray.updateAvailable", { version: status.latestVersion ?? t("common.latest") }),
       click: () => { void openUpdateReleasePage(); },
     },
   ];

@@ -118,8 +118,15 @@ export interface OpenPetsAssetRef {
 /** A named host icon (curated set) or a bundled icon asset reference. */
 export type OpenPetsIconRef = string | OpenPetsAssetRef;
 
-/** A named host sound (curated set) or a bundled sound asset reference. */
-export type OpenPetsSoundRef = string | OpenPetsAssetRef;
+/** A JSON-safe reference to a user-imported sound. */
+export interface OpenPetsUserSoundRef {
+  readonly kind: "user-sound";
+  readonly id: string;
+  readonly name?: string;
+}
+
+/** A named host sound, bundled sound asset, or user-imported sound reference. */
+export type OpenPetsSoundRef = string | OpenPetsAssetRef | OpenPetsUserSoundRef;
 
 /** Resolve manifest-declared assets to opaque references. */
 export interface OpenPetsAssetsApi {
@@ -248,12 +255,31 @@ export interface OpenPetsPanelHandle {
   close(): Promise<void>;
 }
 
+/**
+ * Must-not-miss pet alert. Alerts render as sticky high-priority bubbles and
+ * may also request best-effort sound and OS notification delivery.
+ */
+export interface OpenPetsAlert extends Omit<OpenPetsBubble, "sticky" | "priority"> {
+  /** Optional sound to play with the alert. Requires `audio` only when set. */
+  sound?: OpenPetsSoundRef;
+  /** Optional OS notification. Requires `notify` only when set. */
+  notify?: { title: string; body?: string; sound?: boolean };
+}
+
+/** Handle to a live alert bubble. */
+export interface OpenPetsAlertHandle extends OpenPetsBubbleHandle {
+  /** Mark the alert acknowledged and dismiss it. */
+  acknowledge(): Promise<void>;
+}
+
 /** Bubbles, toasts, panels, and the dynamic context-menu section. */
 export interface OpenPetsUiApi {
   /** Show a bubble on the default pet. Requires `pet:speak`. */
   bubble(spec: string | OpenPetsBubble): Promise<OpenPetsBubbleHandle>;
   /** Show a transient host toast. Requires `ui:toast`. */
   toast(spec: { text: string; tone?: OpenPetsStatusTone; durationMs?: number }): Promise<void>;
+  /** Show a sticky high-priority alert bubble. Requires `pet:speak`. */
+  alert(spec: OpenPetsAlert): Promise<OpenPetsAlertHandle>;
   /** Open a sandboxed plugin webview panel. Requires `ui:panel`. */
   panel(spec: OpenPetsPanelOptions): Promise<OpenPetsPanelHandle>;
   /** Fully dynamic context-menu section. Requires `commands`. */
@@ -278,6 +304,10 @@ export interface OpenPetsAudioApi {
    * quiet hours.
    */
   play(sound: OpenPetsSoundRef, options?: { volume?: number }): Promise<void>;
+  /** Import a user-picked sound into plugin-owned host storage. Requires `audio` and `files`. */
+  importUserSound(file: OpenPetsPickedFile, opts?: { name?: string }): Promise<OpenPetsUserSoundRef>;
+  /** Forget a previously imported user sound. Requires `audio`. */
+  forgetUserSound(ref: OpenPetsUserSoundRef): Promise<void>;
   stop(handle?: string): Promise<void>;
 }
 
@@ -406,8 +436,8 @@ export interface OpenPetsPetHandle {
   setAnimation(state: OpenPetsAnimationState): Promise<void>;
   /** Bounded by the host (0.5–2). Requires `pet:animate`. */
   setScale(scale: number): Promise<void>;
-  /** Show a status badge (or clear with null). Requires `pet:reaction`. */
-  badge(badge: OpenPetsReaction | null): Promise<void>;
+  /** Show a status reaction (or clear with null). Requires `pet:reaction`. */
+  setStatusReaction(reaction: OpenPetsReaction | null): Promise<void>;
   /** Requires `pet:move`. Movement is bounded to the work area. */
   moveBy(options: OpenPetsMoveByOptions): Promise<void>;
   /** Requires `pet:move`. */
@@ -852,6 +882,31 @@ export interface OpenPetsContext {
   /** v2 alias of `net` (GET-only). */
   http: OpenPetsHttpApi;
   log: OpenPetsLogApi;
+  /**
+   * Translate a key against the plugin's own `locales/<locale>.json` catalogs
+   * for the active host locale, falling back to the plugin's `en` catalog and
+   * then to the raw key. `{var}` placeholders are interpolated from `vars`.
+   *
+   * Use this for strings the plugin *composes at runtime* (bubble/notify/status
+   * bodies). Static manifest strings (`name`, `description`, `configSchema`
+   * labels, command titles) should instead use the `$t:key` reference form,
+   * which the host resolves at display time.
+   *
+   * ```ts
+   * await ctx.ui.bubble({ text: ctx.t("reminder.fire", { message: "Stretch" }) })
+   * // locales/ja.json: { "reminder.fire": "リマインダー: {message}" } -> "リマインダー: Stretch"
+   * ```
+   */
+  t: (key: string, vars?: Record<string, string | number>) => string;
+  /**
+   * The active host locale string (e.g. `"en"`, `"ja"`, `"pt-BR"`, `"zh-Hans"`).
+   * Read it to branch on language at runtime; `ctx.t` already follows it.
+   *
+   * ```ts
+   * if (ctx.locale.startsWith("ja")) { /* ... *\/ }
+   * ```
+   */
+  readonly locale: string;
 }
 
 /** The object you pass to {@link OpenPetsPluginApi.register}. */
@@ -890,6 +945,7 @@ export type OpenPetsConfigFieldType =
   | "date"
   | "list"
   | "multiselect"
+  | "sound"
   /** Masked input, encrypted at rest, never logged or echoed (v3). */
   | "secret";
 

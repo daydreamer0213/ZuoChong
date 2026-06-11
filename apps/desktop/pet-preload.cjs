@@ -246,6 +246,15 @@ let audioContext = null;
 let activeAudioNodes = [];
 let activeAudioElements = [];
 
+const audioLog = (level, message, fields) => {
+  try {
+    const safeFields = fields && Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+    const line = `[openpets:pet-audio] ${message}`;
+    if (level === "warn") console.warn(line, safeFields || {});
+    else console.debug(line, safeFields || {});
+  } catch { /* diagnostics must never affect playback */ }
+};
+
 const getAudioContext = () => {
   if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
   return audioContext;
@@ -266,10 +275,12 @@ ipcRenderer.on("openpets:play-audio", (_event, payload) => {
   try {
     if (!payload) return;
     const volume = Math.min(1, Math.max(0, Number(payload.volume) || 0.6));
+    audioLog("debug", "play requested", { kind: payload.kind, volume });
     if (payload.kind === "named") {
       const recipe = namedSoundRecipes[payload.name];
-      if (!recipe) return;
+      if (!recipe) { audioLog("warn", "named sound skipped", { name: payload.name, reason: "unknown-sound" }); return; }
       const ctxAudio = getAudioContext();
+      if (ctxAudio.state === "suspended") void ctxAudio.resume().catch((error) => audioLog("warn", "audio context resume failed", { reason: error && error.message ? error.message : String(error) }));
       const now = ctxAudio.currentTime;
       for (const note of recipe) {
         const osc = ctxAudio.createOscillator();
@@ -284,19 +295,27 @@ ipcRenderer.on("openpets:play-audio", (_event, payload) => {
         osc.stop(now + note.start + note.duration + 0.05);
         activeAudioNodes.push(osc);
       }
+      audioLog("debug", "named sound scheduled", { name: payload.name, notes: recipe.length, contextState: ctxAudio.state });
       return;
     }
     if (payload.kind === "data" && typeof payload.dataUrl === "string" && payload.dataUrl.startsWith("data:audio/")) {
       const element = new Audio(payload.dataUrl);
       element.volume = volume;
       activeAudioElements.push(element);
-      element.addEventListener("ended", () => { activeAudioElements = activeAudioElements.filter((entry) => entry !== element); });
-      void element.play().catch(() => undefined);
+      element.addEventListener("ended", () => { activeAudioElements = activeAudioElements.filter((entry) => entry !== element); audioLog("debug", "data sound ended", { remaining: activeAudioElements.length }); });
+      element.addEventListener("error", () => audioLog("warn", "data sound element error", { code: element.error ? element.error.code : undefined, message: element.error ? element.error.message : undefined }));
+      void element.play().then(() => audioLog("debug", "data sound playback started", { volume })).catch((error) => {
+        activeAudioElements = activeAudioElements.filter((entry) => entry !== element);
+        audioLog("warn", "data sound playback failed", { reason: error && error.message ? error.message : String(error), name: error && error.name ? error.name : undefined });
+      });
+    } else {
+      audioLog("warn", "play request ignored", { kind: payload.kind, reason: "invalid-payload" });
     }
-  } catch { /* audio is best-effort */ }
+  } catch (error) { audioLog("warn", "play request threw", { reason: error && error.message ? error.message : String(error) }); }
 });
 
 ipcRenderer.on("openpets:stop-audio", () => {
+  audioLog("debug", "stop requested", { nodes: activeAudioNodes.length, elements: activeAudioElements.length });
   for (const node of activeAudioNodes) { try { node.stop(); } catch { /* already stopped */ } }
   activeAudioNodes = [];
   for (const element of activeAudioElements) { try { element.pause(); } catch { /* noop */ } }

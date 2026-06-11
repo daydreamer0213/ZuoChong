@@ -6,6 +6,7 @@ import { app } from "electron";
 import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
+import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
 import { allowedReactions, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { publishPluginAgentActivity } from "./plugin-events-source.js";
@@ -36,6 +37,7 @@ export interface OpenPetsStateV1 {
   readonly preferences: {
     readonly defaultPetId: string;
     readonly openDefaultPetOnLaunch: boolean;
+    readonly locale: LocalePreference;
     readonly speechBubblesEnabled: boolean;
     readonly petScale: number;
     readonly reactionAnimationOverrides?: ReactionAnimationOverrides;
@@ -377,6 +379,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     openDefaultPetOnLaunch: typeof value.openDefaultPetOnLaunch === "boolean"
       ? value.openDefaultPetOnLaunch
       : defaultState.preferences.openDefaultPetOnLaunch,
+    locale: normalizeLocalePreference(value.locale),
     speechBubblesEnabled: true,
     petScale: normalizePetScale(value.petScale),
     reactionAnimationOverrides: normalizeReactionAnimationOverrides(value.reactionAnimationOverrides),
@@ -385,6 +388,11 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     nodeCommandPath: normalizeCommandPath(value.nodeCommandPath),
     opencodeCommandPath: normalizeCommandPath(value.opencodeCommandPath),
   };
+}
+
+function normalizeLocalePreference(value: unknown): LocalePreference {
+  if (value === "system") return "system";
+  return isSupportedLocale(value) ? value : "system";
 }
 
 function normalizeCommandPath(value: unknown): string | undefined {
@@ -444,6 +452,7 @@ function createDefaultState(): OpenPetsStateV1 {
     preferences: {
       defaultPetId: builtInPet.id,
       openDefaultPetOnLaunch: true,
+      locale: "system",
       speechBubblesEnabled: true,
       petScale: defaultPetScale,
       reactionAnimationOverrides: undefined,

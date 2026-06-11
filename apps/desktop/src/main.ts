@@ -2,8 +2,9 @@ import { app, powerMonitor } from "electron";
 import { existsSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
-import { initializeAppState, releaseStartupInstallLock } from "./app-state.js";
+import { getAppStateSnapshot, initializeAppState, releaseStartupInstallLock } from "./app-state.js";
 import { createAppIcon } from "./assets.js";
+import { setLocaleFromPreference } from "./i18n/index.js";
 import { installDefaultPetDisplayHandlers, shouldOpenDefaultPetOnLaunch, showDefaultPet } from "./default-pet-controller.js";
 import { installAppLifecycle } from "./lifecycle.js";
 import { debug, error as logError, getLogFilePath, info, initializeLogger, warn } from "./logger.js";
@@ -54,6 +55,8 @@ if (!gotSingleInstanceLock) {
     }
 
     initializeAppState();
+    // Resolve the UI language before any window or the tray is built.
+    setLocaleFromPreference(getAppStateSnapshot().preferences.locale);
     installInternalUiProtocol();
     installInternalUiHandlers();
     createAppTray();

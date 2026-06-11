@@ -10,6 +10,7 @@ import type {
   OpenPetsBubble,
   OpenPetsBubbleHandle,
   OpenPetsContext,
+  OpenPetsPickedFile,
   OpenPetsPluginDefinition,
   OpenPetsStatus,
 } from "./index.js";
@@ -39,6 +40,10 @@ const plugin: OpenPetsPluginDefinition = {
     await ctx.status.set({ text: "Ready", tone: "info" });
     await ctx.pet.speak("Hello!");
     await ctx.pet.react("waving");
+    await ctx.pet.setStatusReaction("thinking");
+    const alert = await ctx.ui.alert({ text: "Heads up", markdown: "**Check complete**", icon: "bell", tone: "info", sound: "alert" });
+    alert.onAction(() => undefined);
+    await alert.acknowledge();
     const bubble: OpenPetsBubbleHandle = await ctx.ui.bubble({
       text: "Break in 5:00",
       sticky: true,
@@ -58,26 +63,39 @@ const plugin: OpenPetsPluginDefinition = {
     });
     ctx.storage.subscribe("lastTick", () => undefined);
     await ctx.bus.publish("sample/mood", { mood: "happy" });
+    const picked: OpenPetsPickedFile = (await ctx.files.pick({ accept: ["audio/*"] }))[0]!;
+    const sound = await ctx.audio.importUserSound(picked, { name: "Bell" });
+    await ctx.audio.play(sound);
+    await ctx.audio.forgetUserSound(sound);
     await ctx.commands.register({ id: "greet", title: "Greet" }, async () => {
       await ctx.pet.speak("Hi again!");
     });
+    // i18n surface: ctx.locale (active host locale) + ctx.t (runtime translation).
+    await ctx.status.set({ text: `${ctx.locale}:${ctx.t("greeting", { name: "Pet" })}` });
   },
 };
 
 const { ctx, calls, harness } = createMockContext();
+harness.files.provide([{ name: "bell.wav", bytes: new Uint8Array([1, 2, 3]) }]);
 await plugin.start(ctx);
 
-assert.deepEqual(calls.speak, ["Hello!", "Break in 5:00"]);
+assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00"]);
 assert.deepEqual(calls.react, ["waving"]);
-assert.equal(calls.status.length, 1);
+assert.deepEqual(calls.statusReactions, ["thinking"]);
+assert.equal(calls.status.length, 2);
 assert.ok(calls.schedules.has("tick"));
 assert.ok(calls.schedules.has("daily-summary"));
 assert.ok(calls.commands.has("greet"));
-assert.equal(calls.bubbles.length, 2, "speak + ui.bubble both produce bubbles");
+assert.equal(calls.bubbles.length, 3, "speak + ui.alert + ui.bubble all produce bubbles");
+assert.equal(calls.alerts.length, 1);
+assert.equal(calls.alerts[0]!.acknowledged, true);
+assert.equal(calls.sounds[0]!.sound, "alert");
 assert.equal(calls.busPublishes.length, 1);
+assert.equal(calls.importedUserSounds.length, 1);
+assert.equal(calls.forgottenUserSounds.length, 1);
 
 // Bubble interactions round-trip.
-const live = calls.bubbles[1]!;
+const live = calls.bubbles[2]!;
 assert.equal(live.spec.sticky, true);
 await harness.fireBubbleAction(live.handle.id, "done");
 assert.ok(calls.dismissedBubbles.includes(live.handle.id), "onAction('done') dismissed the bubble");
@@ -91,9 +109,23 @@ await harness.emit("pet:clicked", { petId: "default" });
 assert.deepEqual(calls.react, ["waving", "celebrating"]);
 
 await calls.commands.get("greet")?.handler();
-assert.deepEqual(calls.speak, ["Hello!", "Break in 5:00", "Hi again!"]);
+assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00", "Hi again!"]);
 
 const status: OpenPetsStatus = calls.status[0]!;
 assert.ok(typeof status === "object" && status.text === "Ready");
+
+// ctx.t / ctx.locale drift checks: the runtime bridge must expose both members.
+assert.equal(ctx.locale, "en", "ctx.locale defaults to en");
+assert.equal(ctx.t("missing.key", { name: "Pet" }), "missing.key", "ctx.t echoes unknown keys");
+const i18nStatus = calls.status[1]!;
+assert.ok(typeof i18nStatus === "object" && i18nStatus.text === "en:greeting", "no-catalog ctx.t echoes key, ctx.locale is en");
+
+// A harness with catalogs resolves active locale -> en -> key, then interpolates.
+const i18n = createMockContext({ locales: { en: { greeting: "Hi {name}" }, ja: { greeting: "やあ {name}" } } });
+assert.equal(i18n.ctx.t("greeting", { name: "Pet" }), "Hi Pet", "default locale uses en catalog");
+i18n.harness.system.set({ locale: "ja" });
+assert.equal(i18n.ctx.locale, "ja", "ctx.locale follows system.set({ locale })");
+assert.equal(i18n.ctx.t("greeting", { name: "Pet" }), "やあ Pet", "active locale catalog wins");
+assert.equal(i18n.ctx.t("absent"), "absent", "unknown key echoes even with catalogs");
 
 console.log("Plugin SDK contract tests passed.");

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { I18nProvider, useI18n, type I18nSnapshot } from "./i18n";
 import "./styles.css";
 import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
@@ -22,7 +23,7 @@ type CodexState = { pets: PetEntry[]; error?: string };
 type PetScaleOption = { label: string; value: number };
 type UserSelectableAnimationState = "idle" | "review" | "running" | "waiting" | "waving" | "jumping" | "failed";
 type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides }; petScaleOptions: PetScaleOption[] };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides }; petScaleOptions: PetScaleOption[] };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
 type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
@@ -44,10 +45,12 @@ type PluginPlatformSettings = {
 };
 type PluginInspectorState = { schedules: Array<{ id: string; type: string; nextRunMs: number }>; commands: PluginCommand[]; menuItems: Array<{ id: string; title: string }>; status?: PluginStatus; activeBubbles: number; activePanels: number; eventSubscriptions: number; lastError?: string; quotaCounters: Record<string, number> };
 type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
-type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
+type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
 type PluginConfigSchema = Record<string, PluginConfigField>;
 type PluginConfig = Record<string, unknown>;
-type PluginCommand = { id: string; title: string; description?: string };
+type PluginCommandFormField = { id: string; type: "text" | "textarea" | "number" | "boolean" | "select" | "multiSelect" | "time" | "date" | "list"; label: string; default?: string | number | boolean | string[]; options?: Array<{ label: string; value: string }>; min?: number; max?: number; maxLength?: number; required?: boolean };
+type PluginCommandForm = { fields: PluginCommandFormField[]; submitLabel?: string };
+type PluginCommand = { id: string; title: string; description?: string; form?: PluginCommandForm };
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
 type PluginCategory = "Companion" | "Wellness" | "Focus" | "Developer" | "Advanced";
@@ -56,11 +59,13 @@ type SafeCatalogPluginRecord = { id: string; name: string; version: string; desc
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
+type PluginConfigSoundPickResult = { ok: true; sound: { kind: "user-sound"; id: string; name?: string }; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
 type PluginEntry = { id: string; installed?: SafePluginRecord; catalog?: SafeCatalogPluginRecord };
 type ControlCenterApi = {
   getPetsState(): Promise<StateSnapshot>;
   getDashboardSnapshot(): Promise<DashboardSnapshot>;
   getSettingsState(): Promise<SettingsState>;
+  getI18n(): Promise<I18nSnapshot>;
   updatePreferences(patch: Partial<SettingsState["preferences"]>): Promise<SettingsState>;
   getReactionAnimationSettings(): Promise<ReactionAnimationSettings>;
   getLaunchAtLogin(): Promise<LaunchAtLoginState>;
@@ -73,8 +78,9 @@ type ControlCenterApi = {
   getPluginCatalogSnapshot(refresh?: boolean): Promise<PluginCatalogSnapshot>;
   setPluginEnabled(id: string, enabled: boolean): Promise<PluginServiceResult>;
   savePluginConfig(id: string, config: PluginConfig): Promise<PluginServiceResult>;
+  pickPluginConfigSound(id: string): Promise<PluginConfigSoundPickResult>;
   reloadPlugin(id: string): Promise<PluginServiceResult>;
-  executePluginCommand(id: string, commandId: string): Promise<PluginServiceResult>;
+  executePluginCommand(id: string, commandId: string, args?: Record<string, unknown>): Promise<PluginServiceResult>;
   loadLocalPlugin(): Promise<PluginServiceResult>;
   installCatalogPlugin(id: string): Promise<PluginServiceResult>;
   updateCatalogPlugin(id: string): Promise<PluginServiceResult>;
@@ -95,6 +101,7 @@ type ControlCenterApi = {
   openGallery(): Promise<void>;
   removePet(petId: string): Promise<StateSnapshot>;
   onRouteChange(callback: (route: Route) => void): () => void;
+  onPluginsRefresh(callback: () => void): () => void;
   getIntegrationsState(selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
   runIntegrationAction(action: AgentSetupAction, selectedPetId?: string, commandMode?: "published" | "local" | "bundled"): Promise<AgentSetupSnapshot>;
   updateIntegrationCommandPaths(patch: Partial<AgentSetupCommandPaths>): Promise<AgentSetupCommandPaths>;
@@ -395,37 +402,38 @@ const IntegrationsIcon = () => (
 );
 
 const navTabs = [
-  { id: "dashboard" as const, label: "Dashboard", icon: <DashboardIcon /> },
-  { id: "pets" as const, label: "Pets", icon: <PetsIcon /> },
-  { id: "settings" as const, label: "Settings", icon: <SettingsIcon /> },
-  { id: "plugins" as const, label: "Plugins", icon: <PluginsIcon /> },
-  { id: "integrations" as const, label: "Integrations", icon: <IntegrationsIcon /> },
+  { id: "dashboard" as const, labelKey: "nav.dashboard", icon: <DashboardIcon /> },
+  { id: "pets" as const, labelKey: "nav.pets", icon: <PetsIcon /> },
+  { id: "settings" as const, labelKey: "nav.settings", icon: <SettingsIcon /> },
+  { id: "plugins" as const, labelKey: "nav.plugins", icon: <PluginsIcon /> },
+  { id: "integrations" as const, labelKey: "nav.integrations", icon: <IntegrationsIcon /> },
 ];
 
-const routeMetadata: Record<Route, { title: string; description: string }> = {
+const routeMetadata: Record<Route, { titleKey: string; descKey: string }> = {
   dashboard: {
-    title: "Dashboard",
-    description: "Overview of your active companions, status, and system metrics.",
+    titleKey: "route.dashboard.title",
+    descKey: "route.dashboard.description",
   },
   pets: {
-    title: "Pets",
-    description: "Install, import, preview, and choose your default desktop companion.",
+    titleKey: "route.pets.title",
+    descKey: "route.pets.description",
   },
   settings: {
-    title: "Settings",
-    description: "Configure startup behaviors, scale preferences, and animation settings.",
+    titleKey: "route.settings.title",
+    descKey: "route.settings.description",
   },
   plugins: {
-    title: "Plugins",
-    description: "Extend your desktop experience with custom tools and behaviors.",
+    titleKey: "route.plugins.title",
+    descKey: "route.plugins.description",
   },
   integrations: {
-    title: "Integrations",
-    description: "Connect your companions to Claude Code, VS Code, Cursor, and more.",
+    titleKey: "route.integrations.title",
+    descKey: "route.integrations.description",
   },
 };
 
 function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState("");
 
@@ -445,8 +453,8 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
     return (
       <div className="flex flex-col gap-6 h-full">
         <GlassCard className="flex h-full flex-col items-center justify-center gap-4 text-center py-16">
-          <p className="text-sm font-semibold text-slatecopy">{error || "Gathering companion metrics..."}</p>
-          {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>Retry</Button>}
+          <p className="text-sm font-semibold text-slatecopy">{error || t("dashboard.loading")}</p>
+          {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>{t("common.retry")}</Button>}
         </GlassCard>
       </div>
     );
@@ -474,8 +482,8 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 4);
   const maxCompanionActivity = Math.max(...topCompanionEntries.map(([, count]) => count), 1);
-  const lastActiveLabel = activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : "No activity yet";
-  const updateLabel = updateStatus.state === "available" ? "Update available" : updateStatus.state === "error" ? "Check failed" : updateStatus.state === "checking" ? "Checking" : updateStatus.state === "current" ? "Current" : "Not checked";
+  const lastActiveLabel = activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : t("dashboard.lastActive.none");
+  const updateLabel = updateStatus.state === "available" ? t("dashboard.update.available") : updateStatus.state === "error" ? t("dashboard.update.error") : updateStatus.state === "checking" ? t("dashboard.update.checking") : updateStatus.state === "current" ? t("dashboard.update.current") : t("dashboard.update.notChecked");
 
   return (
     <div className="dashboard-layout">
@@ -483,13 +491,13 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
       <section className="dashboard-hero">
         <div className="dashboard-hero-content">
-          <p className="eyebrow !text-blue-100 opacity-80">Primary Companion</p>
+          <p className="eyebrow !text-blue-100 opacity-80">{t("dashboard.hero.eyebrow")}</p>
           <h2 className="dashboard-hero-title">{defaultPet.displayName}</h2>
           <p className="dashboard-hero-desc">
-            Ready for your next coding session.
+            {t("dashboard.hero.desc")}
           </p>
           <div className="flex gap-3 mt-3">
-            <Button variant="secondary" size="compact" onClick={() => onNavigate("pets")}>Change Pet</Button>
+            <Button variant="secondary" size="compact" onClick={() => onNavigate("pets")}>{t("dashboard.hero.changePet")}</Button>
           </div>
         </div>
         <div className="dashboard-hero-pet">
@@ -501,37 +509,37 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
         <article className="dashboard-stat-card">
           <div className="dashboard-stat-header">
             <div className="dashboard-stat-icon"><MessageIcon /></div>
-            <span className="dashboard-stat-label">Messages</span>
+            <span className="dashboard-stat-label">{t("dashboard.stat.messages")}</span>
           </div>
           <div className="dashboard-stat-value">{activity.messagesSent.toLocaleString()}</div>
-          <div className="dashboard-stat-footer">Total speech bubbles sent</div>
+          <div className="dashboard-stat-footer">{t("dashboard.stat.messages.footer")}</div>
         </article>
 
         <article className="dashboard-stat-card">
           <div className="dashboard-stat-header">
             <div className="dashboard-stat-icon"><HeartIcon /></div>
-            <span className="dashboard-stat-label">Reactions</span>
+            <span className="dashboard-stat-label">{t("dashboard.stat.reactions")}</span>
           </div>
           <div className="dashboard-stat-value">{activity.reactionsSent.toLocaleString()}</div>
-          <div className="dashboard-stat-footer">Total animations triggered</div>
+          <div className="dashboard-stat-footer">{t("dashboard.stat.reactions.footer")}</div>
         </article>
 
         <article className="dashboard-stat-card">
           <div className="dashboard-stat-header">
             <div className="dashboard-stat-icon"><StarIcon /></div>
-            <span className="dashboard-stat-label">Top Companion</span>
+            <span className="dashboard-stat-label">{t("dashboard.stat.topCompanion")}</span>
           </div>
           <div className="dashboard-stat-value truncate text-2xl">{topPetName}</div>
-          <div className="dashboard-stat-footer">Most active pet lately</div>
+          <div className="dashboard-stat-footer">{t("dashboard.stat.topCompanion.footer")}</div>
         </article>
       </div>
 
       <div className="dashboard-row">
         <GlassCard className="dashboard-activity-card">
-          <div className="dashboard-section-title"><ActivityIcon /> Activity Overview</div>
+          <div className="dashboard-section-title"><ActivityIcon /> {t("dashboard.activity.title")}</div>
           <div className="flex flex-col gap-6">
             <div className="flex flex-col gap-3">
-              <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Top Reactions</span>
+              <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("dashboard.activity.topReactions")}</span>
               <div className="dashboard-reaction-list">
                 {reactionEntries.length > 0 ? (
                   reactionEntries.slice(0, 6)
@@ -542,7 +550,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
                       </div>
                     ))
                 ) : (
-                  <div className="text-xs text-slatecopy italic py-2">No reactions recorded yet. Start coding!</div>
+                  <div className="text-xs text-slatecopy italic py-2">{t("dashboard.activity.noReactions")}</div>
                 )}
               </div>
             </div>
@@ -550,11 +558,11 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
             <div className="dashboard-activity-charts">
               <section className="dashboard-chart-panel dashboard-reaction-mix">
                 <div className="dashboard-chart-heading">
-                  <span>Reaction Mix</span>
-                  <small>{reactionTotal ? `${reactionTotal.toLocaleString()} total` : "Waiting for activity"}</small>
+                  <span>{t("dashboard.reactionMix.title")}</span>
+                  <small>{reactionTotal ? t("dashboard.reactionMix.total", { count: reactionTotal.toLocaleString() }) : t("dashboard.reactionMix.waiting")}</small>
                 </div>
                 <div className="dashboard-donut-row">
-                  <div className="dashboard-donut" aria-label="Reaction mix chart">
+                  <div className="dashboard-donut" aria-label={t("dashboard.reactionMix.chartLabel")}>
                     <svg viewBox="0 0 100 100" role="img">
                       <circle className="dashboard-donut-track" cx="50" cy="50" r="40" />
                       {reactionTotal > 0 && reactionDonutSegments.map((segment, index) => {
@@ -567,7 +575,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
                     </svg>
                     <div className="dashboard-donut-center">
                       <strong>{reactionTotal.toLocaleString()}</strong>
-                      <span>reactions</span>
+                      <span>{t("dashboard.reactionMix.reactions")}</span>
                     </div>
                   </div>
                   <div className="dashboard-donut-legend">
@@ -577,15 +585,15 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
                         <span>{segment.label}</span>
                         <strong>{segment.count}</strong>
                       </div>
-                    )) : <p>No reaction mix yet.</p>}
+                    )) : <p>{t("dashboard.reactionMix.empty")}</p>}
                   </div>
                 </div>
               </section>
 
               <section className="dashboard-chart-panel dashboard-companion-bars">
                 <div className="dashboard-chart-heading">
-                  <span>Top Companions</span>
-                  <small>Most active pets</small>
+                  <span>{t("dashboard.companions.title")}</span>
+                  <small>{t("dashboard.companions.subtitle")}</small>
                 </div>
                 <div className="dashboard-bars-list">
                   {topCompanionEntries.length ? topCompanionEntries.map(([petId, count]) => {
@@ -599,33 +607,33 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
                         <div className="dashboard-bar-track"><span style={{ width: `${Math.max(8, Math.round((count / maxCompanionActivity) * 100))}%` }} /></div>
                       </div>
                     );
-                  }) : <p className="dashboard-empty-note">No companion activity yet.</p>}
+                  }) : <p className="dashboard-empty-note">{t("dashboard.companions.empty")}</p>}
                 </div>
               </section>
 
-              <div className="dashboard-last-active-pill">Last active: <strong>{lastActiveLabel}</strong></div>
+              <div className="dashboard-last-active-pill">{t("dashboard.lastActive.label")}<strong>{lastActiveLabel}</strong></div>
             </div>
           </div>
         </GlassCard>
 
         <GlassCard className="dashboard-system-card">
-          <div className="dashboard-section-title"><ZapIcon /> System Health</div>
+          <div className="dashboard-section-title"><ZapIcon /> {t("dashboard.system.title")}</div>
           <div className="dashboard-system-list">
             <div className="dashboard-system-item">
               <div className="dashboard-system-info">
                 <div className="dashboard-system-icon"><BoxIcon /></div>
-                <span className="dashboard-system-label">Pets</span>
+                <span className="dashboard-system-label">{t("dashboard.system.pets")}</span>
               </div>
-              <span className="dashboard-system-value">{installedPetCount} installed</span>
+              <span className="dashboard-system-value">{t("dashboard.system.pets.value", { count: installedPetCount })}</span>
             </div>
 
             <div className="dashboard-system-item">
               <div className="dashboard-system-info">
                 <div className="dashboard-system-icon"><PluginGlyph className="w-4 h-4" /></div>
-                <span className="dashboard-system-label">Plugins</span>
+                <span className="dashboard-system-label">{t("dashboard.system.plugins")}</span>
               </div>
               <div className="flex gap-1.5">
-                <StatusPill tone="green">{plugins.enabled} enabled</StatusPill>
+                <StatusPill tone="green">{t("dashboard.system.plugins.enabled", { count: plugins.enabled })}</StatusPill>
                 {plugins.broken > 0 && <StatusPill tone="red">{plugins.broken}</StatusPill>}
               </div>
             </div>
@@ -633,15 +641,15 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
             <div className="dashboard-system-item">
               <div className="dashboard-system-info">
                 <div className="dashboard-system-icon"><StarIcon /></div>
-                <span className="dashboard-system-label">Catalog</span>
+                <span className="dashboard-system-label">{t("dashboard.system.catalog")}</span>
               </div>
-              <span className="dashboard-system-value">{catalog.error ? "Offline" : catalog.total ? `${catalog.total} pets` : "Ready"}</span>
+              <span className="dashboard-system-value">{catalog.error ? t("dashboard.system.catalog.offline") : catalog.total ? t("dashboard.system.catalog.pets", { count: catalog.total }) : t("dashboard.system.catalog.ready")}</span>
             </div>
 
             <div className="dashboard-system-item">
               <div className="dashboard-system-info">
                 <div className="dashboard-system-icon"><ShieldIcon /></div>
-                <span className="dashboard-system-label">Updates</span>
+                <span className="dashboard-system-label">{t("dashboard.system.updates")}</span>
               </div>
               <StatusPill tone={updateStatus.state === "available" ? "orange" : "blue"}>
                 {updateLabel}
@@ -651,7 +659,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
 
           <div className="mt-auto pt-4 border-t border-blue-100/30">
              <div className="flex items-center justify-between text-[10px] font-bold text-slatecopy uppercase tracking-wider">
-               <span>Version</span>
+               <span>{t("dashboard.system.version")}</span>
                <span className="font-mono">{updateStatus.currentVersion}</span>
              </div>
           </div>
@@ -662,6 +670,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
 }
 
 function PlaceholderView({ route }: { route: "dashboard" }) {
+  const { t } = useI18n();
   const meta = routeMetadata[route];
   return (
     <div className="grid grid-cols-1 w-full">
@@ -669,10 +678,10 @@ function PlaceholderView({ route }: { route: "dashboard" }) {
         <div className="p-4 rounded-3xl bg-blue-50/80 border border-blue-100/50 mb-6 text-brand">
           {route === "dashboard" && <DashboardIcon />}
         </div>
-        <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{meta.title}</h2>
-        <p className="text-sm text-slatecopy max-w-md mb-6">{meta.description}</p>
+        <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{t(meta.titleKey)}</h2>
+        <p className="text-sm text-slatecopy max-w-md mb-6">{t(meta.descKey)}</p>
         <span className="inline-flex items-center rounded-full bg-blue-50/80 px-4 py-1.5 text-xs font-bold text-brand border border-blue-200/50">
-          Coming Soon • Next Migration Target
+          {t("placeholder.comingSoon")}
         </span>
       </GlassCard>
     </div>
@@ -687,12 +696,12 @@ const filterIcons: Record<Filter, React.ReactNode> = {
   codex: <FilterCodexIcon />,
 };
 
-const filterLabels: Record<Filter, string> = {
-  all: "All",
-  installed: "Installed",
-  featured: "Featured",
-  originals: "Originals",
-  codex: "Codex",
+const filterLabelKeys: Record<Filter, string> = {
+  all: "pets.filter.all",
+  installed: "pets.filter.installed",
+  featured: "pets.filter.featured",
+  originals: "pets.filter.originals",
+  codex: "pets.filter.codex",
 };
 
 const buttonVariantClass = {
@@ -727,10 +736,10 @@ function initialControlCenterRoute(): Route {
   }
 }
 
-const commandModeLabels: Record<AgentSetupSnapshot["commandMode"], string> = {
-  published: "Published package",
-  bundled: "Bundled desktop CLI",
-  local: "Local development",
+const commandModeLabelKeys: Record<AgentSetupSnapshot["commandMode"], string> = {
+  published: "integrations.commandMode.published",
+  bundled: "integrations.commandMode.bundled",
+  local: "integrations.commandMode.local",
 };
 
 function Button({
@@ -769,7 +778,7 @@ function Button({
 }
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) { return <section className={`glass ${className}`}>{children}</section>; }
 function StatusPill({ children, tone = "blue" }: { children: React.ReactNode; tone?: keyof typeof statusPillToneClass }) { return <span className={`pill ${statusPillToneClass[tone]}`}>{children}</span>; }
-function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) { return <input className="search" placeholder="Search pets..." {...props} />; }
+function SearchInput(props: React.InputHTMLAttributes<HTMLInputElement>) { const { t } = useI18n(); return <input className="search" placeholder={t("pets.search.placeholder")} {...props} />; }
 
 function isAllowedCatalogPreview(value: string | undefined): value is string {
   if (!value) return false;
@@ -869,16 +878,17 @@ function ToggleRow({ title, description, checked, disabled, onChange }: { title:
   </label>;
 }
 
-function formatUpdateStatus(status: UpdateStatus | null): string {
-  if (!status) return "Update status has not loaded yet.";
-  if (status.state === "checking") return "Checking for updates…";
-  if (status.state === "available") return `Version ${status.latestVersion ?? "latest"} is available.`;
-  if (status.state === "current") return `Up to date.`;
-  if (status.state === "error") return status.error || "Update check failed.";
-  return `Version: ${status.currentVersion}.`;
+function formatUpdateStatus(status: UpdateStatus | null, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  if (!status) return t("settings.update.notLoaded");
+  if (status.state === "checking") return t("settings.update.checking");
+  if (status.state === "available") return t("settings.update.available", { version: status.latestVersion ?? t("common.latest") });
+  if (status.state === "current") return t("settings.update.current");
+  if (status.state === "error") return status.error || t("settings.update.failed");
+  return t("settings.update.version", { version: status.currentVersion });
 }
 
 function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimationSettings; state: UserSelectableAnimationState }) {
+  const { t } = useI18n();
   const frame = { width: settings.sprite.frameWidth, height: settings.sprite.frameHeight };
   const sprite = settings.sprite.states[state] ?? settings.sprite.states.idle;
   const xValues = Array.from({ length: sprite.frames }, (_, index) => String(-index * frame.width)).join(";");
@@ -886,7 +896,7 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
 
   return (
     <div className="reaction-preview-sprite-shell">
-      <svg className="reaction-preview-sprite" width={frame.width} height={frame.height} viewBox={`0 0 ${frame.width} ${frame.height}`} role="img" aria-label={`Animation: ${state}`}>
+      <svg className="reaction-preview-sprite" width={frame.width} height={frame.height} viewBox={`0 0 ${frame.width} ${frame.height}`} role="img" aria-label={t("settings.reactions.previewAria", { state })}>
         <image href={settings.previewSpriteUrl} x="0" y={y} width={frame.width * settings.sprite.columns} height={frame.height * settings.sprite.rows} preserveAspectRatio="none">
           <animate attributeName="x" values={xValues} dur={`${sprite.durationMs}ms`} repeatCount="indefinite" calcMode="discrete" />
         </image>
@@ -896,6 +906,7 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
 }
 
 function SettingsView() {
+  const { t, localePreference, availableLocales, reload: reloadI18n } = useI18n();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [reactionSettings, setReactionSettings] = useState<ReactionAnimationSettings | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
@@ -945,7 +956,7 @@ function SettingsView() {
   }
 
   function patchPreferences(patch: Partial<SettingsState["preferences"]>, success: string) {
-    void run("Saving", async () => {
+    void run(t("settings.busy.saving"), async () => {
       const next = await api.updatePreferences(patch);
       setSettings(next);
       if ("reactionAnimationOverrides" in patch) {
@@ -955,8 +966,16 @@ function SettingsView() {
     });
   }
 
+  function changeLocale(value: string) {
+    void run(t("settings.busy.saving"), async () => {
+      await api.updatePreferences({ locale: value });
+      reloadI18n();
+      setMessage(t("settings.language.title"));
+    });
+  }
+
   function updateReactionOverride(reaction: ReactionAnimationSettings["reactions"][number], value: UserSelectableAnimationState) {
-    const queuedSave = reactionSaveQueue.current.catch(() => undefined).then(() => run("Saving", async () => {
+    const queuedSave = reactionSaveQueue.current.catch(() => undefined).then(() => run(t("settings.busy.saving"), async () => {
       const latestReactions = await api.getReactionAnimationSettings();
       const nextOverrides = { ...(latestReactions.overrides ?? {}) };
       if (value === reaction.defaultAnimation) delete nextOverrides[reaction.id];
@@ -964,7 +983,7 @@ function SettingsView() {
       const nextSettings = await api.updatePreferences({ reactionAnimationOverrides: nextOverrides });
       setSettings(nextSettings);
       setReactionSettings({ ...latestReactions, overrides: nextSettings.preferences.reactionAnimationOverrides ?? {} });
-      setMessage("Reaction animation saved.");
+      setMessage(t("settings.toast.reactionSaved"));
     }));
     reactionSaveQueue.current = queuedSave;
     void queuedSave;
@@ -973,7 +992,7 @@ function SettingsView() {
   const overrides = settings?.preferences.reactionAnimationOverrides ?? {};
 
   function patchPlatformSettings(patch: Partial<PluginPlatformSettings>, success: string) {
-    void run("Saving", async () => {
+    void run(t("settings.busy.saving"), async () => {
       setPlatformSettings(await api.updatePluginPlatformSettings(patch));
       setMessage(success);
     });
@@ -987,67 +1006,77 @@ function SettingsView() {
       <aside className="settings-sidebar">
         <button className={`settings-nav-item ${activeTab === "general" ? "active" : ""}`} onClick={() => setActiveTab("general")}>
           <SettingsIcon />
-          <span>General</span>
+          <span>{t("settings.nav.general")}</span>
         </button>
         <button className={`settings-nav-item ${activeTab === "reactions" ? "active" : ""}`} onClick={() => setActiveTab("reactions")}>
           <PetsIcon />
-          <span>Reaction Mapping</span>
+          <span>{t("settings.nav.reactions")}</span>
         </button>
         <button className={`settings-nav-item ${activeTab === "plugins" ? "active" : ""}`} onClick={() => setActiveTab("plugins")}>
           <PluginsIcon />
-          <span>Plugin Platform</span>
+          <span>{t("settings.nav.plugins")}</span>
         </button>
       </aside>
 
       <main className="settings-content">
         {activeTab === "general" && (
           <div className="settings-section">
-            <p className="eyebrow">Environment</p>
-            <h2 className="settings-section-title">General Settings</h2>
+            <p className="eyebrow">{t("settings.general.eyebrow")}</p>
+            <h2 className="settings-section-title">{t("settings.general.title")}</h2>
 
             <div className="settings-group">
               <ToggleRow
-                title="Show pet on launch"
-                description="Keep OpenPets in the tray but hide the pet until requested."
+                title={t("settings.general.showOnLaunch.title")}
+                description={t("settings.general.showOnLaunch.description")}
                 checked={settings?.preferences.openDefaultPetOnLaunch ?? false}
                 disabled={!settings || !!busy}
-                onChange={(checked) => patchPreferences({ openDefaultPetOnLaunch: checked }, "Startup preference saved.")}
+                onChange={(checked) => patchPreferences({ openDefaultPetOnLaunch: checked }, t("settings.toast.startupSaved"))}
               />
               <ToggleRow
-                title="Launch at login"
-                description={launchAtLogin?.supported ? "Start OpenPets automatically when your computer starts." : "Not supported on this platform."}
+                title={t("settings.general.launchAtLogin.title")}
+                description={launchAtLogin?.supported ? t("settings.general.launchAtLogin.supported") : t("settings.general.launchAtLogin.unsupported")}
                 checked={launchAtLogin?.enabled ?? false}
                 disabled={!launchAtLogin?.supported || !!busy}
-                onChange={(checked) => void run("Saving", async () => { setLaunchAtLogin(await api.setLaunchAtLogin(checked)); setMessage("Login startup preference saved."); })}
+                onChange={(checked) => void run(t("settings.busy.saving"), async () => { setLaunchAtLogin(await api.setLaunchAtLogin(checked)); setMessage(t("settings.toast.loginStartupSaved")); })}
               />
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <strong>Pet scale</strong>
-                  <small>Adjust how large the default desktop pet appears.</small>
+                  <strong>{t("settings.general.petScale.title")}</strong>
+                  <small>{t("settings.general.petScale.description")}</small>
                 </div>
-                <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, "Pet scale saved.")}>
+                <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, t("settings.toast.petScaleSaved"))}>
                   {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-info">
+                  <strong>{t("settings.language.title")}</strong>
+                  <small>{t("settings.language.description")}</small>
+                </div>
+                <select className="settings-select" value={localePreference} disabled={!!busy} onChange={(event) => changeLocale(event.target.value)}>
+                  <option value="system">{t("settings.language.system")}</option>
+                  {availableLocales.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </div>
             </div>
 
             <div className="settings-actions">
-              <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Resetting", async () => { setSettings(await api.resetDefaultPetPosition()); setMessage("Default pet position reset."); })}>Reset Pet Position</Button>
+              <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.resetting"), async () => { setSettings(await api.resetDefaultPetPosition()); setMessage(t("settings.toast.positionReset")); })}>{t("settings.general.resetPosition")}</Button>
             </div>
 
             <div className="settings-system-footer">
               <div className="settings-system-info">
                 <RefreshIcon />
-                <span>System Status</span>
+                <span>{t("settings.general.systemStatus")}</span>
                 <span className="settings-system-version">{updateStatus?.currentVersion}</span>
-                <span className="opacity-60">{formatUpdateStatus(updateStatus)}</span>
+                <span className="opacity-60">{formatUpdateStatus(updateStatus, t)}</span>
               </div>
               <div className="flex gap-2">
                 {updateStatus?.state === "available" && (
-                  <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run("Opening", async () => { await api.openUpdateReleasePage(); })}>Update Available</Button>
+                  <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.opening"), async () => { await api.openUpdateReleasePage(); })}>{t("settings.general.updateAvailable")}</Button>
                 )}
-                <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run("Checking", async () => { setUpdateStatus(await api.checkForUpdates()); })}>
-                  {busy === "Checking" ? "Checking…" : "Check for Updates"}
+                <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run(t("settings.busy.checking"), async () => { setUpdateStatus(await api.checkForUpdates()); })}>
+                  {busy === t("settings.busy.checking") ? t("settings.general.checking") : t("settings.general.checkForUpdates")}
                 </Button>
               </div>
             </div>
@@ -1058,12 +1087,12 @@ function SettingsView() {
           <div className="settings-section">
             <div className="flex items-center justify-between">
               <div>
-                <p className="eyebrow">Behavior</p>
-                <h2 className="settings-section-title">Reaction Mapping</h2>
+                <p className="eyebrow">{t("settings.reactions.eyebrow")}</p>
+                <h2 className="settings-section-title">{t("settings.reactions.title")}</h2>
               </div>
-              <Button variant="secondary" size="compact" disabled={!settings || !!busy || !Object.keys(overrides).length} onClick={() => patchPreferences({ reactionAnimationOverrides: {} }, "Reaction animations reset.")}>Reset to Defaults</Button>
+              <Button variant="secondary" size="compact" disabled={!settings || !!busy || !Object.keys(overrides).length} onClick={() => patchPreferences({ reactionAnimationOverrides: {} }, t("settings.toast.reactionsReset"))}>{t("settings.reactions.resetDefaults")}</Button>
             </div>
-            <p className="text-sm text-slatecopy -mt-2 mb-2">Customize which animation plays for each agent reaction. Previews use the default pet.</p>
+            <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.reactions.description")}</p>
 
             <div className="settings-group">
               <div className="reaction-grid">
@@ -1103,58 +1132,58 @@ function SettingsView() {
 
         {activeTab === "plugins" && (
           <div className="settings-section">
-            <p className="eyebrow">Plugin Platform</p>
-            <h2 className="settings-section-title">Plugin Permissions & AI</h2>
-            <p className="text-sm text-slatecopy -mt-2 mb-2">Global gates for what plugins may do. Sensitive capabilities stay off until you enable them here.</p>
+            <p className="eyebrow">{t("settings.plugins.eyebrow")}</p>
+            <h2 className="settings-section-title">{t("settings.plugins.title")}</h2>
+            <p className="text-sm text-slatecopy -mt-2 mb-2">{t("settings.plugins.description")}</p>
 
             <div className="settings-group">
               <ToggleRow
-                title="Plugins may play sound"
-                description="Allow plugin chimes, alerts, and bundled sounds."
+                title={t("settings.plugins.audio.title")}
+                description={t("settings.plugins.audio.description")}
                 checked={platformSettings?.allowPluginAudio ?? true}
                 disabled={!platformSettings || !!busy}
-                onChange={(checked) => patchPlatformSettings({ allowPluginAudio: checked }, "Plugin sound preference saved.")}
+                onChange={(checked) => patchPlatformSettings({ allowPluginAudio: checked }, t("settings.toast.audioSaved"))}
               />
               <ToggleRow
-                title="Plugins may speak (voice)"
-                description="Allow text-to-speech through the system voice."
+                title={t("settings.plugins.voice.title")}
+                description={t("settings.plugins.voice.description")}
                 checked={platformSettings?.allowPluginVoice ?? true}
                 disabled={!platformSettings || !!busy}
-                onChange={(checked) => patchPlatformSettings({ allowPluginVoice: checked }, "Plugin voice preference saved.")}
+                onChange={(checked) => patchPlatformSettings({ allowPluginVoice: checked }, t("settings.toast.voiceSaved"))}
               />
               <ToggleRow
-                title="Allow AI-generated pet speech"
-                description="Sensitive: lets approved plugins show model-generated bubbles."
+                title={t("settings.plugins.dynamicSpeech.title")}
+                description={t("settings.plugins.dynamicSpeech.description")}
                 checked={platformSettings?.allowDynamicSpeech ?? false}
                 disabled={!platformSettings || !!busy}
-                onChange={(checked) => patchPlatformSettings({ allowDynamicSpeech: checked }, "AI speech preference saved.")}
+                onChange={(checked) => patchPlatformSettings({ allowDynamicSpeech: checked }, t("settings.toast.dynamicSpeechSaved"))}
               />
               <ToggleRow
-                title="Allow microphone (push-to-talk)"
-                description="Sensitive: lets approved plugins capture one-shot voice input."
+                title={t("settings.plugins.microphone.title")}
+                description={t("settings.plugins.microphone.description")}
                 checked={platformSettings?.allowMicrophone ?? false}
                 disabled={!platformSettings || !!busy}
-                onChange={(checked) => patchPlatformSettings({ allowMicrophone: checked }, "Microphone preference saved.")}
+                onChange={(checked) => patchPlatformSettings({ allowMicrophone: checked }, t("settings.toast.microphoneSaved"))}
               />
             </div>
 
             <div className="settings-group">
               <ToggleRow
-                title="Quiet hours"
-                description="Silence plugin speech, sound, and voice during this window."
+                title={t("settings.plugins.quietHours.title")}
+                description={t("settings.plugins.quietHours.description")}
                 checked={platformSettings?.quietHours.enabled ?? false}
                 disabled={!platformSettings || !!busy}
-                onChange={(checked) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { start: "22:00", end: "08:00" }), enabled: checked } }, "Quiet hours saved.")}
+                onChange={(checked) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { start: "22:00", end: "08:00" }), enabled: checked } }, t("settings.toast.quietHoursSaved"))}
               />
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <strong>Quiet window</strong>
-                  <small>Start and end of the quiet-hours window.</small>
+                  <strong>{t("settings.plugins.quietWindow.title")}</strong>
+                  <small>{t("settings.plugins.quietWindow.description")}</small>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <input type="time" className="settings-select" value={platformSettings?.quietHours.start ?? "22:00"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { enabled: false, end: "08:00" }), start: event.target.value } as PluginPlatformSettings["quietHours"] }, "Quiet hours saved.")} />
-                  <span className="opacity-60">to</span>
-                  <input type="time" className="settings-select" value={platformSettings?.quietHours.end ?? "08:00"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { enabled: false, start: "22:00" }), end: event.target.value } as PluginPlatformSettings["quietHours"] }, "Quiet hours saved.")} />
+                  <input type="time" className="settings-select" value={platformSettings?.quietHours.start ?? "22:00"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { enabled: false, end: "08:00" }), start: event.target.value } as PluginPlatformSettings["quietHours"] }, t("settings.toast.quietHoursSaved"))} />
+                  <span className="opacity-60">{t("common.to")}</span>
+                  <input type="time" className="settings-select" value={platformSettings?.quietHours.end ?? "08:00"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ quietHours: { ...(platformSettings?.quietHours ?? { enabled: false, start: "22:00" }), end: event.target.value } as PluginPlatformSettings["quietHours"] }, t("settings.toast.quietHoursSaved"))} />
                 </div>
               </div>
             </div>
@@ -1162,32 +1191,32 @@ function SettingsView() {
             <div className="settings-group">
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <strong>AI provider</strong>
-                  <small>One provider serves every plugin through the host AI gateway. Keys are encrypted and never shared with plugin code.</small>
+                  <strong>{t("settings.plugins.aiProvider.title")}</strong>
+                  <small>{t("settings.plugins.aiProvider.description")}</small>
                 </div>
-                <select className="settings-select" value={platformSettings?.ai.provider ?? "none"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { model: "" }), provider: event.target.value as PluginPlatformSettings["ai"]["provider"] } }, "AI provider saved.")}>
-                  <option value="none">Disabled</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="ollama">Ollama (local)</option>
+                <select className="settings-select" value={platformSettings?.ai.provider ?? "none"} disabled={!platformSettings || !!busy} onChange={(event) => patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { model: "" }), provider: event.target.value as PluginPlatformSettings["ai"]["provider"] } }, t("settings.toast.aiProviderSaved"))}>
+                  <option value="none">{t("settings.plugins.aiProvider.disabled")}</option>
+                  <option value="anthropic">{t("settings.plugins.aiProvider.anthropic")}</option>
+                  <option value="openai">{t("settings.plugins.aiProvider.openai")}</option>
+                  <option value="ollama">{t("settings.plugins.aiProvider.ollama")}</option>
                 </select>
               </div>
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <strong>Model</strong>
-                  <small>Leave empty for the provider default.</small>
+                  <strong>{t("settings.plugins.model.title")}</strong>
+                  <small>{t("settings.plugins.model.description")}</small>
                 </div>
-                <input type="text" className="settings-select" placeholder="provider default" defaultValue={platformSettings?.ai.model ?? ""} disabled={!platformSettings || !!busy} onBlur={(event) => { if (event.target.value !== (platformSettings?.ai.model ?? "")) patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { provider: "none" }), model: event.target.value } as PluginPlatformSettings["ai"] }, "AI model saved."); }} />
+                <input type="text" className="settings-select" placeholder={t("settings.plugins.model.placeholder")} defaultValue={platformSettings?.ai.model ?? ""} disabled={!platformSettings || !!busy} onBlur={(event) => { if (event.target.value !== (platformSettings?.ai.model ?? "")) patchPlatformSettings({ ai: { ...(platformSettings?.ai ?? { provider: "none" }), model: event.target.value } as PluginPlatformSettings["ai"] }, t("settings.toast.aiModelSaved")); }} />
               </div>
               <div className="settings-row">
                 <div className="settings-row-info">
-                  <strong>API key</strong>
-                  <small>{aiKeyStatus.hasKey ? "A key is stored (encrypted)." : "No key stored. Ollama needs no key."}</small>
+                  <strong>{t("settings.plugins.apiKey.title")}</strong>
+                  <small>{aiKeyStatus.hasKey ? t("settings.plugins.apiKey.stored") : t("settings.plugins.apiKey.none")}</small>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <input type="password" className="settings-select" placeholder={aiKeyStatus.hasKey ? "••••••••" : "Paste key"} value={aiKeyDraft} disabled={!!busy} onChange={(event) => setAiKeyDraft(event.target.value)} />
-                  <Button variant="secondary" size="compact" disabled={!!busy || !aiKeyDraft} onClick={() => void run("Saving", async () => { setAiKeyStatus(await api.setPluginAiApiKey(aiKeyDraft)); setAiKeyDraft(""); setMessage("AI key saved."); })}>Save</Button>
-                  {aiKeyStatus.hasKey && <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Saving", async () => { setAiKeyStatus(await api.setPluginAiApiKey(null)); setMessage("AI key removed."); })}>Remove</Button>}
+                  <input type="password" className="settings-select" placeholder={aiKeyStatus.hasKey ? t("settings.plugins.apiKey.placeholderStored") : t("settings.plugins.apiKey.placeholderEmpty")} value={aiKeyDraft} disabled={!!busy} onChange={(event) => setAiKeyDraft(event.target.value)} />
+                  <Button variant="secondary" size="compact" disabled={!!busy || !aiKeyDraft} onClick={() => void run(t("settings.busy.saving"), async () => { setAiKeyStatus(await api.setPluginAiApiKey(aiKeyDraft)); setAiKeyDraft(""); setMessage(t("settings.toast.aiKeySaved")); })}>{t("settings.plugins.apiKey.save")}</Button>
+                  {aiKeyStatus.hasKey && <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.saving"), async () => { setAiKeyStatus(await api.setPluginAiApiKey(null)); setMessage(t("settings.toast.aiKeyRemoved")); })}>{t("settings.plugins.apiKey.remove")}</Button>}
                 </div>
               </div>
             </div>
@@ -1198,47 +1227,47 @@ function SettingsView() {
   </div>;
 }
 
-const pluginFilterLabels: Record<PluginFilter, string> = {
-  all: "All",
-  installed: "Installed",
-  catalog: "Catalog",
-  local: "Local / Dev",
-  broken: "Broken",
+const pluginFilterLabelKeys: Record<PluginFilter, string> = {
+  all: "plugins.filter.all",
+  installed: "plugins.filter.installed",
+  catalog: "plugins.filter.catalog",
+  local: "plugins.filter.local",
+  broken: "plugins.filter.broken",
 };
 
-const pluginPermissionLabels: Record<PluginPermission, string> = {
-  "pet:speak": "Speech",
-  "pet:reaction": "Reactions",
-  "pet:move": "Movement",
-  timer: "Timers",
-  schedule: "Schedule",
-  storage: "Storage",
-  status: "Status",
-  commands: "Commands",
-  network: "Network",
-  "pet:interact": "Bubble buttons",
-  "pet:pin": "Pinned bubble",
-  "pet:animate": "Custom animation",
-  "pet:speak:dynamic": "AI speech",
-  "pet:drop": "Drag & drop",
-  "pets:read": "Read pets",
-  "pets:manage": "Manage pets",
-  audio: "Sound",
-  events: "Events",
-  "ui:toast": "Toasts",
-  "ui:panel": "Panels",
-  notify: "Notifications",
-  bus: "Plugin bus",
-  ai: "AI gateway",
-  secrets: "Secrets",
-  "voice:speak": "Voice",
-  "voice:listen": "Microphone",
-  auth: "Sign-in",
-  files: "Files",
-  "system:openExternal": "Open links",
-  "system:metrics": "System metrics",
-  clipboard: "Clipboard",
-  "network:write": "Network write",
+const pluginPermissionLabelKeys: Record<PluginPermission, string> = {
+  "pet:speak": "plugins.permission.pet:speak",
+  "pet:reaction": "plugins.permission.pet:reaction",
+  "pet:move": "plugins.permission.pet:move",
+  timer: "plugins.permission.timer",
+  schedule: "plugins.permission.schedule",
+  storage: "plugins.permission.storage",
+  status: "plugins.permission.status",
+  commands: "plugins.permission.commands",
+  network: "plugins.permission.network",
+  "pet:interact": "plugins.permission.pet:interact",
+  "pet:pin": "plugins.permission.pet:pin",
+  "pet:animate": "plugins.permission.pet:animate",
+  "pet:speak:dynamic": "plugins.permission.pet:speak:dynamic",
+  "pet:drop": "plugins.permission.pet:drop",
+  "pets:read": "plugins.permission.pets:read",
+  "pets:manage": "plugins.permission.pets:manage",
+  audio: "plugins.permission.audio",
+  events: "plugins.permission.events",
+  "ui:toast": "plugins.permission.ui:toast",
+  "ui:panel": "plugins.permission.ui:panel",
+  notify: "plugins.permission.notify",
+  bus: "plugins.permission.bus",
+  ai: "plugins.permission.ai",
+  secrets: "plugins.permission.secrets",
+  "voice:speak": "plugins.permission.voice:speak",
+  "voice:listen": "plugins.permission.voice:listen",
+  auth: "plugins.permission.auth",
+  files: "plugins.permission.files",
+  "system:openExternal": "plugins.permission.system:openExternal",
+  "system:metrics": "plugins.permission.system:metrics",
+  clipboard: "plugins.permission.clipboard",
+  "network:write": "plugins.permission.network:write",
 };
 const sensitivePermissionSet = new Set<PluginPermission>(["voice:listen", "clipboard", "pet:speak:dynamic"]);
 
@@ -1288,9 +1317,9 @@ function pluginName(entry: PluginEntry): string {
   return entry.installed?.name || entry.catalog?.name || entry.id;
 }
 
-function pluginDescription(entry: PluginEntry): string {
+function pluginDescription(entry: PluginEntry, t: (key: string, vars?: Record<string, string | number>) => string): string {
   if (entry.installed?.brokenReason) return entry.installed.brokenReason;
-  return entry.installed?.description || entry.catalog?.description || (entry.installed ? "Installed plugin ready for configuration." : "Available from the plugin catalog.");
+  return entry.installed?.description || entry.catalog?.description || (entry.installed ? t("plugins.description.installedReady") : t("plugins.description.availableCatalog"));
 }
 
 function pluginPrimaryTone(entry: PluginEntry): keyof typeof statusPillToneClass {
@@ -1301,12 +1330,12 @@ function pluginPrimaryTone(entry: PluginEntry): keyof typeof statusPillToneClass
   return "blue";
 }
 
-function pluginPrimaryLabel(entry: PluginEntry): string {
-  if (entry.installed?.brokenReason) return "Broken";
-  if (entry.installed?.catalogDisabled) return "Catalog disabled";
-  if (entry.installed?.enabled) return "Active";
-  if (entry.installed) return "Disabled";
-  return "Available";
+function pluginPrimaryLabel(entry: PluginEntry, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  if (entry.installed?.brokenReason) return t("plugins.status.broken");
+  if (entry.installed?.catalogDisabled) return t("plugins.status.catalogDisabled");
+  if (entry.installed?.enabled) return t("plugins.status.active");
+  if (entry.installed) return t("plugins.status.disabled");
+  return t("plugins.status.available");
 }
 
 function mergePluginEntries(snapshot: PluginServiceSnapshot | null, catalog: PluginCatalogSnapshot | null): PluginEntry[] {
@@ -1331,6 +1360,16 @@ function initialConfigValue(field: PluginConfigField): unknown {
   return "";
 }
 
+function commandFieldToConfigField(field: PluginCommandFormField): PluginConfigField {
+  return { type: field.type, label: field.label, default: field.default, options: field.options, min: field.min, max: field.max, maxLength: field.maxLength };
+}
+
+function materializeCommandDraft(form: PluginCommandForm | undefined, values: Record<string, unknown> | undefined): Record<string, unknown> {
+  const next: Record<string, unknown> = {};
+  for (const field of form?.fields ?? []) next[field.id] = values?.[field.id] ?? initialConfigValue(commandFieldToConfigField(field));
+  return next;
+}
+
 function materializeListItemDefaults(schema: PluginConfigSchema, value: Record<string, unknown> = {}): Record<string, unknown> {
   const next: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(schema)) next[key] = materializeConfigValue(field, value[key]);
@@ -1351,7 +1390,8 @@ function materializeConfigDraft(schema: PluginConfigSchema | undefined, config: 
   return next;
 }
 
-function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { pluginId?: string; fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void }) {
+function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange, onPickSound }: { pluginId?: string; fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void; onPickSound?: (pluginId: string) => Promise<void> }) {
+  const { t } = useI18n();
   const label = field.label || fieldKey;
   const description = field.description;
   const textValue = typeof value === "string" ? value : typeof field.default === "string" ? field.default : "";
@@ -1368,25 +1408,25 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { plu
     const maxed = typeof field.maxItems === "number" && items.length >= field.maxItems;
 
     const isReminders = (pluginId === "openpets.break-buddy" || fieldKey === "reminders") && ["reminders", "breaks"].includes(fieldKey);
-    const addLabel = isReminders ? "Add reminder" : "Add item";
+    const addLabel = isReminders ? t("plugins.config.addReminder") : t("plugins.config.addItem");
 
     return <div className="plugin-config-row">
       <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
       <div className="plugin-list-editor">
         {items.map((item, index) => {
-          let itemTitle = `Item ${index + 1}`;
-          let removeLabel = "Remove";
+          let itemTitle = t("plugins.config.item", { index: index + 1 });
+          let removeLabel = t("plugins.config.remove");
 
           if (isReminders) {
-            removeLabel = "Remove reminder";
+            removeLabel = t("plugins.config.removeReminder");
             const id = String(item.id || "").trim();
             const scheduleType = item.scheduleType;
             if (scheduleType === "daily") {
               const time = String(item.time || "09:00");
-              itemTitle = `${id || "Reminder"} · Daily at ${time}`;
+              itemTitle = t("plugins.config.dailyAt", { id: id || t("plugins.config.reminder"), time });
             } else if (scheduleType === "interval") {
               const mins = Number(item.intervalMinutes) || 60;
-              itemTitle = `${id || "Reminder"} · Every ${mins} min`;
+              itemTitle = t("plugins.config.everyMin", { id: id || t("plugins.config.reminder"), mins });
             } else if (id) {
               itemTitle = id;
             }
@@ -1418,19 +1458,19 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { plu
                   <>
                     {behaviorFields.length > 0 && (
                       <div className="plugin-config-group">
-                        <div className="plugin-config-group-title">Identity & Behavior</div>
+                        <div className="plugin-config-group-title">{t("plugins.config.group.identity")}</div>
                         {behaviorFields.map(renderField)}
                       </div>
                     )}
                     {messageField && (
                       <div className="plugin-config-group">
-                        <div className="plugin-config-group-title">Message</div>
+                        <div className="plugin-config-group-title">{t("plugins.config.group.message")}</div>
                         {renderField(messageField)}
                       </div>
                     )}
                     {scheduleFields.length > 0 && (
                       <div className="plugin-config-group">
-                        <div className="plugin-config-group-title">Schedule</div>
+                        <div className="plugin-config-group-title">{t("plugins.config.group.schedule")}</div>
                         {scheduleFields.map(renderField)}
                       </div>
                     )}
@@ -1446,6 +1486,19 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { plu
         <Button variant="secondary" size="compact" disabled={maxed} onClick={() => onChange([...items, materializeListItemDefaults(field.itemSchema ?? {})])}>{addLabel}</Button>
       </div>
     </div>;
+  }
+
+  if (field.type === "sound") {
+    const soundLabel = typeof value === "string" ? (value || t("plugins.config.defaultSound")) : value && typeof value === "object" && "name" in value && typeof value.name === "string" ? value.name : t("plugins.config.defaultSound");
+    return <label className="plugin-config-row">
+      <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
+      <span className="flex items-center gap-2">
+        <span className="plugin-input flex-1 truncate" aria-live="polite">{soundLabel}</span>
+        <Button variant="secondary" size="compact" disabled={!pluginId || !onPickSound} onClick={() => { if (pluginId) void onPickSound?.(pluginId); }}>{t("plugins.config.browseSound")}</Button>
+        <Button variant="secondary" size="compact" onClick={() => onChange("alert")}>{t("plugins.config.useDefaultSound")}</Button>
+        <Button variant="secondary" size="compact" onClick={() => onChange("")}>{t("plugins.config.clearSound")}</Button>
+      </span>
+    </label>;
   }
 
   return <label className="plugin-config-row">
@@ -1473,6 +1526,7 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange }: { plu
 }
 
 function PathField({ label, value, placeholder, onSave, disabled }: { label: string; value: string; placeholder: string; onSave: (v: string) => void; disabled?: boolean }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(value);
   useEffect(() => { setDraft(value); }, [value]);
   return (
@@ -1486,7 +1540,7 @@ function PathField({ label, value, placeholder, onSave, disabled }: { label: str
           placeholder={placeholder}
           disabled={disabled}
         />
-        <Button variant="secondary" size="compact" icon={<SaveIcon />} disabled={disabled || draft === value} onClick={() => onSave(draft)}>Save</Button>
+        <Button variant="secondary" size="compact" icon={<SaveIcon />} disabled={disabled || draft === value} onClick={() => onSave(draft)}>{t("common.save")}</Button>
       </div>
     </div>
   );
@@ -1530,6 +1584,7 @@ function cursorStatusTone(state: CursorSetupStatus["state"]): StatusTone {
 }
 
 function IntegrationsView() {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<AgentSetupSnapshot | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
@@ -1576,10 +1631,10 @@ function IntegrationsView() {
 
   const updatePath = async (key: keyof AgentSetupCommandPaths, value: string) => {
     try {
-      setBusy("Saving path");
+      setBusy(t("integrations.busy.savingPath"));
       await api.updateIntegrationCommandPaths({ [key]: value });
       await load();
-      setMessage("Path saved.");
+      setMessage(t("integrations.toast.pathSaved"));
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
     } finally {
@@ -1594,8 +1649,8 @@ function IntegrationsView() {
   if (!snapshot) {
     return (
       <GlassCard className="flex h-64 flex-col items-center justify-center gap-4 text-center">
-        <p className="text-sm font-semibold text-slatecopy">{error || "Loading integrations…"}</p>
-        {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>Retry</Button>}
+        <p className="text-sm font-semibold text-slatecopy">{error || t("integrations.loading")}</p>
+        {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>{t("common.retry")}</Button>}
       </GlassCard>
     );
   }
@@ -1604,19 +1659,19 @@ function IntegrationsView() {
   const integrationDialogTitleId = selectedId ? `integration-detail-title-${selectedId}` : undefined;
 
   const integrations = [
-    { id: "claude", name: "Claude Code", icon: "claude", status: snapshot.status.label, tone: claudeStatusTone(snapshot.status.state), description: "Connect Claude Code to your OpenPets companion." },
-    { id: "opencode", name: "OpenCode", icon: "opencode", status: snapshot.opencodeStatus.label, tone: opencodeStatusTone(snapshot.opencodeStatus.state), description: "Connect OpenCode globally to your OpenPets companion." },
-    { id: "cursor", name: "Cursor", icon: "cursor", status: snapshot.cursorStatus.label, tone: cursorStatusTone(snapshot.cursorStatus.state), description: "Connect Cursor to your OpenPets companion via global MCP config." },
-    { id: "pi", name: "Pi", icon: "pi", status: "Manual", tone: "blue" satisfies StatusTone, description: "Connect Pi coding-agent activity through the OpenPets Pi extension package." },
+    { id: "claude", name: t("integrations.claude.name"), icon: "claude", status: snapshot.status.label, tone: claudeStatusTone(snapshot.status.state), description: t("integrations.claude.description") },
+    { id: "opencode", name: t("integrations.opencode.name"), icon: "opencode", status: snapshot.opencodeStatus.label, tone: opencodeStatusTone(snapshot.opencodeStatus.state), description: t("integrations.opencode.description") },
+    { id: "cursor", name: t("integrations.cursor.name"), icon: "cursor", status: snapshot.cursorStatus.label, tone: cursorStatusTone(snapshot.cursorStatus.state), description: t("integrations.cursor.description") },
+    { id: "pi", name: t("integrations.pi.name"), icon: "pi", status: t("integrations.pi.status"), tone: "blue" satisfies StatusTone, description: t("integrations.pi.description") },
   ] as const;
 
   const soon = [
-    { name: "VS Code", icon: "vscode" },
-    { name: "Windsurf", icon: "windsurf" },
-    { name: "Zed", icon: "zed" },
+    { name: t("integrations.soon.vscode"), icon: "vscode" },
+    { name: t("integrations.soon.windsurf"), icon: "windsurf" },
+    { name: t("integrations.soon.zed"), icon: "zed" },
   ];
 
-  const selectedIntegrationName = selectedId === "pi" ? "Pi" : integrations.find((item) => item.id === selectedId)?.name;
+  const selectedIntegrationName = selectedId === "pi" ? t("integrations.pi.name") : integrations.find((item) => item.id === selectedId)?.name;
 
   return (
     <div className="flex flex-col gap-6 h-full overflow-y-auto pr-2">
@@ -1640,10 +1695,10 @@ function IntegrationsView() {
             </div>
             <div className="plugin-card-footer">
               <div className="flex gap-2 w-full">
-                {item.id === "claude" && snapshot.status.canConfigure && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "configure")}>Install</Button>}
-                {item.id === "opencode" && snapshot.opencodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "opencode-install")}>Install</Button>}
-                {item.id === "cursor" && snapshot.cursorStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "cursor-install")}>Install</Button>}
-                <Button variant="secondary" size="compact" icon={<ConfigureIcon />} fullWidth={item.id === "pi"} onClick={() => setSelectedId(item.id)}>{item.id === "pi" ? "View Setup" : "Configure"}</Button>
+                {item.id === "claude" && snapshot.status.canConfigure && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "configure")}>{t("integrations.install")}</Button>}
+                {item.id === "opencode" && snapshot.opencodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "opencode-install")}>{t("integrations.install")}</Button>}
+                {item.id === "cursor" && snapshot.cursorStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "cursor-install")}>{t("integrations.install")}</Button>}
+                <Button variant="secondary" size="compact" icon={<ConfigureIcon />} fullWidth={item.id === "pi"} onClick={() => setSelectedId(item.id)}>{item.id === "pi" ? t("integrations.viewSetup") : t("integrations.configure")}</Button>
               </div>
             </div>
           </article>
@@ -1657,13 +1712,13 @@ function IntegrationsView() {
               <div className="plugin-card-content">
                 <div className="flex items-center justify-between">
                   <strong>{item.name}</strong>
-                  <StatusPill tone="slate">Soon</StatusPill>
+                  <StatusPill tone="slate">{t("integrations.soon.status")}</StatusPill>
                 </div>
-                <small>Coming soon.</small>
+                <small>{t("integrations.soon.description")}</small>
               </div>
             </div>
             <div className="plugin-card-footer">
-              <Button variant="secondary" size="compact" fullWidth disabled>Coming soon</Button>
+              <Button variant="secondary" size="compact" fullWidth disabled>{t("integrations.soon.button")}</Button>
             </div>
           </article>
         ))}
@@ -1671,36 +1726,36 @@ function IntegrationsView() {
 
       {selectedId && (
         <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-labelledby={integrationDialogTitleId}>
-          <button className="plugin-config-backdrop" type="button" aria-label="Close integration detail" onClick={() => setSelectedId(null)} />
+          <button className="plugin-config-backdrop" type="button" aria-label={t("integrations.closeAria")} onClick={() => setSelectedId(null)} />
           <GlassCard className="plugin-inspector">
             <div className="plugin-inspector-head">
               <div className="plugin-inspector-icon">
                 <IntegrationIcon id={selectedId} />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="eyebrow">Integration Detail</p>
+                <p className="eyebrow">{t("integrations.detail")}</p>
                 <h2 id={integrationDialogTitleId}>{selectedIntegrationName}</h2>
               </div>
-              <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId(null)}>Close</Button>
+              <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId(null)}>{t("integrations.close")}</Button>
             </div>
 
             <div className="flex flex-col gap-5 mt-4">
               {selectedId !== "pi" && (
                 <section className="plugin-section">
-                  <div className="plugin-section-title"><small>Command Source</small><strong>CLI mode</strong></div>
+                  <div className="plugin-section-title"><small>{t("integrations.commandSource")}</small><strong>{t("integrations.cliMode")}</strong></div>
                   <select className="settings-select w-full" value={snapshot.commandMode} disabled={isBusy} onChange={(event) => changeCommandMode(event.target.value as AgentSetupSnapshot["commandMode"])}>
-                    <option value="published">{commandModeLabels.published}</option>
-                    <option value="bundled">{commandModeLabels.bundled}</option>
-                    <option value="local" disabled={!snapshot.localDevAvailable}>{commandModeLabels.local}{snapshot.localDevAvailable ? "" : " unavailable"}</option>
+                    <option value="published">{t(commandModeLabelKeys.published)}</option>
+                    <option value="bundled">{t(commandModeLabelKeys.bundled)}</option>
+                    <option value="local" disabled={!snapshot.localDevAvailable}>{t(commandModeLabelKeys.local)}{snapshot.localDevAvailable ? "" : t("integrations.localUnavailable")}</option>
                   </select>
-                  <p className="text-xs text-slatecopy mt-2">Use the published package for normal setup, bundled for the desktop app build, or local while developing OpenPets.</p>
+                  <p className="text-xs text-slatecopy mt-2">{t("integrations.commandModeHelp")}</p>
                 </section>
               )}
 
               {selectedId === "claude" && (
                 <>
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Connection</small><strong>Status & Routing</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.statusRouting")}</strong></div>
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.status.label}</strong>
@@ -1709,61 +1764,61 @@ function IntegrationsView() {
                       <StatusPill tone={claudeStatusTone(snapshot.status.state)}>{snapshot.status.state}</StatusPill>
                     </div>
                     <div className="mt-2">
-                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">{t("integrations.petRouting")}</label>
                       <select
                         className="settings-select w-full"
                         value={snapshot.selectedPetId || ""}
                         onChange={(e) => void load(e.target.value)}
                         disabled={isBusy}
                       >
-                        <option value="">Default Pet</option>
+                        <option value="">{t("integrations.defaultPet")}</option>
                         {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
                       </select>
                     </div>
                   </section>
 
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Configuration</small><strong>Command Paths</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.configuration")}</small><strong>{t("integrations.commandPaths")}</strong></div>
                     <div className="flex flex-col gap-3">
-                      <PathField label="Claude Command" value={snapshot.commandPaths.claude} placeholder="claude" onSave={(v) => updatePath("claude", v)} disabled={isBusy} />
-                      <PathField label="Node.js Command" value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
+                      <PathField label={t("integrations.claudeCommand")} value={snapshot.commandPaths.claude} placeholder="claude" onSave={(v) => updatePath("claude", v)} disabled={isBusy} />
+                      <PathField label={t("integrations.nodeCommand")} value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
                     </div>
                   </section>
 
                   <div className="grid grid-cols-2 gap-3">
                     <section className="plugin-section">
-                      <div className="plugin-section-title"><small>Optional</small><strong>Claude Hooks</strong></div>
+                      <div className="plugin-section-title"><small>{t("integrations.optional")}</small><strong>{t("integrations.claudeHooks")}</strong></div>
                       <div className="flex items-center justify-between mb-2">
                         <StatusPill tone={snapshot.hookStatus.status === "installed" ? "green" : "blue"}>{snapshot.hookStatus.status}</StatusPill>
                       </div>
                     <div className="flex flex-col gap-2">
-                      <Button variant="primary" size="compact" icon={<HookIcon />} disabled={isBusy} onClick={() => run("Installing hooks", "install-hooks")}>Install Hooks</Button>
-                      <Button variant="danger" size="compact" icon={<RemoveIcon />} disabled={isBusy || snapshot.hookStatus.status === "needs_setup"} onClick={() => run("Removing hooks", "uninstall-hooks")}>Remove Hooks</Button>
+                      <Button variant="primary" size="compact" icon={<HookIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installingHooks"), "install-hooks")}>{t("integrations.installHooks")}</Button>
+                      <Button variant="danger" size="compact" icon={<RemoveIcon />} disabled={isBusy || snapshot.hookStatus.status === "needs_setup"} onClick={() => run(t("integrations.busy.removingHooks"), "uninstall-hooks")}>{t("integrations.removeHooks")}</Button>
                     </div>
                   </section>
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Included</small><strong>Instructions</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.included")}</small><strong>{t("integrations.instructions")}</strong></div>
                     <div className="flex items-center justify-between mb-2">
                       <StatusPill tone={snapshot.memoryStatus.state === "installed" ? "green" : "blue"}>{snapshot.memoryStatus.state}</StatusPill>
                     </div>
-                    <Button variant="secondary" size="compact" icon={<MemoryIcon />} disabled={isBusy} onClick={() => run("Updating instructions", "install-memory")}>Update Instructions</Button>
+                    <Button variant="secondary" size="compact" icon={<MemoryIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.updatingInstructions"), "install-memory")}>{t("integrations.updateInstructions")}</Button>
                   </section>
                 </div>
 
                 <section className="plugin-section">
-                  <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                  <div className="plugin-section-title"><small>{t("integrations.actions")}</small><strong>{t("integrations.management")}</strong></div>
                   <div className="grid grid-cols-2 gap-2">
-                    {snapshot.status.canConfigure && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "configure")}>Install MCP</Button>}
-                    {snapshot.status.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run("Replacing", "replace")}>Replace MCP</Button>}
-                    {snapshot.status.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "remove")}>Remove MCP</Button>}
-                    <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                    {snapshot.status.canConfigure && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "configure")}>{t("integrations.installMcp")}</Button>}
+                    {snapshot.status.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.replacing"), "replace")}>{t("integrations.replaceMcp")}</Button>}
+                    {snapshot.status.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.removing"), "remove")}>{t("integrations.removeMcp")}</Button>}
+                    <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>{t("integrations.refreshStatus")}</Button>
                   </div>
                 </section>
 
 
                   <details className="plugin-section group">
                     <summary className="cursor-pointer list-none flex items-center justify-between">
-                      <div className="plugin-section-title"><small>Advanced</small><strong>MCP JSON Preview</strong></div>
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.mcpJsonPreview")}</strong></div>
                       <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
                     </summary>
                     <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
@@ -1777,7 +1832,7 @@ function IntegrationsView() {
               {selectedId === "opencode" && (
                 <>
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Connection</small><strong>Global Setup</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.globalSetup")}</strong></div>
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.opencodeStatus.label}</strong>
@@ -1786,39 +1841,39 @@ function IntegrationsView() {
                       <StatusPill tone={opencodeStatusTone(snapshot.opencodeStatus.state)}>{snapshot.opencodeStatus.state}</StatusPill>
                     </div>
                     <div className="mt-2">
-                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">{t("integrations.petRouting")}</label>
                       <select
                         className="settings-select w-full"
                         value={snapshot.selectedPetId || ""}
                         onChange={(e) => void load(e.target.value)}
                         disabled={isBusy}
                       >
-                        <option value="">Default Pet</option>
+                        <option value="">{t("integrations.defaultPet")}</option>
                         {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
                       </select>
                     </div>
                   </section>
 
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Configuration</small><strong>Command Paths</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.configuration")}</small><strong>{t("integrations.commandPaths")}</strong></div>
                     <div className="flex flex-col gap-3">
-                      <PathField label="OpenCode Command" value={snapshot.commandPaths.opencode} placeholder="opencode" onSave={(v) => updatePath("opencode", v)} disabled={isBusy} />
-                      <PathField label="Node.js Command" value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
+                      <PathField label={t("integrations.opencodeCommand")} value={snapshot.commandPaths.opencode} placeholder="opencode" onSave={(v) => updatePath("opencode", v)} disabled={isBusy} />
+                      <PathField label={t("integrations.nodeCommand")} value={snapshot.commandPaths.node} placeholder="node" onSave={(v) => updatePath("node", v)} disabled={isBusy} />
                     </div>
                   </section>
 
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.actions")}</small><strong>{t("integrations.management")}</strong></div>
                     <div className="grid grid-cols-2 gap-2">
-                      {snapshot.opencodeStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "opencode-install")}>Install Global</Button>}
-                      {snapshot.opencodeStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "opencode-remove")}>Remove Global</Button>}
-                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                      {snapshot.opencodeStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "opencode-install")}>{t("integrations.installGlobal")}</Button>}
+                      {snapshot.opencodeStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.removing"), "opencode-remove")}>{t("integrations.removeGlobal")}</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>{t("integrations.refreshStatus")}</Button>
                     </div>
                   </section>
 
                   <details className="plugin-section group">
                     <summary className="cursor-pointer list-none flex items-center justify-between">
-                      <div className="plugin-section-title"><small>Advanced</small><strong>Config Preview</strong></div>
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.configPreview")}</strong></div>
                       <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
                     </summary>
                     <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
@@ -1831,7 +1886,7 @@ function IntegrationsView() {
               {selectedId === "cursor" && (
                 <>
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Connection</small><strong>Global MCP</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.globalMcp")}</strong></div>
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.cursorStatus.label}</strong>
@@ -1840,33 +1895,33 @@ function IntegrationsView() {
                       <StatusPill tone={cursorStatusTone(snapshot.cursorStatus.state)}>{snapshot.cursorStatus.state}</StatusPill>
                     </div>
                     <div className="mt-2">
-                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">Pet Routing</label>
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">{t("integrations.petRouting")}</label>
                       <select
                         className="settings-select w-full"
                         value={snapshot.selectedPetId || ""}
                         onChange={(e) => void load(e.target.value)}
                         disabled={isBusy}
                       >
-                        <option value="">Default Pet</option>
+                        <option value="">{t("integrations.defaultPet")}</option>
                         {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
                       </select>
                     </div>
                   </section>
 
                   <section className="plugin-section">
-                    <div className="plugin-section-title"><small>Actions</small><strong>Management</strong></div>
+                    <div className="plugin-section-title"><small>{t("integrations.actions")}</small><strong>{t("integrations.management")}</strong></div>
                     <div className="grid grid-cols-2 gap-2">
-                      {snapshot.cursorStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run("Installing", "cursor-install")}>Install MCP</Button>}
-                      {snapshot.cursorStatus.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run("Replacing", "cursor-replace")}>Replace MCP</Button>}
-                      {snapshot.cursorStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run("Removing", "cursor-remove")}>Remove MCP</Button>}
-                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>Refresh Status</Button>
+                      {snapshot.cursorStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "cursor-install")}>{t("integrations.installMcp")}</Button>}
+                      {snapshot.cursorStatus.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.replacing"), "cursor-replace")}>{t("integrations.replaceMcp")}</Button>}
+                      {snapshot.cursorStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.removing"), "cursor-remove")}>{t("integrations.removeMcp")}</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>{t("integrations.refreshStatus")}</Button>
                     </div>
                   </section>
 
 
                   <details className="plugin-section group">
                     <summary className="cursor-pointer list-none flex items-center justify-between">
-                      <div className="plugin-section-title"><small>Advanced</small><strong>MCP Entry Preview</strong></div>
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.mcpEntryPreview")}</strong></div>
                       <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
                     </summary>
                     <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
@@ -1876,7 +1931,7 @@ function IntegrationsView() {
 
                   <details className="plugin-section group">
                     <summary className="cursor-pointer list-none flex items-center justify-between">
-                      <div className="plugin-section-title"><small>Advanced</small><strong>Rules Preview</strong></div>
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.rulesPreview")}</strong></div>
                       <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
                     </summary>
                     <p className="mt-3 text-xs text-slatecopy">{snapshot.cursorPreview.rulesPath}</p>
@@ -1889,33 +1944,33 @@ function IntegrationsView() {
 
               {selectedId === "pi" && (
                 <section className="plugin-section">
-                  <div className="plugin-section-title"><small>Manual Setup</small><strong>Pi Extension</strong></div>
+                  <div className="plugin-section-title"><small>{t("integrations.pi.manualSetup")}</small><strong>{t("integrations.pi.extension")}</strong></div>
                   <p className="text-sm text-slatecopy leading-relaxed">
-                    Install the OpenPets Pi extension from Pi, then use the slash commands inside a Pi session.
+                    {t("integrations.pi.intro")}
                   </p>
                   <div className="mt-3 p-4 rounded-2xl bg-navy/5 border border-navy/5 flex flex-col gap-3">
                     <div className="flex flex-col gap-1">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Global install</span>
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.globalInstall")}</span>
                       <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install npm:@open-pets/pi</code>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Project install</span>
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.projectInstall")}</span>
                       <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install -l npm:@open-pets/pi</code>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Remove</span>
+                      <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.remove")}</span>
                       <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi remove npm:@open-pets/pi</code>
                     </div>
                   </div>
                   <div className="mt-3 p-4 rounded-2xl bg-blue-50/50 border border-blue-100/60 flex flex-col gap-2">
-                    <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">Slash commands</span>
+                    <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.slashCommands")}</span>
                     <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets status</code>
                     <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets test</code>
                     <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets react &lt;reaction&gt;</code>
                     <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets say &lt;message&gt;</code>
                   </div>
                   <p className="text-xs text-slatecopy mt-2">
-                    Use global install for all Pi workspaces, or project install when you only want OpenPets in the current project.
+                    {t("integrations.pi.outro")}
                   </p>
                 </section>
               )}
@@ -1928,6 +1983,7 @@ function IntegrationsView() {
 }
 
 function PluginsView() {
+  const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [catalog, setCatalog] = useState<PluginCatalogSnapshot | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -1936,6 +1992,8 @@ function PluginsView() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [configDraft, setConfigDraft] = useState<PluginConfig>({});
+  const [commandDrafts, setCommandDrafts] = useState<Record<string, Record<string, unknown>>>({});
+  const [activeCommandId, setActiveCommandId] = useState("");
 
   async function load(refreshCatalog = false, clearMessages = true) {
     if (clearMessages) setError("");
@@ -1950,6 +2008,8 @@ function PluginsView() {
   }
 
   useEffect(() => { void load().catch((err) => setError(String(err?.message ?? err))); }, []);
+  // Re-fetch plugin records when the host locale changes so `$t:` labels re-render translated.
+  useEffect(() => api.onPluginsRefresh(() => { void load(false, false).catch((err) => setError(String(err?.message ?? err))); }), []);
   useEffect(() => {
     if (!message) return;
     const timeout = window.setTimeout(() => setMessage(""), 2200);
@@ -1961,8 +2021,10 @@ function PluginsView() {
   const installed = selected?.installed;
   const catalogPlugin = selected?.catalog;
   const hasConfigFields = Boolean(installed?.configSchema && Object.keys(installed.configSchema).length > 0);
+  const activeCommand = installed?.commands?.find((command) => command.id === activeCommandId);
 
   useEffect(() => { setConfigDraft(materializeConfigDraft(installed?.configSchema, installed?.effectiveConfig)); }, [installed?.id, installed?.configSchema, installed?.effectiveConfig]);
+  useEffect(() => { setCommandDrafts({}); setActiveCommandId(""); }, [installed?.id]);
 
   const filteredEntries = useMemo(() => {
     return entries.filter((entry) => {
@@ -1991,13 +2053,28 @@ function PluginsView() {
     setConfigDraft((current) => ({ ...current, [key]: value }));
   }
 
+  function updateCommandDraft(commandId: string, key: string, value: unknown) {
+    setCommandDrafts((current) => ({ ...current, [commandId]: { ...(current[commandId] ?? {}), [key]: value } }));
+  }
+
+  async function pickConfigSound(pluginId: string, key: string) {
+    try {
+      setError("");
+      const result = await api.pickPluginConfigSound(pluginId);
+      if (!result.ok) { setSnapshot(result.snapshot); setError(result.error); return; }
+      if (!result.sound.id) { setSnapshot(result.snapshot); return; }
+      updateDraft(key, result.sound);
+      setMessage(t("plugins.toast.soundImported"));
+    } catch (err) { setError(String((err as Error)?.message ?? err)); }
+  }
+
   async function installCatalogEntry(entry: PluginEntry) {
     const result = await api.installCatalogPlugin(entry.id);
     if (!applyResult(result)) return;
     const installedPlugin = result.snapshot.plugins.find((plugin) => plugin.id === entry.id);
-    if (!installedPlugin) { setMessage("No plugin installed."); return; }
+    if (!installedPlugin) { setMessage(t("plugins.toast.noPluginInstalled")); return; }
     await load(false, false);
-    setMessage("Plugin installed.");
+    setMessage(t("plugins.toast.pluginInstalled"));
   }
 
   async function updateCatalogEntry(plugin: SafePluginRecord) {
@@ -2005,7 +2082,7 @@ function PluginsView() {
     const result = await api.updateCatalogPlugin(plugin.id);
     if (!applyResult(result)) return;
     const updatedPlugin = result.snapshot.plugins.find((nextPlugin) => nextPlugin.id === plugin.id);
-    setMessage(updatedPlugin && updatedPlugin.version !== previousVersion ? "Plugin updated." : "No plugin update applied.");
+    setMessage(updatedPlugin && updatedPlugin.version !== previousVersion ? t("plugins.toast.pluginUpdated") : t("plugins.toast.noPluginUpdate"));
   }
 
   return (
@@ -2015,7 +2092,7 @@ function PluginsView() {
       <GlassCard className="plugins-hub">
         <div className="filters">
           {(["all", "installed", "catalog", "local", "broken"] as PluginFilter[]).map((nextFilter) => (
-            <button key={nextFilter} className={`filter ${filter === nextFilter ? "active" : ""}`} onClick={() => setFilter(nextFilter)}>{pluginFilterLabels[nextFilter]}</button>
+            <button key={nextFilter} className={`filter ${filter === nextFilter ? "active" : ""}`} onClick={() => setFilter(nextFilter)}>{t(pluginFilterLabelKeys[nextFilter])}</button>
           ))}
         </div>
         <div className="plugin-grid">
@@ -2025,12 +2102,12 @@ function PluginsView() {
                 <span className="plugin-card-icon"><PluginIcon icon={pluginIcon(entry)} /></span>
                 <div className="plugin-card-content">
                   <strong>{pluginName(entry)}</strong>
-                  <small>{pluginDescription(entry)}</small>
+                  <small>{pluginDescription(entry, t)}</small>
                   <div className="badges mt-1">
-                    <StatusPill tone={pluginPrimaryTone(entry)}>{pluginPrimaryLabel(entry)}</StatusPill>
-                    {entry.installed?.bundled && <StatusPill tone="blue">Bundled</StatusPill>}
-                    {entry.installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
-                    {entry.installed?.runtime === "javascript" || entry.catalog?.runtime === "javascript" ? <StatusPill tone="purple">JS</StatusPill> : <StatusPill tone="slate">Declarative</StatusPill>}
+                    <StatusPill tone={pluginPrimaryTone(entry)}>{pluginPrimaryLabel(entry, t)}</StatusPill>
+                    {entry.installed?.bundled && <StatusPill tone="blue">{t("plugins.badge.bundled")}</StatusPill>}
+                    {entry.installed?.source === "local" && <StatusPill tone="orange">{t("plugins.badge.local")}</StatusPill>}
+                    {entry.installed?.runtime === "javascript" || entry.catalog?.runtime === "javascript" ? <StatusPill tone="purple">{t("plugins.badge.js")}</StatusPill> : <StatusPill tone="slate">{t("plugins.badge.declarative")}</StatusPill>}
                   </div>
                 </div>
               </div>
@@ -2043,59 +2120,59 @@ function PluginsView() {
                 <div className="plugin-card-actions">
                   {entry.installed && (
                     <div className="plugin-card-toggle-zone">
-                      <span className="plugin-card-toggle-label">{entry.installed.enabled ? "Active" : "Off"}</span>
+                      <span className="plugin-card-toggle-label">{entry.installed.enabled ? t("plugins.card.active") : t("plugins.card.off")}</span>
                       <input
                         className="settings-toggle plugin-card-toggle"
                         type="checkbox"
                         checked={entry.installed.enabled}
                         disabled={!!busy || entry.installed.catalogDisabled || Boolean(entry.installed.brokenReason)}
-                        onChange={(event) => void run("Saving", async () => {
-                          applyResult(await api.setPluginEnabled(entry.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled.");
+                        onChange={(event) => void run(t("plugins.busy.saving"), async () => {
+                          applyResult(await api.setPluginEnabled(entry.id, event.target.checked), event.target.checked ? t("plugins.toast.pluginEnabled") : t("plugins.toast.pluginDisabled"));
                         })}
                       />
                     </div>
                   )}
 
                   {entry.installed ? (
-                    <Button variant="secondary" size="compact" icon={<ConfigureIcon />} disabled={!!busy} onClick={() => setSelectedId(entry.id)}>Configure</Button>
+                    <Button variant="secondary" size="compact" icon={<ConfigureIcon />} disabled={!!busy} onClick={() => setSelectedId(entry.id)}>{t("plugins.card.configure")}</Button>
                   ) : (
-                    <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={!!busy || entry.catalog?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(entry); })}>Install Plugin</Button>
+                    <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={!!busy || entry.catalog?.deprecated} onClick={() => void run(t("plugins.busy.installing"), async () => { await installCatalogEntry(entry); })}>{t("plugins.card.installPlugin")}</Button>
                   )}
                 </div>
               </div>
             </article>
           ))}
-          {!filteredEntries.length && <div className="plugin-empty"><PluginGlyph /><strong>No plugins found</strong><small>Try a different filter, refresh the catalog, or load a local plugin folder.</small></div>}
+          {!filteredEntries.length && <div className="plugin-empty"><PluginGlyph /><strong>{t("plugins.empty.title")}</strong><small>{t("plugins.empty.description")}</small></div>}
         </div>
         <div className="plugin-hub-footer">
-          <span><strong>{snapshot?.plugins.length ?? 0}</strong> installed · <strong>{catalog?.plugins.length ?? 0}</strong> catalog</span>
+          <span><strong>{snapshot?.plugins.length ?? 0}</strong> {t("plugins.footer.installed")} · <strong>{catalog?.plugins.length ?? 0}</strong> {t("plugins.footer.catalog")}</span>
           <span className="plugin-hub-actions">
-            <Button variant="secondary" size="compact" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Refreshing", async () => { await load(true); setMessage("Plugin catalog refreshed."); })}>Refresh</Button>
-            <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void run("Loading", async () => {
+            <Button variant="secondary" size="compact" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run(t("plugins.busy.refreshing"), async () => { await load(true); setMessage(t("plugins.toast.catalogRefreshed")); })}>{t("plugins.footer.refresh")}</Button>
+            <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void run(t("plugins.busy.loading"), async () => {
               const beforeIds = new Set(snapshot?.plugins.map((plugin) => plugin.id) ?? []);
               const result = await api.loadLocalPlugin();
               if (!applyResult(result)) return;
               const loadedPlugin = result.snapshot.plugins.find((plugin) => plugin.source === "local" && !beforeIds.has(plugin.id));
-              setMessage(loadedPlugin ? "Local plugin loaded." : "No local plugin loaded.");
-            })}>Load Local Plugin</Button>
+              setMessage(loadedPlugin ? t("plugins.toast.localLoaded") : t("plugins.toast.noLocalLoaded"));
+            })}>{t("plugins.footer.loadLocal")}</Button>
           </span>
         </div>
       </GlassCard>
-      {selected && <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={`${pluginName(selected)} configuration`}>
-        <button className="plugin-config-backdrop" type="button" aria-label="Close plugin configuration" onClick={() => setSelectedId("")} />
+      {selected && <div className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={t("plugins.inspector.configAria", { name: pluginName(selected) })}>
+        <button className="plugin-config-backdrop" type="button" aria-label={t("plugins.inspector.closeAria")} onClick={() => setSelectedId("")} />
         <GlassCard className="plugin-inspector">
         {selected ? <>
           <div className="plugin-inspector-head">
             <span className="plugin-inspector-icon"><PluginIcon icon={pluginIcon(selected)} /></span>
-            <div className="flex-1 min-w-0"><p className="eyebrow">Plugin Details</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected)}</p></div>
-            <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
+            <div className="flex-1 min-w-0"><p className="eyebrow">{t("plugins.inspector.details")}</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected, t)}</p></div>
+            <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("plugins.inspector.close")}</Button>
           </div>
           <div className="meta">
-            <StatusPill tone={pluginPrimaryTone(selected)}>{pluginPrimaryLabel(selected)}</StatusPill>
+            <StatusPill tone={pluginPrimaryTone(selected)}>{pluginPrimaryLabel(selected, t)}</StatusPill>
             <StatusPill tone="slate">v{installed?.version ?? catalogPlugin?.version}</StatusPill>
-            {installed?.bundled && <StatusPill tone="blue">Bundled</StatusPill>}
-            {installed?.source === "local" && <StatusPill tone="orange">Local</StatusPill>}
-            {(installed?.catalogDeprecated || catalogPlugin?.deprecated) && <StatusPill tone="orange">Deprecated</StatusPill>}
+            {installed?.bundled && <StatusPill tone="blue">{t("plugins.badge.bundled")}</StatusPill>}
+            {installed?.source === "local" && <StatusPill tone="orange">{t("plugins.badge.local")}</StatusPill>}
+            {(installed?.catalogDeprecated || catalogPlugin?.deprecated) && <StatusPill tone="orange">{t("plugins.badge.deprecated")}</StatusPill>}
           </div>
           {(installed?.catalogStatusReason || catalogPlugin?.statusReason || installed?.status?.text) && <div className="plugin-status-strip">
             {installed?.status?.text && <StatusPill tone={installed.status.tone ? pluginStatusTone[installed.status.tone] : "blue"}>{installed.status.text}</StatusPill>}
@@ -2103,51 +2180,68 @@ function PluginsView() {
           </div>}
           {installed ? <>
             <section className="plugin-section">
-              <div className="plugin-section-title"><small>Runtime</small><strong>State & permissions</strong></div>
+              <div className="plugin-section-title"><small>{t("plugins.inspector.runtime")}</small><strong>{t("plugins.inspector.statePermissions")}</strong></div>
               <label className="settings-row plugin-toggle-row">
-                <div className="settings-row-info"><strong>{installed.enabled ? "Enabled" : "Disabled"}</strong><small>{installed.brokenReason || (installed.catalogDisabled ? "This plugin is disabled by the catalog." : "Toggle this plugin without leaving the Control Center.")}</small></div>
-                <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled || Boolean(installed.brokenReason)} onChange={(event) => void run("Saving", async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? "Plugin enabled." : "Plugin disabled."); })} />
+                <div className="settings-row-info"><strong>{installed.enabled ? t("plugins.inspector.enabled") : t("plugins.inspector.disabled")}</strong><small>{installed.brokenReason || (installed.catalogDisabled ? t("plugins.inspector.catalogDisabledNote") : t("plugins.inspector.toggleNote"))}</small></div>
+                <input className="settings-toggle" type="checkbox" checked={installed.enabled} disabled={!!busy || installed.catalogDisabled || Boolean(installed.brokenReason)} onChange={(event) => void run(t("plugins.busy.saving"), async () => { applyResult(await api.setPluginEnabled(installed.id, event.target.checked), event.target.checked ? t("plugins.toast.pluginEnabled") : t("plugins.toast.pluginDisabled")); })} />
               </label>
-              <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={sensitivePermissionSet.has(permission) ? "red" : permission === "network" || permission === "network:write" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>) : <StatusPill tone="slate">No permissions</StatusPill>}</div>
+              <div className="badges plugin-permissions">{installed.approvedPermissions.length ? installed.approvedPermissions.map((permission) => <StatusPill key={permission} tone={sensitivePermissionSet.has(permission) ? "red" : permission === "network" || permission === "network:write" ? "orange" : "blue"}>{t(pluginPermissionLabelKeys[permission])}</StatusPill>) : <StatusPill tone="slate">{t("plugins.inspector.noPermissions")}</StatusPill>}</div>
             </section>
-            {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>Configuration</small><strong>Needs attention</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
+            {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>{t("plugins.inspector.configuration")}</small><strong>{t("plugins.inspector.needsAttention")}</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
             {hasConfigFields && <section className="plugin-section">
-              <div className="plugin-section-title"><small>Settings</small><strong>Configuration</strong></div>
-              <div className="plugin-config-form">{Object.entries(installed.configSchema ?? {}).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} />)}</div>
-              <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run("Saving", async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), "Plugin configuration saved."); })}>Save Configuration</Button>
+              <div className="plugin-section-title"><small>{t("plugins.inspector.settings")}</small><strong>{t("plugins.inspector.configuration")}</strong></div>
+              <div className="plugin-config-form">{Object.entries(installed.configSchema ?? {}).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} onPickSound={(pluginId) => pickConfigSound(pluginId, key)} />)}</div>
+              <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run(t("plugins.busy.saving"), async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), t("plugins.toast.configSaved")); })}>{t("plugins.inspector.saveConfiguration")}</Button>
             </section>}
             {!!installed.commands?.length && <section className="plugin-section">
-              <div className="plugin-section-title"><small>Commands</small><strong>Quick actions</strong></div>
+              <div className="plugin-section-title"><small>{t("plugins.inspector.commands")}</small><strong>{t("plugins.inspector.quickActions")}</strong></div>
               <div className="plugin-command-list">
                 {installed.commands.map((command) => (
                   <div key={command.id} className="flex flex-col gap-2">
-                    <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run("Running", async () => { applyResult(await api.executePluginCommand(installed.id, command.id), "Plugin command ran."); })}>
+                    <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => {
+                      if (command.form) { setActiveCommandId((current) => current === command.id ? "" : command.id); return; }
+                      void run(t("plugins.busy.running"), async () => { applyResult(await api.executePluginCommand(installed.id, command.id), t("plugins.toast.commandRan")); });
+                    }}>
                       {command.title}
                     </Button>
                     {command.description && <small className="text-[10px] text-slatecopy px-1 leading-tight">{command.description}</small>}
                   </div>
                 ))}
               </div>
+              {activeCommand?.form && (() => {
+                const formDraft = materializeCommandDraft(activeCommand.form, commandDrafts[activeCommand.id]);
+                return <div className="plugin-command-form-panel">
+                  <div className="plugin-section-title"><small>{activeCommand.title}</small><strong>{activeCommand.form.submitLabel || activeCommand.title}</strong></div>
+                  <div className="plugin-command-form">
+                    {activeCommand.form.fields.map((field) => <ConfigFieldEditor key={field.id} pluginId={installed.id} fieldKey={field.id} field={commandFieldToConfigField(field)} value={formDraft[field.id]} onChange={(value) => updateCommandDraft(activeCommand.id, field.id, value)} />)}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run(t("plugins.busy.running"), async () => { if (applyResult(await api.executePluginCommand(installed.id, activeCommand.id, formDraft), t("plugins.toast.commandRan"))) setActiveCommandId(""); })}>{activeCommand.form.submitLabel || activeCommand.title}</Button>
+                    <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => setActiveCommandId("")}>{t("plugins.inspector.close")}</Button>
+                  </div>
+                </div>;
+              })()}
             </section>}
             <section className="plugin-section plugin-actions-section">
-              <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run("Reloading", async () => { applyResult(await api.reloadPlugin(installed.id), "Plugin reloaded."); })}>Reload</Button>
-              {installed.source === "catalog" && !installed.bundled && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run("Updating", async () => { await updateCatalogEntry(installed); })}>Update</Button>}
-              {!installed.bundled && <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(`Uninstall ${pluginName(selected)}?`)) void run("Uninstalling", async () => { if (applyResult(await api.uninstallPlugin(installed.id), "Plugin uninstalled.")) setSelectedId(""); }); }}>Uninstall</Button>}
+              <Button variant="secondary" disabled={!!busy} icon={<RefreshIcon />} onClick={() => void run(t("plugins.busy.reloading"), async () => { applyResult(await api.reloadPlugin(installed.id), t("plugins.toast.pluginReloaded")); })}>{t("plugins.inspector.reload")}</Button>
+              {installed.source === "catalog" && !installed.bundled && catalogPlugin && catalogPlugin.version !== installed.version && <Button variant="primary" icon={<InstallIcon />} disabled={!!busy} onClick={() => void run(t("plugins.busy.updating"), async () => { await updateCatalogEntry(installed); })}>{t("plugins.inspector.update")}</Button>}
+              {!installed.bundled && <Button variant="danger" icon={<RemoveIcon />} disabled={!!busy} onClick={() => { if (window.confirm(t("plugins.inspector.uninstallConfirm", { name: pluginName(selected) }))) void run(t("plugins.busy.uninstalling"), async () => { if (applyResult(await api.uninstallPlugin(installed.id), t("plugins.toast.pluginUninstalled"))) setSelectedId(""); }); }}>{t("plugins.inspector.uninstall")}</Button>}
             </section>
           </> : <section className="plugin-section">
-            <div className="plugin-section-title"><small>Catalog</small><strong>Ready to install</strong></div>
-            <p className="desc">Install this plugin to approve its permissions and make it available in your desktop companion.</p>
-            <div className="badges plugin-permissions">{catalogPlugin?.permissions.map((permission) => <StatusPill key={permission} tone={sensitivePermissionSet.has(permission) ? "red" : permission === "network" || permission === "network:write" ? "orange" : "blue"}>{pluginPermissionLabels[permission]}</StatusPill>)}</div>
-            <Button variant="primary" fullWidth icon={<InstallIcon />} disabled={!!busy || catalogPlugin?.deprecated} onClick={() => void run("Installing", async () => { await installCatalogEntry(selected); })}>Install Plugin</Button>
+            <div className="plugin-section-title"><small>{t("plugins.inspector.catalog")}</small><strong>{t("plugins.inspector.readyToInstall")}</strong></div>
+            <p className="desc">{t("plugins.inspector.catalogDescription")}</p>
+            <div className="badges plugin-permissions">{catalogPlugin?.permissions.map((permission) => <StatusPill key={permission} tone={sensitivePermissionSet.has(permission) ? "red" : permission === "network" || permission === "network:write" ? "orange" : "blue"}>{t(pluginPermissionLabelKeys[permission])}</StatusPill>)}</div>
+            <Button variant="primary" fullWidth icon={<InstallIcon />} disabled={!!busy || catalogPlugin?.deprecated} onClick={() => void run(t("plugins.busy.installing"), async () => { await installCatalogEntry(selected); })}>{t("plugins.inspector.installPlugin")}</Button>
           </section>}
-        </> : <div className="plugin-empty plugin-empty-detail"><PluginGlyph /><strong>No plugin selected</strong><small>Install a catalog plugin or load a local folder to begin.</small></div>}
+        </> : <div className="plugin-empty plugin-empty-detail"><PluginGlyph /><strong>{t("plugins.emptyDetail.title")}</strong><small>{t("plugins.emptyDetail.description")}</small></div>}
         </GlassCard>
       </div>}
     </div>
   );
 }
 
-function App() {
+function ControlCenter() {
+  const { t } = useI18n();
   const [currentRoute, setCurrentRoute] = useState<Route>(() => initialControlCenterRoute());
   const [state, setState] = useState<StateSnapshot | null>(null);
   const [catalog, setCatalog] = useState<CatalogState | null>(null);
@@ -2302,15 +2396,15 @@ function App() {
     if (!selected) return "";
     const isDefault = selected.id === defaultId;
     const isCodex = selected.sourceKind === "codex" || (state?.pets.installed.find(p => p.id === selected.id)?.source?.kind === "codex");
-    if (selected.broken) return selected.brokenReason || "This installed pet is broken and cannot be selected as default.";
-    if (isDefault) return selected.protected ? "Default built-in pet. Protected from removal." : "Default pet.";
+    if (selected.broken) return selected.brokenReason || t("pets.status.broken");
+    if (isDefault) return selected.protected ? t("pets.status.defaultProtected") : t("pets.status.default");
     if (selected.installed) {
-      if (isCodex) return "Installed and ready to become your default pet. Also found in ~/.codex/pets.";
-      return "Installed and ready to become your default pet.";
+      if (isCodex) return t("pets.status.installedCodex");
+      return t("pets.status.installed");
     }
-    if (selected.sourceKind === "codex") return "Available to import from ~/.codex/pets.";
-    return "Available to install from the catalog.";
-  }, [selected, defaultId, state]);
+    if (selected.sourceKind === "codex") return t("pets.status.availableCodex");
+    return t("pets.status.availableCatalog");
+  }, [selected, defaultId, state, t]);
 
   async function act(label: string, fn: () => Promise<unknown>) {
     try { setBusy(label); setError(""); await fn(); await loadPetsData(); }
@@ -2372,7 +2466,7 @@ function App() {
   async function loadCatalogPage(page: number) {
     if (catalogPages[page]) { setCatalogPage(page); return; }
     try {
-      setBusy("Loading page"); setError("");
+      setBusy(t("pets.busy.loadingPage")); setError("");
       const next = await api.getCatalogPage(page);
       setCatalog(next); setCatalogPage(next.page ?? page); setCatalogPages((pages) => ({ ...pages, [next.page ?? page]: next.pets }));
     } catch (err) { setError(String((err as Error)?.message ?? err)); }
@@ -2385,12 +2479,12 @@ function App() {
     <main className="app-shell">
       <header className="hero">
         <div className="hero-content">
-          <p className="eyebrow">Control Center</p>
-          <h1>{currentMeta.title}</h1>
-          <p className="hero-desc">{currentMeta.description}</p>
+          <p className="eyebrow">{t("app.controlCenter")}</p>
+          <h1>{t(currentMeta.titleKey)}</h1>
+          <p className="hero-desc">{t(currentMeta.descKey)}</p>
         </div>
         <div className="hero-logo-container">
-          <img src={openPetsLogoUrl} className="hero-brand-logo" alt="OpenPets" />
+          <img src={openPetsLogoUrl} className="hero-brand-logo" alt={t("app.logo.alt")} />
         </div>
       </header>
 
@@ -2402,7 +2496,7 @@ function App() {
             onClick={() => setCurrentRoute(tab.id)}
           >
             {tab.icon}
-            <span>{tab.label}</span>
+            <span>{t(tab.labelKey)}</span>
           </button>
         ))}
       </nav>
@@ -2431,13 +2525,13 @@ function App() {
                     aria-current={filter === f ? "page" : undefined}
                   >
                     <span className="filter-icon-wrapper">{filterIcons[f]}</span>
-                    <span className="filter-text">{filterLabels[f]}</span>
+                    <span className="filter-text">{t(filterLabelKeys[f])}</span>
                   </button>
                 ))}
               </div>
               <div className="filter-actions">
-                <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void act("Importing", () => api.installLocalPet())}>Import pet</Button>
-                <Button variant="secondary" size="compact" icon={<HeartIcon />} onClick={() => void api.openGallery().catch((err) => setError(String(err?.message ?? err)))}>Gallery</Button>
+                <Button variant="secondary" size="compact" icon={<FolderPlusIcon />} disabled={!!busy} onClick={() => void act(t("pets.busy.importing"), () => api.installLocalPet())}>{t("pets.import")}</Button>
+                <Button variant="secondary" size="compact" icon={<HeartIcon />} onClick={() => void api.openGallery().catch((err) => setError(String(err?.message ?? err)))}>{t("pets.gallery")}</Button>
               </div>
             </div>
             <div className="pets-grid">{pets.map((pet) => {
@@ -2457,7 +2551,7 @@ function App() {
                 >
                   <span className="thumb">
                     {useSpritesheetFrame ? (
-                      <SpriteFrame src={pet.spritesheet} label={`${pet.displayName} thumbnail`} size="thumb" />
+                      <SpriteFrame src={pet.spritesheet} label={t("pets.spriteLabel.thumbnail", { name: pet.displayName })} size="thumb" />
                     ) : (
                       <PetImage src={pet.preview} debugLabel={`${pet.id}:card`} />
                     )}
@@ -2467,17 +2561,17 @@ function App() {
                       <b className="card-title">{pet.displayName}</b>
                     </span>
                     <p className="card-desc">{pet.description || pet.id}</p>
-                    <div className="badges">{isDefault && <StatusPill tone="green">Default</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">Original</StatusPill> : pet.featured ? <StatusPill tone="purple">Featured</StatusPill> : null}{pet.installed && <StatusPill>Installed</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">Codex</StatusPill>}</div>
+                    <div className="badges">{isDefault && <StatusPill tone="green">{t("pets.badge.default")}</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill> : pet.featured ? <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill> : null}{pet.installed && <StatusPill>{t("pets.badge.installed")}</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">{t("pets.badge.codex")}</StatusPill>}</div>
 
                     <div className="pet-card-actions" onClick={(event) => event.stopPropagation()}>
                       <Button
                         variant="secondary"
                         size="compact"
                         icon={<EyeIcon />}
-                        ariaLabel={`View ${pet.displayName}`}
+                        ariaLabel={t("pets.aria.view", { name: pet.displayName })}
                         onClick={() => setSelectedId(pet.id)}
                       >
-                        View pet
+                        {t("pets.action.viewPet")}
                       </Button>
                       {canInstall && (
                         <Button
@@ -2485,10 +2579,10 @@ function App() {
                           size="compact"
                           icon={<InstallIcon />}
                           disabled={!!busy}
-                          ariaLabel={`Install ${pet.displayName}`}
-                          onClick={() => { void act("Installing", () => api.installPet(pet.id)); }}
+                          ariaLabel={t("pets.aria.install", { name: pet.displayName })}
+                          onClick={() => { void act(t("pets.busy.installing"), () => api.installPet(pet.id)); }}
                         >
-                          Install
+                          {t("pets.action.install")}
                         </Button>
                       )}
                       {canImport && (
@@ -2497,10 +2591,10 @@ function App() {
                           size="compact"
                           icon={<ImportIcon />}
                           disabled={!!busy}
-                          ariaLabel={`Import ${pet.displayName} from Codex`}
-                          onClick={() => { void act("Importing", () => api.importCodexPet(pet.id)); }}
+                          ariaLabel={t("pets.aria.import", { name: pet.displayName })}
+                          onClick={() => { void act(t("pets.busy.importing"), () => api.importCodexPet(pet.id)); }}
                         >
-                          Import
+                          {t("pets.action.import")}
                         </Button>
                       )}
                       {canSetDefault && (
@@ -2509,10 +2603,10 @@ function App() {
                           size="compact"
                           icon={<SetDefaultIcon />}
                           disabled={!!busy}
-                          ariaLabel={`Set ${pet.displayName} as default`}
-                          onClick={() => { void act("Setting default", () => api.setDefaultPet(pet.id)); }}
+                          ariaLabel={t("pets.aria.setDefault", { name: pet.displayName })}
+                          onClick={() => { void act(t("pets.busy.settingDefault"), () => api.setDefaultPet(pet.id)); }}
                         >
-                          Default
+                          {t("pets.action.default")}
                         </Button>
                       )}
                       {canRemove && (
@@ -2521,10 +2615,10 @@ function App() {
                           size="compact"
                           icon={<RemoveIcon />}
                           disabled={!!busy}
-                          ariaLabel={`Remove ${pet.displayName}`}
-                          onClick={() => { void act("Removing", () => api.removePet(pet.id)); }}
+                          ariaLabel={t("pets.aria.remove", { name: pet.displayName })}
+                          onClick={() => { void act(t("pets.busy.removing"), () => api.removePet(pet.id)); }}
                         >
-                          Remove
+                          {t("pets.action.remove")}
                         </Button>
                       )}
                     </div>
@@ -2541,10 +2635,10 @@ function App() {
                   disabled={!!busy || catalogPage <= 0}
                   onClick={() => void loadCatalogPage(catalogPage - 1)}
                 >
-                  Prev
+                  {t("pets.pager.prev")}
                 </Button>
               ) : <span />}
-              <span className="pager-text">{pets.length} pets{!!catalog?.pageCount && catalog.pageCount > 1 ? ` · Page ${catalogPage + 1} of ${catalog.pageCount}` : ""}</span>
+              <span className="pager-text">{t("pets.pager.count", { count: pets.length })}{!!catalog?.pageCount && catalog.pageCount > 1 ? t("pets.pager.page", { page: catalogPage + 1, pageCount: catalog.pageCount }) : ""}</span>
               {!!catalog?.pageCount && catalog.pageCount > 1 ? (
                 <Button
                   variant="secondary"
@@ -2554,29 +2648,29 @@ function App() {
                   disabled={!!busy || catalogPage >= catalog.pageCount - 1}
                   onClick={() => void loadCatalogPage(catalogPage + 1)}
                 >
-                  Next
+                  {t("pets.pager.next")}
                 </Button>
               ) : <span />}
             </div>
           </GlassCard>
 
           {selected ? (
-            <div ref={petDetailDialogRef} className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={`${selected.displayName} pet details`}>
-              <button className="plugin-config-backdrop" type="button" aria-label="Close pet details" onClick={() => setSelectedId("")} />
+            <div ref={petDetailDialogRef} className="plugin-config-overlay" role="dialog" aria-modal="true" aria-label={t("pets.detail.ariaLabel", { name: selected.displayName })}>
+              <button className="plugin-config-backdrop" type="button" aria-label={t("pets.detail.closeAria")} onClick={() => setSelectedId("")} />
               <GlassCard className="plugin-inspector pet-detail-inspector">
                 <div className="plugin-inspector-head">
                   <span className="plugin-inspector-icon">
                     {safePetImage(selected.spritesheet) ? (
-                      <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} thumb`} size="thumb" />
+                      <SpriteFrame src={selected.spritesheet} label={t("pets.spriteLabel.thumb", { name: selected.displayName })} size="thumb" />
                     ) : (
                       <PetImage src={selected.preview} debugLabel={`${selected.id}:thumb`} />
                     )}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="eyebrow">Pet detail</p>
+                    <p className="eyebrow">{t("pets.detail.eyebrow")}</p>
                     <h2>{selected.displayName}</h2>
                   </div>
-                  <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>Close</Button>
+                  <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("common.close")}</Button>
                 </div>
 
                 <div className="pet-detail-content">
@@ -2584,32 +2678,32 @@ function App() {
                     <p className="desc">{selected.description || selected.id}</p>
                     <div className="stage">
                       {safePetImage(selected.spritesheet) ? (
-                        <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} animated preview`} />
+                        <SpriteFrame src={selected.spritesheet} label={t("pets.spriteLabel.animatedPreview", { name: selected.displayName })} />
                       ) : (
                         <PetImage src={selected.preview} debugLabel={`${selected.id}:detail-fallback`} />
                       )}
                     </div>
                     <div className="meta">
-                      {selected.broken && <StatusPill tone="red">Broken</StatusPill>}
-                      {selected.installed && !selected.broken && <StatusPill tone="green">Ready</StatusPill>}
-                      {selected.builtIn && <StatusPill tone="orange">Originals</StatusPill>}
-                      {selected.original && !selected.builtIn && <StatusPill tone="yellow">Original</StatusPill>}
-                      {selected.featured && !selected.original && <StatusPill tone="purple">Featured</StatusPill>}
+                      {selected.broken && <StatusPill tone="red">{t("pets.badge.broken")}</StatusPill>}
+                      {selected.installed && !selected.broken && <StatusPill tone="green">{t("pets.badge.ready")}</StatusPill>}
+                      {selected.builtIn && <StatusPill tone="orange">{t("pets.badge.originals")}</StatusPill>}
+                      {selected.original && !selected.builtIn && <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill>}
+                      {selected.featured && !selected.original && <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill>}
                     </div>
                     {statusText && <p className="text-sm text-slatecopy mt-3 mb-0 font-medium">{statusText}</p>}
                   </div>
 
                   <aside className="pet-detail-reactions">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mb-3">Preview Animations</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slatecopy mb-3">{t("pets.detail.previewAnimations")}</h3>
                     <div className="pet-preview-grid">
                       {[
-                        { label: "Idle", state: "idle" as const },
-                        { label: "Thinking", state: "thinking" as const },
-                        { label: "Happy", state: "happy" as const },
-                        { label: "Wave", state: "wave" as const },
+                        { label: t("pets.detail.preview.idle"), state: "idle" as const },
+                        { label: t("pets.detail.preview.thinking"), state: "thinking" as const },
+                        { label: t("pets.detail.preview.happy"), state: "happy" as const },
+                        { label: t("pets.detail.preview.wave"), state: "wave" as const },
                       ].map((previewState) => (
-                        <article key={previewState.label} className="pet-preview-item">
-                          <SpriteFrame src={selected.spritesheet} label={`${selected.displayName} ${previewState.label} preview`} state={previewState.state} size="mini" />
+                        <article key={previewState.state} className="pet-preview-item">
+                          <SpriteFrame src={selected.spritesheet} label={t("pets.spriteLabel.statePreview", { name: selected.displayName, state: previewState.label })} state={previewState.state} size="mini" />
                           <span className="text-xs font-bold text-slatecopy">{previewState.label}</span>
                         </article>
                       ))}
@@ -2625,9 +2719,9 @@ function App() {
                       fullWidth
                       icon={<InstallIcon />}
                       disabled={!!busy}
-                      onClick={() => act("Installing", () => api.installPet(selected.id))}
+                      onClick={() => act(t("pets.busy.installing"), () => api.installPet(selected.id))}
                     >
-                      {busy || "Install Pet"}
+                      {busy || t("pets.detail.installPet")}
                     </Button>
                   )}
                   {!selected.installed && selected.sourceKind === "codex" && (
@@ -2636,9 +2730,9 @@ function App() {
                       fullWidth
                       icon={<ImportIcon />}
                       disabled={!!busy}
-                      onClick={() => act("Importing", () => api.importCodexPet(selected.id))}
+                      onClick={() => act(t("pets.busy.importing"), () => api.importCodexPet(selected.id))}
                     >
-                      {busy || "Import Codex Pet"}
+                      {busy || t("pets.detail.importCodexPet")}
                     </Button>
                   )}
                   {selected.installed && selected.id !== defaultId && !selected.broken && (
@@ -2647,9 +2741,9 @@ function App() {
                       fullWidth
                       icon={<SetDefaultIcon />}
                       disabled={!!busy}
-                      onClick={() => act("Setting default", () => api.setDefaultPet(selected.id))}
+                      onClick={() => act(t("pets.busy.settingDefault"), () => api.setDefaultPet(selected.id))}
                     >
-                      {busy || "Set Default Pet"}
+                      {busy || t("pets.detail.setDefaultPet")}
                     </Button>
                   )}
 
@@ -2659,9 +2753,9 @@ function App() {
                         variant="danger"
                         icon={<RemoveIcon />}
                         disabled={!!busy}
-                        onClick={() => act("Removing", () => api.removePet(selected.id))}
+                        onClick={() => act(t("pets.busy.removing"), () => api.removePet(selected.id))}
                       >
-                        Remove
+                        {t("pets.detail.remove")}
                       </Button>
                     )}
                     <Button
@@ -2670,7 +2764,7 @@ function App() {
                       disabled={!!busy}
                       onClick={() => void loadPetsData()}
                     >
-                      Refresh
+                      {t("pets.detail.refresh")}
                     </Button>
                   </div>
                 </div>
@@ -2680,6 +2774,24 @@ function App() {
         </div>
       )}
     </main>
+  );
+}
+
+function App() {
+  const [i18n, setI18n] = useState<I18nSnapshot | null>(null);
+
+  const reloadI18n = React.useCallback(() => {
+    void api.getI18n().then((snapshot) => {
+      setI18n(snapshot);
+      document.documentElement.lang = snapshot.locale;
+    }).catch(() => undefined);
+  }, []);
+  useEffect(() => { reloadI18n(); }, [reloadI18n]);
+
+  return (
+    <I18nProvider snapshot={i18n} onReload={reloadI18n}>
+      <ControlCenter />
+    </I18nProvider>
   );
 }
 

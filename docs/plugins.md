@@ -47,7 +47,15 @@ manifests may carry `$schema` for editor validation.
     (`plugin-assets.ts` strips script/foreignObject/event handlers/external hrefs).
   - `panels`: `{ name: relative .html path }` (max 8). Panel HTML gets a strict
     CSP injected at install.
-  - New config field types `date` and `secret` (masked input; no defaults allowed).
+  - New config field types `date`, `sound`, and `secret` (masked input; no defaults allowed).
+
+Minimum unblock note: Control Center `sound` config fields now support importing
+`.ogg`, `.mp3`, and `.wav` files through the host picker. Imported sounds are
+stored as opaque `{ kind: "user-sound", id, name }` refs; raw filesystem paths
+are rejected by config validation. Near-term debt remains to split
+`plugin-sdk-bridge.ts` by namespace, centralize preload/host route contracts,
+extract the user-sound store from host capabilities, and add parity tests for
+renderer preload routes.
 
 ## Permissions (v3)
 
@@ -72,7 +80,7 @@ No signing tier (deliberate — see `docs/superplugins.md` §15).
 
 Types: `packages/sdk/src/index.ts` (`@open-pets/plugin-sdk`, v3). The
 namespaces on `ctx`: `pets`, `pet` (alias of `pets.default`), `ui` (bubbles,
-toast, panel, dynamic menu), `audio`, `events`, `assets`, `bus`, `schedule`
+alert, toast, panel, dynamic menu), `audio`, `events`, `assets`, `bus`, `schedule`
 (`once`/`every`/`daily`/`cron`/`at`/`list`), `storage` (now with `keys` +
 `subscribe`, ~5 MB quota), `config`, `net` (`fetch` with non-GET +
 `stream`), `notify`, `ai`, `secrets`, `voice`, `auth`, `files`, `system`,
@@ -82,6 +90,18 @@ Hard lines kept regardless of permissions:
 
 - The render rule above (no raw markup into pet windows).
 - The privacy line (§3.1): no keystrokes, no screen contents, no other apps'
+
+- `ctx.ui.alert(...)` is the must-not-miss delivery helper: it renders a sticky,
+high-priority pet bubble and can optionally request `sound`, `notify`, actions,
+`dismissOn`, and rich bubble content (`text`, limited `markdown`, `icon`, `svg`,
+`image`, `tone`). Alerts require `pet:speak`; `pet:interact` is only needed for
+actions/input, `audio` only when `sound` is set, and `notify` only when `notify`
+is set. The returned handle behaves like a bubble handle and adds
+`acknowledge()`.
+- Config schemas may use `type: "sound"` for host-managed plugin sound
+  preferences. The saved value is a named host sound, an opaque user sound ref,
+  or empty; plugins never receive raw filesystem paths.
+- The privacy line (§3.1): no keystrokes, no screen contents, no other apps'
   window titles, no ambient clipboard/microphone/filesystem. Clipboard read is
   allowed only *inside a user-invoked command handler*; STT is one-shot
   push-to-talk behind a default-off toggle; drops fire only on explicit drags.
@@ -89,6 +109,32 @@ Hard lines kept regardless of permissions:
   redirects, response caps, DNS/private-IP SSRF guard (`assertPublicHost`).
 
 Quotas live in `pluginSdkQuotas` (`plugin-sdk-bridge.ts`).
+
+## Plugin i18n
+
+A plugin ships its translations as `locales/<locale>.json` — one file per
+supported locale, the same convention as the host catalog: a flat map of dotted
+keys to strings, with `{var}` interpolation. `locales/en.json` is the source and
+the fallback; missing locales (or missing keys within a locale) fall back to
+`en`, then to the raw key. The host packages and loads any present `locales/`;
+no file is required.
+
+Two ways to use those keys:
+
+- **`$t:key` references in manifest static fields** — wherever the host renders
+  a plugin-authored string at display time: `name`, `description`, `configSchema`
+  labels/descriptions/option labels, command titles/descriptions, and dynamic
+  menu item titles. Write the value as `"$t:plugin.name"`; the host resolves it
+  against the plugin's catalog for the active locale (→ plugin `en` → raw key) at
+  display time, so labels re-render translated when the user switches language.
+- **`ctx.t(key, vars?)` + `ctx.locale`** — for strings the plugin composes at
+  runtime (bubble / notify / status bodies with interpolation). `ctx.t` reads the
+  active locale live and interpolates `{var}` placeholders; `ctx.locale` is the
+  current locale string. Example: `ctx.t("reminder.due", { message })`.
+
+Keep placeholders intact across locales and leave brand names untranslated. The
+reference implementation is the `openpets.reminders` ("Quick Reminders") default
+plugin, mirrored by the CLI `reminder` template.
 
 ## Bubbles & the arbiter
 

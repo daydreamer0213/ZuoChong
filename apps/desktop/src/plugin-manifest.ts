@@ -43,7 +43,7 @@ export type PluginJavascriptPermission = Exclude<PluginPermission, "timer">;
 /** Permissions flagged sensitive in the UI (louder consent, global toggles). */
 export const sensitivePluginPermissions: ReadonlySet<PluginPermission> = new Set(["voice:listen", "clipboard", "pet:speak:dynamic"]);
 export type PluginIcon = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
-export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret";
+export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound";
 
 /** Asset kinds a v3 plugin can declare and bundle. */
 export type PluginAssetKind = "icons" | "images" | "svgs" | "sprites" | "sounds";
@@ -122,7 +122,7 @@ const configOptionFields = new Set(["label", "value"]);
 const triggerFields = new Set(["on", "everyMinutes", "actions"]);
 const speakActionFields = new Set(["type", "message"]);
 const reactActionFields = new Set(["type", "reaction"]);
-const supportedConfigTypes = new Set(["text", "textarea", "number", "boolean", "select", "time", "date", "multiSelect", "list", "secret"]);
+const supportedConfigTypes = new Set(["text", "textarea", "number", "boolean", "select", "time", "date", "multiSelect", "list", "secret", "sound"]);
 const deferredConfigTypes = new Set(["multi-select", "schedule", "connection"]);
 const deferredConfigFeatures = new Set(["dynamicOptions"]);
 const supportedPluginIcons = new Set(["plugin", "bell", "timer", "github", "heart", "sparkles", "coffee", "focus"]);
@@ -340,7 +340,7 @@ function validateConfigSchema(value: unknown, errors: PluginManifestValidationEr
     addError(errors, "$.configSchema", "invalid_config_schema", "configSchema must be an object.");
     return fields;
   }
-  const v3OnlyTypes = new Set(["date", "secret"]);
+  const v3OnlyTypes = new Set(["date", "secret", "sound"]);
   for (const [key, field] of Object.entries(value)) {
     const path = `$.configSchema.${key}`;
     if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(key)) addError(errors, path, "invalid_config_key", "Config field keys must be simple identifiers.");

@@ -22,6 +22,8 @@ import type {
   OpenPetsBubble,
   OpenPetsBubbleDismissReason,
   OpenPetsBubbleHandle,
+  OpenPetsAlert,
+  OpenPetsAlertHandle,
   OpenPetsCommand,
   OpenPetsCommandHandler,
   OpenPetsContext,
@@ -37,6 +39,7 @@ import type {
   OpenPetsReaction,
   OpenPetsScheduleHandler,
   OpenPetsStatus,
+  OpenPetsUserSoundRef,
 } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +53,15 @@ export interface RecordedBubble {
   updates: Array<Partial<OpenPetsBubble>>;
   pinned: boolean;
   dismissed: boolean;
+}
+
+export interface RecordedAlert {
+  spec: OpenPetsAlert;
+  handle: OpenPetsAlertHandle;
+  bubble: RecordedBubble;
+  updates: Array<Partial<OpenPetsBubble>>;
+  dismissed: boolean;
+  acknowledged: boolean;
 }
 
 export interface RecordedSchedule {
@@ -72,16 +84,20 @@ export interface RecordedNetCall {
 export interface MockCalls {
   speak: string[];
   react: string[];
+  statusReactions: Array<string | null>;
   status: OpenPetsStatus[];
   storage: Map<string, unknown>;
   schedules: Map<string, RecordedSchedule>;
   commands: Map<string, { meta: OpenPetsCommand; handler: OpenPetsCommandHandler }>;
   menuItems: OpenPetsMenuItem[];
   bubbles: RecordedBubble[];
+  alerts: RecordedAlert[];
   dismissedBubbles: string[];
   toasts: Array<{ text: string; tone?: string }>;
   notifications: Array<{ title: string; body?: string }>;
   sounds: Array<{ sound: unknown; volume?: number }>;
+  importedUserSounds: Array<{ ref: OpenPetsUserSoundRef; fileName: string; name?: string }>;
+  forgottenUserSounds: OpenPetsUserSoundRef[];
   busPublishes: Array<{ topic: string; payload: unknown }>;
   netCalls: RecordedNetCall[];
   aiCalls: Array<{ system?: string; messages: Array<{ role: string; content: string }> }>;
@@ -95,6 +111,12 @@ export interface MockCalls {
   errors: string[];
 }
 
+const allowedReactions = new Set<string>(["idle", "thinking", "working", "editing", "running", "testing", "waiting", "waving", "success", "error", "celebrating"]);
+
+function assertReaction(value: unknown): void {
+  if (typeof value !== "string" || !allowedReactions.has(value)) throw new Error("Invalid pet reaction.");
+}
+
 export interface MockContextOptions {
   /** Approved permissions. Omit to approve everything (legacy default). */
   permissions?: readonly OpenPetsPermission[];
@@ -106,6 +128,19 @@ export interface MockContextOptions {
    * harness clock; pin it explicitly for fully reproducible cron/daily tests.
    */
   nowMs?: number;
+  /**
+   * Optional in-memory plugin catalogs keyed by locale, mirroring the host's
+   * `locales/<locale>.json` files. When provided, `ctx.t(key, vars)` resolves
+   * against the active locale's catalog, then the `en` catalog, then echoes the
+   * key. When omitted, `ctx.t` simply echoes the key with `{vars}` interpolated.
+   *
+   * ```ts
+   * createTestHarness(register, {
+   *   locales: { en: { "greet": "Hi {name}" }, ja: { "greet": "やあ {name}" } },
+   * })
+   * ```
+   */
+  locales?: Record<string, Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +189,12 @@ export class FakeClock {
     if (schedule.type === "cron") return nextCronRunMs(schedule.cronExpr!, this.#nowMs) ?? Number.POSITIVE_INFINITY;
     return this.#nowMs + (schedule.intervalMs ?? 0);
   }
+}
+
+/** Replace `{name}` placeholders, mirroring the host catalog's `interpolate`. */
+function interpolateVars(template: string, vars?: Record<string, string | number>): string {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (whole, key: string) => (key in vars ? String(vars[key]) : whole));
 }
 
 function parseDuration(amount: number | string): number {
@@ -253,8 +294,8 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const approved = options.permissions === undefined ? null : new Set(options.permissions);
   let config = { ...(options.config ?? {}) };
   const calls: MockCalls = {
-    speak: [], react: [], status: [], storage: new Map(), schedules: new Map(), commands: new Map(), menuItems: [],
-    bubbles: [], dismissedBubbles: [], toasts: [], notifications: [], sounds: [], busPublishes: [], netCalls: [],
+    speak: [], react: [], statusReactions: [], status: [], storage: new Map(), schedules: new Map(), commands: new Map(), menuItems: [],
+    bubbles: [], alerts: [], dismissedBubbles: [], toasts: [], notifications: [], sounds: [], importedUserSounds: [], forgottenUserSounds: [], busPublishes: [], netCalls: [],
     aiCalls: [], voiceSpeaks: [], openedExternal: [], clipboardWrites: [], spawnedPets: [], panelMessages: [],
     savedFiles: [], secrets: new Map(), errors: [],
   };
@@ -274,6 +315,24 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   let systemMetrics: { cpuPercent: number; memUsedPercent: number; battery?: { percent: number; charging: boolean } } = { cpuPercent: 5, memUsedPercent: 40 };
   let nextId = 0;
   const newId = (prefix: string) => `${prefix}-${++nextId}`;
+
+  // ---- i18n: ctx.t / ctx.locale ----
+  // `ctx.locale` defaults to "en" and follows `harness.system.set({ locale })`.
+  // `ctx.t` resolves an optional in-memory catalog (active locale -> exact, then
+  // language prefix, then `en`), then echoes the key, finally interpolating {vars}.
+  const localeCatalogs = options.locales;
+  const activeLocale = (): string => {
+    const raw = systemInfo.locale;
+    return raw && raw !== "en-US" ? raw : "en";
+  };
+  const lookupCatalog = (key: string): string | undefined => {
+    if (!localeCatalogs) return undefined;
+    const locale = activeLocale();
+    const lang = locale.split(/[-_]/)[0]!;
+    return localeCatalogs[locale]?.[key] ?? localeCatalogs[lang]?.[key] ?? localeCatalogs.en?.[key];
+  };
+  const translate = (key: string, vars?: Record<string, string | number>): string =>
+    interpolateVars(lookupCatalog(key) ?? key, vars);
 
   const requirePermission = (permission: OpenPetsPermission): void => {
     if (approved !== null && !approved.has(permission)) throw new Error(`Plugin permission is not approved: ${permission}`);
@@ -311,6 +370,41 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   };
   const bubbleCallbacks = new Map<string, { record: RecordedBubble; callbacks: { onAction?: (actionId: string) => void | Promise<void>; onSubmit?: (values: Record<string, string | number>) => void | Promise<void>; onDismiss?: (reason: OpenPetsBubbleDismissReason) => void } }>();
 
+  const makeAlert = (spec: OpenPetsAlert): OpenPetsAlertHandle => {
+    if (spec.sound !== undefined) requirePermission("audio");
+    if (spec.notify !== undefined) requirePermission("notify");
+    const { sound, notify, ...bubbleSpec } = spec;
+    const bubble = makeBubble("default", {
+      ...bubbleSpec,
+      sticky: true,
+      priority: "high",
+    });
+    const bubbleRecord = calls.bubbles[calls.bubbles.length - 1]!;
+    if (sound !== undefined) calls.sounds.push({ sound });
+    if (notify !== undefined) calls.notifications.push({ title: notify.title, body: notify.body });
+    const id = newId("alert");
+    const record: RecordedAlert = {
+      spec: { ...spec, actions: spec.actions?.map((action) => ({ ...action })) },
+      bubble: bubbleRecord,
+      updates: [],
+      dismissed: false,
+      acknowledged: false,
+      handle: {
+        id,
+        update: async (patch) => { record.updates.push(patch); Object.assign(record.spec, patch); await bubble.update(patch); },
+        dismiss: async () => { if (!record.dismissed) { record.dismissed = true; await bubble.dismiss(); } },
+        pin: async () => bubble.pin(),
+        unpin: async () => bubble.unpin(),
+        onAction: (handler) => { bubble.onAction(handler); },
+        onSubmit: (handler) => { bubble.onSubmit(handler); },
+        onDismiss: (handler) => { bubble.onDismiss(handler); },
+        acknowledge: async () => { record.acknowledged = true; await record.handle.dismiss(); },
+      },
+    };
+    calls.alerts.push(record);
+    return record.handle;
+  };
+
   const petInfos: OpenPetsPetInfo[] = [{ id: "default", name: "Default pet", kind: "default", visible: true }];
   const petState: OpenPetsPetState = { position: { x: 100, y: 100 }, bounds: { x: 100, y: 100, width: 220, height: 240 }, currentAnimation: "idle", visible: true, dragging: false };
   const tickHandlers = new Set<(dtMs: number) => void>();
@@ -318,10 +412,10 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const makePetHandle = (petId: string): OpenPetsPetHandle => ({
     id: petId,
     speak: async (spec) => makeBubble(petId, spec),
-    react: async (reaction: OpenPetsReaction) => { requirePermission("pet:reaction"); calls.react.push(String(reaction)); },
+    react: async (reaction: OpenPetsReaction) => { requirePermission("pet:reaction"); assertReaction(reaction); calls.react.push(String(reaction)); },
     setAnimation: async (state) => { if (typeof state === "string") { requirePermission("pet:reaction"); calls.react.push(String(state)); } else { requirePermission("pet:animate"); petState.currentAnimation = `sprite:${state.sprite.name}`; } },
     setScale: async () => { requirePermission("pet:animate"); },
-    badge: async () => { requirePermission("pet:reaction"); },
+    setStatusReaction: async (reaction) => { requirePermission("pet:reaction"); if (reaction !== null) assertReaction(reaction); calls.statusReactions.push(reaction === null ? null : String(reaction)); },
     moveBy: async () => { requirePermission("pet:move"); },
     wander: async () => { requirePermission("pet:move"); },
     moveToHome: async () => { requirePermission("pet:move"); },
@@ -349,6 +443,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
     ui: {
       bubble: async (spec) => makeBubble("default", spec),
       toast: async (spec) => { requirePermission("ui:toast"); calls.toasts.push({ text: spec.text, tone: spec.tone }); },
+      alert: async (spec) => makeAlert(spec),
       panel: async () => {
         requirePermission("ui:panel");
         const id = newId("panel");
@@ -368,6 +463,14 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
     },
     audio: {
       play: async (sound, options) => { requirePermission("audio"); calls.sounds.push({ sound, volume: options?.volume }); },
+      importUserSound: async (file, opts) => {
+        requirePermission("audio");
+        requirePermission("files");
+        const ref: OpenPetsUserSoundRef = { kind: "user-sound", id: newId("sound"), name: opts?.name ?? file.name };
+        calls.importedUserSounds.push({ ref, fileName: file.name, name: opts?.name });
+        return ref;
+      },
+      forgetUserSound: async (ref) => { requirePermission("audio"); calls.forgottenUserSounds.push(ref); },
       stop: async () => { requirePermission("audio"); },
     },
     events: {
@@ -523,6 +626,8 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
       warn: async () => undefined,
       error: async () => undefined,
     },
+    t: (key, vars) => translate(key, vars),
+    get locale() { return activeLocale(); },
   };
 
   const harness: MockHarnessCore = {
@@ -550,7 +655,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
 }
 
 function isMockOptions(value: MockContextOptions | Record<string, unknown>): value is MockContextOptions {
-  return "permissions" in value || "config" in value || "nowMs" in value;
+  return "permissions" in value || "config" in value || "nowMs" in value || "locales" in value;
 }
 
 // ---------------------------------------------------------------------------
