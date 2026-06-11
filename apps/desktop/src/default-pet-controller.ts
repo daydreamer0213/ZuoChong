@@ -25,6 +25,7 @@ let movementInProgress = false;
 
 export type PetMoveOptions = { readonly x: number; readonly y: number; readonly durationMs?: number };
 export type PetWanderOptions = { readonly distance?: number; readonly durationMs?: number };
+export type PetReactionOptions = { readonly showMessage?: boolean };
 
 // Plugin bubble slots (SDK v3): the arbiter decides what each slot shows; the
 // sink merges its decisions into the default pet render.
@@ -121,12 +122,12 @@ export function recoverDefaultPetMouseInterop(reason: string): void {
   recoverPetMouseInterop(defaultPetWindow, reason);
 }
 
-export function applyExternalPetReaction(reaction: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
+export function applyExternalPetReaction(reaction: OpenPetsReaction, options: PetReactionOptions = {}): { readonly shown: boolean; readonly reason?: string } {
   if (paused) {
     return { shown: false, reason: "paused" };
   }
 
-  setTransientDisplay({ reaction });
+  setTransientDisplay({ reaction, ...(options.showMessage === false ? { suppressReactionMessage: true } : {}) });
   showDefaultPetForExternalEvent();
   return { shown: isDefaultPetVisible() };
 }

@@ -134,7 +134,7 @@ const callbackOf = (runCallback: RunCallback, id: unknown): ((...callbackArgs: u
 export const sdkCallHandlers: Record<PluginSdkRoute, SdkCallHandler> = {
   // Pet handles (first arg is the pet handle id; "default" targets the default pet).
   "pet.speak": (sdk, args) => sdk.pets.forPet(args[0]).speak(args[1]),
-  "pet.react": (sdk, args) => sdk.pets.forPet(args[0]).react(args[1] as never),
+  "pet.react": (sdk, args) => sdk.pets.forPet(args[0]).react(args[1] as never, args[2]),
   "pet.setAnimation": (sdk, args) => sdk.pets.forPet(args[0]).setAnimation(args[1]),
   "pet.setScale": (sdk, args) => sdk.pets.forPet(args[0]).setScale(args[1]),
   "pet.setStatusReaction": (sdk, args) => sdk.pets.forPet(args[0]).setStatusReaction(args[1]),

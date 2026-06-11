@@ -84,6 +84,7 @@ export interface RecordedNetCall {
 export interface MockCalls {
   speak: string[];
   react: string[];
+  reactions: Array<{ reaction: string; options?: { showMessage?: boolean } }>;
   statusReactions: Array<string | null>;
   status: OpenPetsStatus[];
   storage: Map<string, unknown>;
@@ -294,7 +295,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const approved = options.permissions === undefined ? null : new Set(options.permissions);
   let config = { ...(options.config ?? {}) };
   const calls: MockCalls = {
-    speak: [], react: [], statusReactions: [], status: [], storage: new Map(), schedules: new Map(), commands: new Map(), menuItems: [],
+    speak: [], react: [], reactions: [], statusReactions: [], status: [], storage: new Map(), schedules: new Map(), commands: new Map(), menuItems: [],
     bubbles: [], alerts: [], dismissedBubbles: [], toasts: [], notifications: [], sounds: [], importedUserSounds: [], forgottenUserSounds: [], busPublishes: [], netCalls: [],
     aiCalls: [], voiceSpeaks: [], openedExternal: [], clipboardWrites: [], spawnedPets: [], panelMessages: [],
     savedFiles: [], secrets: new Map(), errors: [],
@@ -373,9 +374,10 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const makeAlert = (spec: OpenPetsAlert): OpenPetsAlertHandle => {
     if (spec.sound !== undefined) requirePermission("audio");
     if (spec.notify !== undefined) requirePermission("notify");
-    const { sound, notify, ...bubbleSpec } = spec;
+    const { sound, notify, indicator, ...bubbleSpec } = spec;
     const bubble = makeBubble("default", {
       ...bubbleSpec,
+      ...(indicator === false ? {} : { indicator }),
       sticky: true,
       priority: "high",
     });
@@ -412,7 +414,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   const makePetHandle = (petId: string): OpenPetsPetHandle => ({
     id: petId,
     speak: async (spec) => makeBubble(petId, spec),
-    react: async (reaction: OpenPetsReaction) => { requirePermission("pet:reaction"); assertReaction(reaction); calls.react.push(String(reaction)); },
+    react: async (reaction: OpenPetsReaction, options) => { requirePermission("pet:reaction"); assertReaction(reaction); const record = { reaction: String(reaction), ...(options === undefined ? {} : { options: { ...options } }) }; calls.react.push(record.reaction); calls.reactions.push(record); },
     setAnimation: async (state) => { if (typeof state === "string") { requirePermission("pet:reaction"); calls.react.push(String(state)); } else { requirePermission("pet:animate"); petState.currentAnimation = `sprite:${state.sprite.name}`; } },
     setScale: async () => { requirePermission("pet:animate"); },
     setStatusReaction: async (reaction) => { requirePermission("pet:reaction"); if (reaction !== null) assertReaction(reaction); calls.statusReactions.push(reaction === null ? null : String(reaction)); },

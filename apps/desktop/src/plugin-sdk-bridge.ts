@@ -40,7 +40,9 @@ export type PluginCommandFormField = {
   required?: boolean;
 };
 export type PluginCommandForm = { fields: readonly PluginCommandFormField[]; submitLabel?: string };
-export type PluginCommand = { id: string; title: string; description?: string; form?: PluginCommandForm; placement?: "top" | "submenu"; priority?: number; featured?: boolean; icon?: string };
+export type PluginIconAssetRef = { kind: "icon"; name: string };
+export type PluginCommandIcon = string | PluginIconAssetRef;
+export type PluginCommand = { id: string; title: string; description?: string; form?: PluginCommandForm; placement?: "top" | "submenu"; priority?: number; featured?: boolean; icon?: PluginCommandIcon };
 export type PluginMenuItem = { id: string; title: string; enabled?: boolean; checked?: boolean };
 export type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 export type PluginRuntimePublicState = { commands: readonly PluginCommand[]; status?: PluginStatus; menuItems?: readonly PluginMenuItem[] };
@@ -55,7 +57,28 @@ export interface PluginStorageStore { get(pluginId: string, key: string): unknow
 
 export type PluginBubbleAction = { id: string; label: string; style: "default" | "primary" | "danger"; iconName?: string; dismissesBubble: boolean };
 export type PluginBubbleInput = { id: string; type: "text" | "number" | "select"; placeholder?: string; default?: string | number; options?: Array<{ value: string; label: string }>; submitLabel?: string };
+export type PluginBubbleIndicator = {
+  label?: string;
+  tone?: "info" | "success" | "warning" | "error";
+  iconName?: string;
+  iconSvgPath?: string;
+  imagePath?: string;
+  color?: string;
+  background?: string;
+  borderColor?: string;
+};
+export type PluginBubbleHudItem = {
+  iconName?: string;
+  svgPath?: string;
+  value: number;
+  label?: string;
+  tone?: "amber" | "blue" | "green" | "pink" | "slate" | "red";
+};
+export type PluginBubbleHud = {
+  items: PluginBubbleHudItem[];
+};
 export type PluginBubbleDescriptor = {
+  hud?: PluginBubbleHud;
   text?: string;
   /** Pre-sanitized HTML rendered from limited markdown (everything escaped first). */
   markdownHtml?: string;
@@ -72,6 +95,7 @@ export type PluginBubbleDescriptor = {
   pin?: boolean;
   dismissOn?: Array<"timeout" | "click" | "petClick" | "action" | "outsideClick">;
   priority: "low" | "normal" | "high" | "urgent";
+  indicator?: PluginBubbleIndicator;
   actions?: PluginBubbleAction[];
   input?: PluginBubbleInput;
 };
@@ -96,6 +120,7 @@ export interface PluginBubbleHostHandle {
 export type PluginPetInfo = { id: string; name: string; kind: "default" | "agent" | "plugin"; visible: boolean };
 export type PluginPetState = { position: { x: number; y: number }; bounds: { x: number; y: number; width: number; height: number }; currentAnimation: string; visible: boolean; dragging: boolean };
 export type PluginAnimationSpec = { kind: "reaction"; reaction: OpenPetsReaction } | { kind: "sprite"; spritePath: string; loop: boolean; fps: number };
+export type PluginReactOptions = { showMessage?: boolean };
 export type PluginPickedFileHost = { fileId: string; name: string; sizeBytes: number };
 export type PluginAiRequest = { system?: string; messages: Array<{ role: "user" | "assistant"; content: string }>; maxTokens?: number; temperature?: number; tools?: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }> };
 export type PluginAiResult = { text: string; toolCalls?: Array<{ name: string; input: Record<string, unknown> }> };
@@ -122,7 +147,7 @@ export interface PluginHostCapabilities {
     close(pluginId: string, petHandleId: string): Promise<void>;
     show(petHandleId: string): Promise<void>;
     hide(petHandleId: string): Promise<void>;
-    react(petHandleId: string, reaction: OpenPetsReaction): Promise<void>;
+    react(petHandleId: string, reaction: OpenPetsReaction, options?: PluginReactOptions): Promise<void>;
     setAnimation(petHandleId: string, spec: PluginAnimationSpec): Promise<void>;
     setScale(petHandleId: string, scale: number): Promise<void>;
     setStatusReaction(petHandleId: string, reaction: OpenPetsReaction | null): Promise<void>;
@@ -213,7 +238,7 @@ export function createDefaultPluginHostCapabilities(petApi: PluginPetApi): Plugi
       close: unavailable("pets.close"),
       show: async () => undefined,
       hide: async () => undefined,
-      react: async (_petId, reaction) => { await petApi.react(reaction); },
+      react: async (_petId, reaction, options) => { await petApi.react(reaction, options); },
       setAnimation: async (_petId, spec) => { if (spec.kind === "reaction") await petApi.react(spec.reaction); },
       setScale: async () => undefined,
       setStatusReaction: async () => undefined,
@@ -270,7 +295,8 @@ const allowedEventNames = new Set([
 ]);
 export const pluginEventNames = allowedEventNames;
 const allowedAccents = new Set(["blue", "purple", "green", "amber", "red", "pink", "slate"]);
-const namedHostIcons = new Set(["info", "check", "alert", "heart", "star", "bell", "coffee", "timer", "sparkles", "zap", "moon", "sun", "food", "play", "pause"]);
+const namedHostIcons = new Set(["info", "check", "alert", "heart", "star", "bell", "coffee", "timer", "droplet", "sparkles", "zap", "moon", "sun", "food", "play", "pause"]);
+const safeCssColorPattern = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|hsla?\(\s*\d{1,3}(?:deg)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\))$/;
 
 // ---------------------------------------------------------------------------
 // Storage stores
@@ -380,7 +406,8 @@ export class PluginSdkBridge {
         check(caps.settings.dynamicSpeechAllowed(), "AI-generated pet speech is disabled in settings.");
         out.dynamic = true;
       }
-      if (raw.text !== undefined) out.text = dynamic ? validateDynamicText(String(raw.text)) : validateSayMessage(String(raw.text));
+      const pinned = raw.pin === true;
+      if (raw.text !== undefined) out.text = dynamic ? validateDynamicText(String(raw.text)) : pinned ? validatePinnedBubbleText(String(raw.text)) : validateSayMessage(String(raw.text));
       if (raw.markdown !== undefined) {
         const markdown = String(raw.markdown);
         check(markdown.length <= (dynamic ? quotas.dynamicTextChars : quotas.markdownChars), "Plugin bubble markdown is too long.");
@@ -399,16 +426,93 @@ export class PluginSdkBridge {
       if (raw.durationMs !== undefined) { const duration = Number(raw.durationMs); check(Number.isFinite(duration) && duration >= 500 && duration <= 10 * 60_000, "Invalid bubble durationMs."); out.durationMs = duration; }
       if (raw.sticky !== undefined) out.sticky = raw.sticky === true;
       if (raw.pin !== undefined) { if (raw.pin === true) { requirePermission("pet:pin"); out.pin = true; if (out.sticky === undefined && out.durationMs === undefined) out.sticky = true; } }
+      if (raw.hud !== undefined) {
+        if (!forUpdate) {
+          check(raw.pin === true, "Bubble HUD descriptor is only allowed for pinned bubbles.");
+        }
+        out.hud = validateBubbleHud(raw.hud);
+      }
       if (raw.dismissOn !== undefined) {
         check(Array.isArray(raw.dismissOn) && raw.dismissOn.length <= 5, "Invalid bubble dismissOn.");
         const allowed = new Set(["timeout", "click", "petClick", "action", "outsideClick"]);
         out.dismissOn = (raw.dismissOn as unknown[]).map((entry) => { check(allowed.has(String(entry)), "Invalid bubble dismissOn entry."); return String(entry) as NonNullable<PluginBubbleDescriptor["dismissOn"]>[number]; });
       }
       if (raw.priority !== undefined) { check(["low", "normal", "high", "urgent"].includes(String(raw.priority)), "Invalid bubble priority."); out.priority = raw.priority as PluginBubbleDescriptor["priority"]; }
+      if (raw.indicator !== undefined && raw.indicator !== false) out.indicator = validateBubbleIndicator(raw.indicator);
       if (raw.actions !== undefined) { requirePermission("pet:interact"); out.actions = validateBubbleActions(raw.actions); }
       if (raw.input !== undefined) { requirePermission("pet:interact"); out.input = validateBubbleInput(raw.input); }
-      if (!forUpdate && out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined) throw new Error("Plugin bubble needs content (text, markdown, icon, svg, or image).");
+      if (out.text !== undefined || out.markdownHtml !== undefined) {
+        check(out.iconName === undefined && out.svgPath === undefined && out.imagePath === undefined, "Plugin bubble body media cannot be combined with text or markdown. Use indicator for icon + message alerts.");
+        check(out.hud === undefined, "Plugin bubble HUD cannot be combined with text or markdown.");
+      }
+      if (out.hud !== undefined) {
+        check(out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined && out.indicator === undefined, "Plugin bubble HUD cannot be combined with text, markdown, body media, or indicator.");
+      }
+      if (!forUpdate && out.text === undefined && out.markdownHtml === undefined && out.svgPath === undefined && out.imagePath === undefined && out.iconName === undefined && out.hud === undefined) throw new Error("Plugin bubble needs content (text, markdown, icon, svg, image, or hud).");
       return out;
+    };
+
+    const validateBubbleIndicator = (value: unknown): PluginBubbleIndicator => {
+      if (!isRecord(value)) throw new Error("Invalid bubble indicator.");
+      const indicator: PluginBubbleIndicator = {};
+      if (value.label !== undefined) indicator.label = validateSayMessage(String(value.label));
+      if (value.tone !== undefined) { check(["info", "success", "warning", "error"].includes(String(value.tone)), "Invalid bubble indicator tone."); indicator.tone = value.tone as PluginBubbleIndicator["tone"]; }
+      if (value.icon !== undefined) {
+        if (typeof value.icon === "string") { check(namedHostIcons.has(value.icon), "Unknown host icon name."); indicator.iconName = value.icon; }
+        else assignIndicatorAssetPath(indicator, resolveAssetRef(value.icon, ["icons"]).path);
+      }
+      if (value.svg !== undefined) indicator.iconSvgPath = resolveAssetRef(value.svg, ["svgs", "icons"]).path;
+      if (value.image !== undefined) indicator.imagePath = resolveAssetRef(value.image, ["images", "icons"]).path;
+      if (value.color !== undefined) indicator.color = validateCssColor(value.color, "Invalid bubble indicator color.");
+      if (value.background !== undefined) indicator.background = validateCssColor(value.background, "Invalid bubble indicator background.");
+      if (value.backgroundColor !== undefined) indicator.background = validateCssColor(value.backgroundColor, "Invalid bubble indicator background color.");
+      if (value.borderColor !== undefined) indicator.borderColor = validateCssColor(value.borderColor, "Invalid bubble indicator border color.");
+      check(indicator.label !== undefined || indicator.iconName !== undefined || indicator.iconSvgPath !== undefined || indicator.imagePath !== undefined, "Bubble indicator needs a label or icon.");
+      return indicator;
+    };
+
+    const assignIndicatorAssetPath = (indicator: PluginBubbleIndicator, path: string): void => {
+      if (path.toLowerCase().endsWith(".svg")) indicator.iconSvgPath = path;
+      else indicator.imagePath = path;
+    };
+
+    const validateBubbleHud = (value: unknown): PluginBubbleHud => {
+      if (!isRecord(value)) throw new Error("Invalid bubble HUD descriptor.");
+      const rawItems = value.items;
+      check(Array.isArray(rawItems), "Bubble HUD items must be an array.");
+      const itemsList = rawItems as unknown[];
+      check(itemsList.length >= 1 && itemsList.length <= 4, "Bubble HUD items must contain between 1 and 4 items.");
+      const items: PluginBubbleHudItem[] = [];
+      for (const item of itemsList) {
+        if (!isRecord(item)) throw new Error("Invalid bubble HUD item.");
+        check(item.value !== undefined, "Bubble HUD item must have a value.");
+        const val = Number(item.value);
+        check(Number.isFinite(val) && val >= 0 && val <= 100, "Bubble HUD item value must be a number between 0 and 100.");
+
+        const hudItem: PluginBubbleHudItem = { value: Math.round(val) };
+
+        if (item.icon !== undefined) {
+          if (typeof item.icon === "string") {
+            check(namedHostIcons.has(item.icon), "Unknown host icon name in HUD item.");
+            hudItem.iconName = item.icon;
+          } else {
+            hudItem.svgPath = resolveAssetRef(item.icon, ["icons"]).path;
+          }
+        } else {
+          throw new Error("Bubble HUD item must have an icon.");
+        }
+
+        if (item.label !== undefined) {
+          hudItem.label = validateSayMessage(String(item.label));
+        }
+
+        if (item.tone !== undefined) {
+          check(["amber", "blue", "green", "pink", "slate", "red"].includes(String(item.tone)), "Invalid HUD item tone.");
+          hudItem.tone = item.tone as PluginBubbleHudItem["tone"];
+        }
+        items.push(hudItem);
+      }
+      return { items };
     };
 
     const audio = createPluginAudioApi({ pluginId, state, capabilities: caps, requirePermission, audioPerMinute: quotas.audioPerMinute, resolveAssetRef });
@@ -420,11 +524,12 @@ export class PluginSdkBridge {
 
     const petNamespace = (petHandleId: string) => ({
       speak: (spec: unknown) => ui.showBubble(petHandleId, spec),
-      react: async (reaction: OpenPetsReaction) => {
+      react: async (reaction: OpenPetsReaction, options?: unknown) => {
         requirePermission("pet:reaction");
         state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
-        if (petHandleId === "default") await this.#petApi.react(validateReaction(reaction));
-        else await caps.pets.react(validatePetHandleId(petHandleId), validateReaction(reaction));
+        const opts = validateReactOptions(options);
+        if (petHandleId === "default") await this.#petApi.react(validateReaction(reaction), opts);
+        else await caps.pets.react(validatePetHandleId(petHandleId), validateReaction(reaction), opts);
       },
       setAnimation: async (animation: unknown) => {
         state.petWindow.tick(quotas.petActionsPerMinute, "pet action");
@@ -626,7 +731,7 @@ export class PluginSdkBridge {
         writeClipboardText: async (text: unknown) => { requirePermission("clipboard"); await caps.system.writeClipboardText(String(text).slice(0, 64 * 1024)); },
       },
       commands: {
-        register: (command: PluginCommand, handler: (values?: Record<string, unknown>) => unknown) => { requirePermission("commands"); const meta = validateCommand(command); check(state.commands.size < quotas.commands || state.commands.has(meta.id), "Plugin command quota exceeded."); state.commands.set(meta.id, { meta, handler }); },
+        register: (command: PluginCommand, handler: (values?: Record<string, unknown>) => unknown) => { requirePermission("commands"); const meta = validateCommand(command, (ref) => resolveAssetRef(ref, ["icons"])); check(state.commands.size < quotas.commands || state.commands.has(meta.id), "Plugin command quota exceeded."); state.commands.set(meta.id, { meta, handler }); },
         unregister: (id: string) => { state.commands.delete(String(id)); },
       },
       status: { set: (status: PluginStatus | string) => { requirePermission("status"); state.status = validateStatus(status); }, clear: () => { state.status = undefined; } },
@@ -882,8 +987,10 @@ export function isPrivateIp(address: string): boolean { if (net.isIPv4(address))
 
 function check(ok: boolean, message: string): void { if (!ok) throw new Error(message); }
 function clampNumber(value: number, min: number, max: number): number { if (!Number.isFinite(value)) return min; return Math.min(Math.max(value, min), max); }
+function validateCssColor(value: unknown, message: string): string { const color = String(value).trim(); check(color.length <= 48 && safeCssColorPattern.test(color), message); return color; }
 function validateStorageKey(key: string): string { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(String(key))) throw new Error("Invalid plugin storage key."); return String(key); }
 function validatePetHandleId(value: unknown): string { const id = String(value); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id)) throw new Error("Invalid pet handle id."); return id; }
+function validateReactOptions(value: unknown): PluginReactOptions | undefined { if (value === undefined) return undefined; if (!isRecord(value)) throw new Error("Invalid pet reaction options."); const keys = Object.keys(value); check(keys.every((key) => key === "showMessage"), "Invalid pet reaction option."); if (value.showMessage !== undefined && typeof value.showMessage !== "boolean") throw new Error("Invalid pet reaction showMessage option."); return value.showMessage === undefined ? {} : { showMessage: value.showMessage }; }
 function validatePoint(value: unknown): { x: number; y: number } { if (!isRecord(value)) throw new Error("Invalid point."); const x = Number(value.x); const y = Number(value.y); if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Invalid point."); return { x, y }; }
 function validateMoveToOptions(value: unknown): { durationMs?: number; easing?: string } { const opts = isRecord(value) ? value : {}; const durationMs = opts.durationMs === undefined ? undefined : clampNumber(Number(opts.durationMs), 100, 10_000); const easing = opts.easing === undefined ? undefined : (check(["linear", "ease-in", "ease-out", "ease-in-out"].includes(String(opts.easing)), "Invalid easing."), String(opts.easing)); return { durationMs, easing }; }
 
@@ -899,6 +1006,16 @@ export function validateDynamicText(value: string): string {
     .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[redacted]")
     .replace(/-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----/g, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
+}
+
+export function validatePinnedBubbleText(value: string): string {
+  const text = value.trim().replace(/\r\n?/g, "\n");
+  check(text.length >= 1, "Pinned bubble text cannot be empty.");
+  check(text.length <= 140, "Pinned bubble text is too long.");
+  const lines = text.split("\n");
+  check(lines.length <= 4, "Pinned bubble text has too many lines.");
+  check(lines.every((line) => line.trim().length > 0), "Pinned bubble text cannot contain blank lines.");
+  return lines.map((line) => validateSayMessage(line)).join("\n");
 }
 
 /** Static (non-dynamic) bubble markdown still gets the ambient content screen. */
@@ -1012,14 +1129,24 @@ export function normalizeJson(value: unknown, maxBytes: number, label: string): 
   return JSON.parse(text) as unknown;
 }
 
-function validateCommand(command: PluginCommand): PluginCommand {
+function validateCommand(command: PluginCommand, validateIconAssetRef: (ref: unknown) => { kind: PluginAssetKind; name: string; path: string }): PluginCommand {
   if (!command || !commandIdPattern.test(command.id)) throw new Error("Invalid plugin command id.");
   if (typeof command.title !== "string" || command.title.trim() === "" || command.title.length > 80) throw new Error("Invalid plugin command title.");
   if (command.description !== undefined && (typeof command.description !== "string" || command.description.length > 240)) throw new Error("Invalid plugin command description.");
   const placement = command.placement === undefined ? undefined : (check(command.placement === "top" || command.placement === "submenu", "Invalid plugin command placement."), command.placement);
   const priority = command.priority === undefined ? undefined : (check(Number.isFinite(Number(command.priority)), "Invalid plugin command priority."), clampNumber(Number(command.priority), -1000, 1000));
-  const icon = command.icon === undefined ? undefined : (check(typeof command.icon === "string" && namedHostIcons.has(command.icon), "Invalid plugin command icon."), command.icon);
+  const icon = command.icon === undefined ? undefined : validateCommandIcon(command.icon, validateIconAssetRef);
   return { id: command.id, title: command.title, description: command.description, form: validateCommandForm(command.form), placement, priority, featured: command.featured === true || undefined, icon };
+}
+
+function validateCommandIcon(icon: unknown, validateIconAssetRef: (ref: unknown) => { kind: PluginAssetKind; name: string; path: string }): PluginCommandIcon {
+  if (typeof icon === "string") {
+    check(namedHostIcons.has(icon), "Invalid plugin command icon.");
+    return icon;
+  }
+  if (!isRecord(icon) || icon.kind !== "icon" || typeof icon.name !== "string") throw new Error("Invalid plugin command icon.");
+  validateIconAssetRef(icon);
+  return { kind: "icon", name: icon.name };
 }
 
 const commandFormFieldTypes = new Set(["text", "textarea", "number", "boolean", "select", "multiSelect", "time", "date", "list"]);

@@ -168,23 +168,45 @@ export interface OpenPetsBubbleInput {
   submitLabel?: string;
 }
 
+/** A HUD item shown in the host-rendered pinned mini-HUD bubble. */
+export interface OpenPetsBubbleHudItem {
+  /** Named host icon or bundled icon asset reference. */
+  icon: OpenPetsIconRef;
+  /** Numeric value between 0 and 100 inclusive. */
+  value: number;
+  /** Optional short display label. */
+  label?: string;
+  /** Optional theme color tone for the bar/indicator. */
+  tone?: "amber" | "blue" | "green" | "pink" | "slate" | "red";
+}
+
+/** Descriptor for a host-rendered mini HUD layout, used in pinned bubbles. */
+export interface OpenPetsBubbleHud {
+  /** List of HUD items (usually up to 4 items). */
+  items: OpenPetsBubbleHudItem[];
+}
+
 /**
  * A structured, host-rendered bubble descriptor. The plugin describes; the
  * host renders — no raw HTML or live DOM ever crosses the SDK boundary.
  */
 export interface OpenPetsBubble {
   // --- content ---
+  /** Host-rendered mini HUD layout for pinned bubbles. */
+  hud?: OpenPetsBubbleHud;
   /** Plain text, length-capped, content-filtered. */
   text?: string;
   /** Limited markdown (bold/italic/code/line breaks), host-sanitized. */
   markdown?: string;
-  /** Named host icon or a bundled icon asset. */
+  /** Named host icon or a bundled icon asset. Body media is icon-only; use `indicator` for icon + message. */
   icon?: OpenPetsIconRef;
-  /** Bundled, install-time-sanitized SVG. */
+  /** Bundled, install-time-sanitized SVG. Body media is icon-only; use `indicator` for icon + message. */
   svg?: OpenPetsAssetRef;
-  /** Bundled raster image. */
+  /** Bundled raster image. Body media is icon-only; use `indicator` for icon + message. */
   image?: OpenPetsAssetRef;
   tone?: OpenPetsStatusTone;
+  /** Optional top-row indicator/header. Intended primarily for alerts. */
+  indicator?: OpenPetsAlertIndicator | false;
   /** Theme-token name, not a raw color string. */
   accent?: string;
   /**
@@ -253,6 +275,27 @@ export interface OpenPetsPanelHandle {
   /** Panel -> plugin, clone-safe. */
   onMessage(handler: (msg: unknown) => void): void;
   close(): Promise<void>;
+}
+
+/** Alert header indicator rendered above alert text. Custom art must be a manifest-declared asset. */
+export interface OpenPetsAlertIndicator {
+  /** Visible/accessibility label shown next to the icon. */
+  label?: string;
+  /** Named host icon or manifest-declared icon asset (`ctx.assets.icon(...)`). */
+  icon?: OpenPetsIconRef;
+  /** Manifest-declared sanitized SVG asset (`ctx.assets.svg(...)`). */
+  svg?: OpenPetsAssetRef;
+  /** Manifest-declared raster/icon image asset. */
+  image?: OpenPetsAssetRef;
+  tone?: OpenPetsStatusTone;
+  /** Safe CSS color for the icon/SVG (`#hex`, `rgb(a)`, or `hsl(a)`). */
+  color?: string;
+  /** Safe CSS background color for the circular icon well. */
+  background?: string;
+  /** Alias for `background`. */
+  backgroundColor?: string;
+  /** Safe CSS border color for the circular icon well. */
+  borderColor?: string;
 }
 
 /**
@@ -425,13 +468,18 @@ export interface OpenPetsPetInfo {
   visible: boolean;
 }
 
+export interface OpenPetsReactOptions {
+  /** Set false to animate without showing the built-in reaction/status message. */
+  showMessage?: boolean;
+}
+
 /** Addressable handle to a single pet. */
 export interface OpenPetsPetHandle {
   readonly id: string;
   /** Requires `pet:speak`. Accepts plain text or a full bubble descriptor. */
   speak(spec: string | OpenPetsBubble): Promise<OpenPetsBubbleHandle>;
   /** Requires `pet:reaction`. */
-  react(reaction: OpenPetsReaction): Promise<void>;
+  react(reaction: OpenPetsReaction, options?: OpenPetsReactOptions): Promise<void>;
   /** Requires `pet:animate` for sprite states; named reactions need `pet:reaction`. */
   setAnimation(state: OpenPetsAnimationState): Promise<void>;
   /** Bounded by the host (0.5–2). Requires `pet:animate`. */

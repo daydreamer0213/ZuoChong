@@ -44,7 +44,7 @@ type PluginPlatformSettings = {
   ai: { provider: "none" | "anthropic" | "openai" | "ollama"; model: string; baseUrl?: string };
 };
 type PluginInspectorState = { schedules: Array<{ id: string; type: string; nextRunMs: number }>; commands: PluginCommand[]; menuItems: Array<{ id: string; title: string }>; status?: PluginStatus; activeBubbles: number; activePanels: number; eventSubscriptions: number; lastError?: string; quotaCounters: Record<string, number> };
-type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus";
+type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus" | "droplet";
 type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
 type PluginConfigSchema = Record<string, PluginConfigField>;
 type PluginConfig = Record<string, unknown>;
@@ -54,8 +54,8 @@ type PluginCommand = { id: string; title: string; description?: string; form?: P
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
 type PluginCategory = "Companion" | "Wellness" | "Focus" | "Developer" | "Advanced";
-type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; source: "catalog" | "local"; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
-type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string };
+type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; iconDataUrl?: string; source: "catalog" | "local"; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
+type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; iconDataUrl?: string; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
 type PluginServiceResult = { ok: true; snapshot: PluginServiceSnapshot } | { ok: false; error: string; snapshot: PluginServiceSnapshot };
@@ -1306,7 +1306,21 @@ function PluginIcon({ icon = "plugin", className = "plugin-glyph" }: { icon?: Pl
   if (icon === "focus") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" /><path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
   </svg>;
+  if (icon === "droplet") return <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 2.5S5 10 5 15a7 7 0 0 0 14 0c0-5-7-12.5-7-12.5Z" />
+    <path d="M8.5 15.5a3.5 3.5 0 0 0 5.5 2.9" />
+  </svg>;
   return <PluginGlyph className={className} />;
+}
+
+function isPluginIconDataUrl(value: string | undefined): value is string {
+  return typeof value === "string" && /^data:image\/svg\+xml;base64,[a-z0-9+/=]+$/iu.test(value);
+}
+
+function PluginIconImage({ entry, className = "plugin-glyph" }: { entry: PluginEntry; className?: string }) {
+  const iconDataUrl = isPluginIconDataUrl(entry.installed?.iconDataUrl) ? entry.installed.iconDataUrl : isPluginIconDataUrl(entry.catalog?.iconDataUrl) ? entry.catalog.iconDataUrl : undefined;
+  if (iconDataUrl) return <img className={`${className} plugin-icon-img`} src={iconDataUrl} alt="" aria-hidden="true" draggable="false" />;
+  return <PluginIcon icon={pluginIcon(entry)} className={className} />;
 }
 
 function pluginIcon(entry: PluginEntry): PluginIconName {
@@ -2099,7 +2113,7 @@ function PluginsView() {
           {filteredEntries.map((entry) => (
             <article key={entry.id} className={`plugin-card ${entry.installed?.brokenReason ? "broken" : ""}`}>
               <div className="plugin-card-body">
-                <span className="plugin-card-icon"><PluginIcon icon={pluginIcon(entry)} /></span>
+                <span className="plugin-card-icon"><PluginIconImage entry={entry} /></span>
                 <div className="plugin-card-content">
                   <strong>{pluginName(entry)}</strong>
                   <small>{pluginDescription(entry, t)}</small>
@@ -2163,7 +2177,7 @@ function PluginsView() {
         <GlassCard className="plugin-inspector">
         {selected ? <>
           <div className="plugin-inspector-head">
-            <span className="plugin-inspector-icon"><PluginIcon icon={pluginIcon(selected)} /></span>
+            <span className="plugin-inspector-icon"><PluginIconImage entry={selected} /></span>
             <div className="flex-1 min-w-0"><p className="eyebrow">{t("plugins.inspector.details")}</p><h2>{pluginName(selected)}</h2><p className="desc">{pluginDescription(selected, t)}</p></div>
             <Button variant="secondary" size="compact" icon={<CloseIcon />} onClick={() => setSelectedId("")}>{t("plugins.inspector.close")}</Button>
           </div>

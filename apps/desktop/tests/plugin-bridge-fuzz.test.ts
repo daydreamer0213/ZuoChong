@@ -10,6 +10,7 @@ import {
   renderLimitedMarkdown,
   validateCommandFormValues,
   validateDynamicText,
+  validatePinnedBubbleText,
   type PluginBubbleDescriptor,
   type PluginCommandForm,
 } from "../src/plugin-sdk-bridge.js";
@@ -106,6 +107,13 @@ for (let index = 0; index < rounds / 4; index += 1) {
 assert.match(injectPanelCsp("<html><head></head><body></body></html>"), /Content-Security-Policy/);
 assert.match(injectPanelCsp("no head at all"), /^<meta http-equiv="Content-Security-Policy"/);
 assert.equal((injectPanelCsp('<head><meta http-equiv="Content-Security-Policy" content="default-src *"></head>').match(/Content-Security-Policy/g) ?? []).length, 1, "existing CSP metas are replaced, not stacked");
+
+// --- pinned bubble text -------------------------------------------------------
+
+assert.equal(validatePinnedBubbleText("🍖 ███░  ⚡ ███░\n🎾 ███░  💛 ██░░"), "🍖 ███░  ⚡ ███░\n🎾 ███░  💛 ██░░", "pinned HUD text may use a few safe lines");
+assert.throws(() => validatePinnedBubbleText("ok\n\nblank"), /blank lines/);
+assert.throws(() => validatePinnedBubbleText("line 1\nline 2\nline 3\nline 4\nline 5"), /too many lines/);
+assert.throws(() => validatePinnedBubbleText("ok\nhttps://example.com"), /URL|path-like/);
 
 // --- normalizeJson ----------------------------------------------------------
 

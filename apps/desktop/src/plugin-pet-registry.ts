@@ -170,8 +170,8 @@ export function hidePluginPet(petHandleId: string): void {
   notifyChange();
 }
 
-export function reactPluginPet(petHandleId: string, reaction: OpenPetsReaction): void {
-  if (petHandleId === "default") { applyExternalPetReaction(reaction); defaultAnimation = String(reaction); return; }
+export function reactPluginPet(petHandleId: string, reaction: OpenPetsReaction, options: { readonly showMessage?: boolean } = {}): void {
+  if (petHandleId === "default") { applyExternalPetReaction(reaction, options); defaultAnimation = String(reaction); return; }
   const pet = spawnedPets.get(petHandleId);
   if (!pet) throw new Error(`Pet is not available: ${petHandleId}`);
   applySpawnedPetAnimation(pet, { kind: "reaction", reaction });

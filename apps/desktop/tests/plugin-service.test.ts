@@ -54,6 +54,17 @@ await scenario("snapshot omits paths and includes manifest config", async ({ ser
   assert.equal("installPath" in snapshot.plugins[0], false);
 });
 
+await scenario("snapshot exposes declared v3 svg icon data url", async ({ root, service, store }) => {
+  const installPath = join(root, "openpets.reminders");
+  mkdirSync(join(installPath, "assets"), { recursive: true });
+  writeFileSync(join(installPath, "index.js"), "export default {};", "utf8");
+  writeFileSync(join(installPath, "assets", "reminders.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"10\"/></svg>", "utf8");
+  addPlugin(store, { id: "openpets.reminders", version: "1.0.0", installPath }, { manifestVersion: 3, id: "openpets.reminders", name: "Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "3.0.0", entry: "index.js", icon: "bell", permissions: [], assets: { icons: { reminders: "assets/reminders.svg" } } });
+  const snapshot = await service.getSnapshot();
+  assert.match(snapshot.plugins[0].iconDataUrl ?? "", /^data:image\/svg\+xml;base64,/);
+  assert.equal(Buffer.from((snapshot.plugins[0].iconDataUrl ?? "").split(",")[1] ?? "", "base64").toString("utf8").includes("<svg"), true);
+});
+
 await scenario("invalid manifest appears safe broken", async ({ service, store }) => {
   addPlugin(store, {}, { bad: true });
   const snapshot = await service.getSnapshot();

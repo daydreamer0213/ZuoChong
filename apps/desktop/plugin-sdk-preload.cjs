@@ -112,7 +112,7 @@ function makePetHandle(petId) {
   return {
     id: String(petId),
     speak: (spec) => call("pet.speak", [petId, spec]).then(makeBubbleHandle),
-    react: (reaction) => call("pet.react", [petId, reaction]),
+    react: (reaction, options) => call("pet.react", [petId, reaction, options]),
     setAnimation: (state) => call("pet.setAnimation", [petId, state]),
     setScale: (scale) => call("pet.setScale", [petId, scale]),
     setStatusReaction: (reaction) => call("pet.setStatusReaction", [petId, reaction]),

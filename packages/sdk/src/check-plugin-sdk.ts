@@ -40,6 +40,7 @@ const plugin: OpenPetsPluginDefinition = {
     await ctx.status.set({ text: "Ready", tone: "info" });
     await ctx.pet.speak("Hello!");
     await ctx.pet.react("waving");
+    await ctx.pet.react("waving", { showMessage: false });
     await ctx.pet.setStatusReaction("thinking");
     const alert = await ctx.ui.alert({ text: "Heads up", markdown: "**Check complete**", icon: "bell", tone: "info", sound: "alert" });
     alert.onAction(() => undefined);
@@ -52,6 +53,15 @@ const plugin: OpenPetsPluginDefinition = {
     bubble.onAction(async (actionId) => {
       if (actionId === "done") await bubble.dismiss();
     });
+    const hudBubble: OpenPetsBubbleHandle = await ctx.ui.bubble({
+      pin: true,
+      hud: {
+        items: [
+          { icon: "food", value: 80, tone: "amber", label: "Food" },
+          { icon: "zap", value: 60, tone: "blue", label: "Energy" },
+        ],
+      },
+    } satisfies OpenPetsBubble);
     await ctx.schedule.every("tick", 60_000, async () => {
       await ctx.storage.set("lastTick", "now");
     });
@@ -80,13 +90,19 @@ harness.files.provide([{ name: "bell.wav", bytes: new Uint8Array([1, 2, 3]) }]);
 await plugin.start(ctx);
 
 assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00"]);
-assert.deepEqual(calls.react, ["waving"]);
+assert.deepEqual(calls.react, ["waving", "waving"]);
+assert.deepEqual(calls.reactions[1]?.options, { showMessage: false });
 assert.deepEqual(calls.statusReactions, ["thinking"]);
 assert.equal(calls.status.length, 2);
 assert.ok(calls.schedules.has("tick"));
 assert.ok(calls.schedules.has("daily-summary"));
 assert.ok(calls.commands.has("greet"));
-assert.equal(calls.bubbles.length, 3, "speak + ui.alert + ui.bubble all produce bubbles");
+assert.equal(calls.bubbles.length, 4, "speak + ui.alert + ui.bubble all produce bubbles");
+assert.equal(calls.bubbles[3]!.spec.hud?.items.length, 2);
+assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.icon, "food");
+assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.value, 80);
+assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.tone, "amber");
+assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.label, "Food");
 assert.equal(calls.alerts.length, 1);
 assert.equal(calls.alerts[0]!.acknowledged, true);
 assert.equal(calls.sounds[0]!.sound, "alert");
@@ -106,7 +122,7 @@ assert.equal(calls.storage.get("lastTick"), "now");
 
 // Curated events reach subscribers.
 await harness.emit("pet:clicked", { petId: "default" });
-assert.deepEqual(calls.react, ["waving", "celebrating"]);
+assert.deepEqual(calls.react, ["waving", "waving", "celebrating"]);
 
 await calls.commands.get("greet")?.handler();
 assert.deepEqual(calls.speak, ["Hello!", "Heads up", "Break in 5:00", "Hi again!"]);

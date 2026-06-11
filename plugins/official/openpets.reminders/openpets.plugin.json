@@ -8,6 +8,11 @@
   "icon": "bell",
   "sdkVersion": "3.0.0",
   "entry": "index.js",
+  "assets": {
+    "icons": {
+      "reminder": "assets/reminder.svg"
+    }
+  },
   "permissions": [
     "pet:speak",
     "pet:interact",

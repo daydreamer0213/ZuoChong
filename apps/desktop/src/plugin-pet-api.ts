@@ -1,11 +1,11 @@
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
-import { applyExternalPetMoveBy, applyExternalPetMoveToHome, applyExternalPetReaction, applyExternalPetSay, applyExternalPetWander, type PetMoveOptions, type PetWanderOptions } from "./default-pet-controller.js";
+import { applyExternalPetMoveBy, applyExternalPetMoveToHome, applyExternalPetReaction, applyExternalPetSay, applyExternalPetWander, type PetMoveOptions, type PetReactionOptions, type PetWanderOptions } from "./default-pet-controller.js";
 import { debug } from "./logger.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 
 export interface PluginPetApi {
   speak(message: string): void | Promise<void>;
-  react(reaction: OpenPetsReaction): void | Promise<void>;
+  react(reaction: OpenPetsReaction, options?: PetReactionOptions): void | Promise<void>;
   moveBy(options: PetMoveOptions): void | Promise<void>;
   wander(options: PetWanderOptions): void | Promise<void>;
   moveToHome(): void | Promise<void>;
@@ -16,8 +16,8 @@ export const defaultPluginPetApi: PluginPetApi = {
     applyExternalPetSay(message);
     recordPluginPetActivity({ kind: "say" });
   },
-  react(reaction) {
-    applyExternalPetReaction(reaction);
+  react(reaction, options) {
+    applyExternalPetReaction(reaction, options);
     recordPluginPetActivity({ kind: "react", reaction });
   },
   moveBy(options) { applyExternalPetMoveBy(options); },

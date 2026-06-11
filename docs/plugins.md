@@ -93,10 +93,18 @@ Hard lines kept regardless of permissions:
 
 - `ctx.ui.alert(...)` is the must-not-miss delivery helper: it renders a sticky,
 high-priority pet bubble and can optionally request `sound`, `notify`, actions,
-`dismissOn`, and rich bubble content (`text`, limited `markdown`, `icon`, `svg`,
-`image`, `tone`). Alerts require `pet:speak`; `pet:interact` is only needed for
-actions/input, `audio` only when `sound` is set, and `notify` only when `notify`
-is set. The returned handle behaves like a bubble handle and adds
+`dismissOn`, an `indicator`, and rich bubble content (`text`, limited
+`markdown`, `icon`, `svg`, `image`, `tone`). `indicator` renders the top header
+row used by pet status messages, but is alert-owned instead of a pet reaction: it
+accepts a named host icon or a manifest-declared asset via `ctx.assets.icon(...)`
+/ `ctx.assets.svg(...)` / `ctx.assets.image(...)`, plus safe `color`,
+`background`/`backgroundColor`, and `borderColor` values. Raw SVG strings are
+not accepted at runtime; bundle SVGs in `assets` so the host can validate and
+sanitize them at install. Bubble body media (`icon`, `svg`, `image`) is
+icon-only and cannot be combined with `text`/`markdown`; use `indicator` for
+icon + message alerts. Alerts require `pet:speak`; `pet:interact` is only
+needed for actions/input, `audio` only when `sound` is set, and `notify` only
+when `notify` is set. The returned handle behaves like a bubble handle and adds
 `acknowledge()`.
 - Config schemas may use `type: "sound"` for host-managed plugin sound
   preferences. The saved value is a named host sound, an opaque user sound ref,
@@ -109,6 +117,10 @@ is set. The returned handle behaves like a bubble handle and adds
   redirects, response caps, DNS/private-IP SSRF guard (`assertPublicHost`).
 
 Quotas live in `pluginSdkQuotas` (`plugin-sdk-bridge.ts`).
+
+Reactions require `pet:reaction`: `ctx.pet.react(reaction)` preserves the built-in
+reaction/status bubble, while `ctx.pet.react(reaction, { showMessage: false })`
+plays the animation without generating that default text.
 
 ## Plugin i18n
 
@@ -133,22 +145,26 @@ Two ways to use those keys:
   current locale string. Example: `ctx.t("reminder.due", { message })`.
 
 Keep placeholders intact across locales and leave brand names untranslated. The
-reference implementation is the `openpets.reminders` ("Quick Reminders") default
-plugin, mirrored by the CLI `reminder` template.
+reference implementations include `openpets.reminders` ("Quick Reminders") and
+`openpets.launch-buddy` ("Launch Buddy"), with the reminder flow mirrored by the
+CLI `reminder` template.
 
 ## Bubbles & the arbiter
 
 `ctx.ui.bubble(spec)` / `pet.speak(spec)` accept a string or a descriptor
 (text, limited markdown, icon/svg/image refs, tone, accent token, duration,
-sticky, pin, dismissOn, priority, actions, input) and return a live handle
+sticky, pin, dismissOn, priority, actions, input, hud) and return a live handle
 (`update`, `dismiss`, `pin`, `unpin`, `onAction`, `onSubmit`, `onDismiss`).
+
+A **pinned mini HUD bubble** can be rendered using the `hud` descriptor (requires `pin: true`). The `hud` property takes an `items` array (1–4 items), where each item has `icon` (named host icon or asset ref), `value` (0–100), optional `label`, and optional `tone` ("amber", "blue", "green", "pink", "slate", "red"). When `hud` is present, it must not be combined with text, markdown, body media, or indicator. Pinned bubbles with `hud` render as a compact, polished 2x2 grid with CSS progress bars, avoiding emoji alignment issues.
 
 `plugin-bubble-arbiter.ts` (one per pet surface) arbitrates: priority queue,
 do-not-interrupt for sticky/urgent, coalescing of identical back-to-back
 messages, and a single **pinned slot** above the transient slot with
-priority-aware replace semantics. Non-dynamic text goes through the static
-content filter; `dynamic: true` content needs `pet:speak:dynamic` plus the
-global toggle and gets the relaxed screen (2,000 chars, secret redaction).
+priority-aware replace semantics. Non-dynamic transient text goes through the
+static content filter and stays single-line; pinned text may use a few safe lines
+for compact status HUDs. `dynamic: true` content needs `pet:speak:dynamic` plus
+the global toggle and gets the relaxed screen (2,000 chars, secret redaction).
 
 ## Multi-pet & liveness
 
@@ -172,6 +188,11 @@ are torn down with their plugin.
 - **System** — `info()` (platform/locale/timezone/theme/version/online) is
   always available; `metrics()` (aggregate CPU/mem only) needs
   `system:metrics`; `openExternal` is HTTPS-only.
+- **Commands** — `ctx.commands.register(...)` accepts `icon` as either one of
+  the host's named icon strings (for example `"info"`, `"check"`, `"timer"`) or
+  a manifest-declared bundled icon reference from `ctx.assets.icon(name)`. Raw SVG
+  strings are rejected; put custom SVG/PNG icons under `assets.icons` so the host
+  can validate and sanitize them before the command reaches runtime/UI state.
 - **Quiet hours** are a host primitive (Settings → Plugin Platform) gating
   speech audio, plugin sound, voice, and notification sound together.
 

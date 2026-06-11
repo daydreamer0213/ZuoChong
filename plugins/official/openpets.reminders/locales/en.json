@@ -9,6 +9,8 @@
   "config.customSound.label": "Custom alert sound",
   "config.customSound.description": "Optional sound to play instead of the default alert sound.",
 
+  "command.testReminder.title": "Test reminder",
+  "command.testReminder.description": "Show a reminder alert now so you can check the message, buttons, icon, and sound.",
   "command.setReminder.title": "Set reminder…",
   "command.setReminder.description": "Create a quick local reminder.",
   "command.setReminder.submit": "Set Reminder",
@@ -28,6 +30,7 @@
   "form.minutes.label": "Minutes",
 
   "reminder.defaultMessage": "Reminder time.",
+  "reminder.testMessage": "This is a test reminder.",
 
   "status.active": "{count} reminder(s) active",
   "status.none": "No active reminders",
@@ -39,6 +42,9 @@
 
   "bubble.due": "{message}",
   "bubble.missed": "Missed while away: {message}",
+
+  "indicator.due": "Reminder",
+  "indicator.missed": "Missed reminder",
 
   "action.done": "Done",
   "action.snooze": "Snooze 5m",

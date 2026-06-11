@@ -148,7 +148,7 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
       close: (pluginId, petHandleId) => closePluginPet(pluginId, petHandleId),
       show: async (petHandleId) => showPluginPet(petHandleId),
       hide: async (petHandleId) => hidePluginPet(petHandleId),
-      react: async (petHandleId, reaction) => reactPluginPet(petHandleId, reaction),
+      react: async (petHandleId, reaction, options) => reactPluginPet(petHandleId, reaction, options),
       setAnimation: async (petHandleId, spec) => setPluginPetAnimation(petHandleId, spec),
       setScale: async (petHandleId, scale) => setPluginPetScale(petHandleId, scale),
       setStatusReaction: async (petHandleId, reaction) => setPluginPetStatusReaction(petHandleId, reaction),

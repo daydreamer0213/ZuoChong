@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, screen, type IpcMainEvent } from "electron";
+import { readFileSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,7 +14,7 @@ import { pickReactionMessage } from "./reaction-messages.js";
 import { debug, error as logError, info, warn } from "./logger.js";
 import { executeDefaultPetPluginCommand, executeDefaultPetPluginMenuSelect, getDefaultPetPluginCommands, getDefaultPetPluginMenuItems } from "./plugin-service.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
-import type { PluginCommandForm } from "./plugin-sdk-bridge.js";
+import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 
 export interface PetWindowInteractionHooks {
@@ -55,6 +56,7 @@ export interface PetTransientDisplay {
   readonly reaction?: OpenPetsReaction;
   readonly message?: string;
   readonly reactionMessage?: string;
+  readonly suppressReactionMessage?: boolean;
   readonly dismissToken?: string;
 }
 
@@ -169,15 +171,17 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
 async function openPluginCommandForm(command: { readonly pluginId: string; readonly commandId: string; readonly commandTitle: string; readonly form?: PluginCommandForm }): Promise<void> {
   if (!command.form) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) ?? screen.getPrimaryDisplay();
-  const width = 380;
-  const height = Math.min(420, 150 + command.form.fields.length * 72);
+  const maxWidth = Math.max(420, display.workArea.width - 48);
+  const maxHeight = Math.max(360, display.workArea.height - 48);
+  const width = Math.min(620, maxWidth);
+  const height = Math.min(Math.max(380, estimatePluginCommandFormHeight(command.form)), maxHeight);
   const window = new BrowserWindow({
     title: command.commandTitle,
     width,
     height,
     x: Math.round(display.workArea.x + (display.workArea.width - width) / 2),
     y: Math.round(display.workArea.y + (display.workArea.height - height) / 2),
-    resizable: false,
+    resizable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -190,21 +194,47 @@ async function openPluginCommandForm(command: { readonly pluginId: string; reado
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   const token = `plugin-command-form-${window.id}`;
+  const resizeToken = `plugin-command-form-resize-${window.id}`;
   ipcMain.handle(token, async (event, values: unknown) => {
     if (event.sender !== window.webContents) throw new Error("Invalid command form sender.");
     const result = await executeDefaultPetPluginCommand(command.pluginId, command.commandId, isRecord(values) ? values : {});
     if (!window.isDestroyed()) window.close();
     return result;
   });
-  window.once("closed", () => ipcMain.removeHandler(token));
-  await window.loadURL(buildPluginCommandFormUrl(command.commandTitle, command.form, token));
+  ipcMain.on(resizeToken, (event, size: unknown) => {
+    if (event.sender !== window.webContents || window.isDestroyed() || !isRecord(size)) return;
+    const nextWidth = clampNumber(Number(size.width), 420, maxWidth);
+    const nextHeight = clampNumber(Number(size.height), 260, maxHeight);
+    const [currentWidth, currentHeight] = window.getContentSize();
+    if (Math.abs(currentWidth - nextWidth) < 8 && Math.abs(currentHeight - nextHeight) < 8) return;
+    window.setContentSize(Math.round(nextWidth), Math.round(nextHeight));
+    const bounds = window.getBounds();
+    const nextX = Math.min(Math.max(bounds.x, display.workArea.x), display.workArea.x + display.workArea.width - bounds.width);
+    const nextY = Math.min(Math.max(bounds.y, display.workArea.y), display.workArea.y + display.workArea.height - bounds.height);
+    if (nextX !== bounds.x || nextY !== bounds.y) window.setPosition(Math.round(nextX), Math.round(nextY));
+  });
+  window.once("closed", () => {
+    ipcMain.removeHandler(token);
+    ipcMain.removeAllListeners(resizeToken);
+  });
+  await window.loadURL(buildPluginCommandFormUrl(command.commandTitle, command.form, token, resizeToken));
   window.show();
 }
 
-function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, channel: string): string {
+function estimatePluginCommandFormHeight(form: PluginCommandForm): number {
+  const fieldHeight = form.fields.reduce((total, field) => total + (field.type === "textarea" || field.type === "list" ? 170 : field.type === "boolean" ? 76 : 100), 0);
+  return 170 + fieldHeight;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildPluginCommandFormUrl(title: string, form: PluginCommandForm, channel: string, resizeChannel: string): string {
   const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; form-action 'none'; base-uri 'none'";
-  const data = JSON.stringify({ title, form, channel }).replace(/</g, "\\u003c");
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>body{margin:0;font:13px system-ui,"Hiragino Sans","Yu Gothic","Malgun Gothic","Apple SD Gothic Neo","PingFang SC","PingFang TC","Microsoft YaHei","Microsoft JhengHei","Noto Sans CJK JP","Noto Sans CJK KR","Noto Sans CJK SC","Noto Sans CJK TC",sans-serif;background:#fff;color:#161616}.wrap{padding:18px}h1{font-size:16px;margin:0 0 14px}label{display:block;font-weight:600;margin:10px 0 5px}input,textarea{box-sizing:border-box;width:100%;border:1px solid #bbb;border-radius:8px;padding:8px;font:inherit}textarea{min-height:74px;resize:vertical}.error{color:#b00020;min-height:18px;margin-top:8px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}button{border:0;border-radius:8px;padding:8px 12px;font:inherit}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">${escapeHtml(t("common.cancel"))}</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';for(const f of data.form.fields){const box=document.createElement('div');const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input=f.type==='textarea'?document.createElement('textarea'):document.createElement('input');input.id=f.id;input.name=f.id;if(f.type==='number')input.type='number';else input.type='text';if(f.default!==undefined)input.value=f.default;if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;box.append(label,input);fields.append(box);}document.getElementById('cancel').onclick=()=>api.close();window.addEventListener('keydown',e=>{if(e.key==='Escape')api.close()});form.onsubmit=async e=>{e.preventDefault();err.textContent='';const values={};for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=f.type==='number'?Number(el.value):String(el.value||'').trim();}try{await api.submit(data.channel,values)}catch(error){err.textContent=(error&&error.message)||'Command failed.'}};</script></body></html>`;
+  const data = JSON.stringify({ title, form, channel, resizeChannel }).replace(/</g, "\\u003c");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><title>${escapeHtml(title)}</title><style>*{box-sizing:border-box}html,body{margin:0;min-width:0}body{font:14px system-ui,"Hiragino Sans","Yu Gothic","Malgun Gothic","Apple SD Gothic Neo","PingFang SC","PingFang TC","Microsoft YaHei","Microsoft JhengHei","Noto Sans CJK JP","Noto Sans CJK KR","Noto Sans CJK SC","Noto Sans CJK TC",sans-serif;background:#fff;color:#161616;overflow:hidden}.wrap{padding:24px}h1{font-size:20px;line-height:1.2;margin:0 0 18px}.field{margin-top:14px}label{display:block;font-weight:700;margin:0 0 7px}.hint{display:block;color:#64748b;font-size:12px;line-height:1.35;margin-top:5px}input,textarea,select{width:100%;border:1px solid #aeb8c8;border-radius:10px;padding:11px 12px;font:inherit;outline:none;background:white;color:#161616}input:focus,textarea:focus,select:focus{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.16)}textarea{min-height:148px;resize:vertical}.check{display:flex;align-items:center;gap:10px;font-weight:700}.check input{width:auto}.error{color:#b00020;min-height:20px;margin-top:10px}.buttons{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}button{border:0;border-radius:10px;padding:10px 14px;font:inherit;font-weight:700}button.primary{background:#2563eb;color:white}</style></head><body><form class="wrap"><h1></h1><div id="fields"></div><div class="error" role="alert"></div><div class="buttons"><button type="button" id="cancel">${escapeHtml(t("common.cancel"))}</button><button class="primary" type="submit"></button></div></form><script>const data=${data};const api=window.openPetsCommandForm;const form=document.querySelector('form'),fields=document.getElementById('fields'),err=document.querySelector('.error');document.querySelector('h1').textContent=data.title;document.querySelector('.primary').textContent=data.form.submitLabel||'Set';const values={};function resize(){requestAnimationFrame(()=>{const root=document.documentElement;api.resize(data.resizeChannel,{width:Math.ceil(Math.max(root.scrollWidth,document.body.scrollWidth)+2),height:Math.ceil(Math.max(root.scrollHeight,document.body.scrollHeight)+2)});});}function addOption(select,option){const el=document.createElement('option');el.value=option.value;el.textContent=option.label||option.value;select.appendChild(el);}for(const f of data.form.fields){const box=document.createElement('div');box.className='field';const label=document.createElement('label');label.textContent=f.label;label.htmlFor=f.id;let input;if(f.type==='textarea'){input=document.createElement('textarea');}else if(f.type==='select'){input=document.createElement('select');for(const option of f.options||[])addOption(input,option);}else if(f.type==='boolean'){label.className='check';input=document.createElement('input');input.type='checkbox';label.prepend(input);}else{input=document.createElement('input');if(f.type==='number')input.type='number';else if(f.type==='time')input.type='time';else if(f.type==='date')input.type='date';else input.type='text';}input.id=f.id;input.name=f.id;if(f.default!==undefined){if(input.type==='checkbox')input.checked=Boolean(f.default);else input.value=f.default;}if(f.min!==undefined)input.min=f.min;if(f.max!==undefined)input.max=f.max;if(f.maxLength!==undefined)input.maxLength=f.maxLength;if(f.required)input.required=true;if(f.type==='boolean'){box.append(label);}else{box.append(label,input);}fields.append(box);input.addEventListener('input',resize);}new ResizeObserver(resize).observe(document.body);resize();form.addEventListener('submit',async(event)=>{event.preventDefault();err.textContent='';for(const f of data.form.fields){const el=form.elements[f.id];values[f.id]=el.type==='number'?Number(el.value):el.type==='checkbox'?Boolean(el.checked):el.value;}try{await api.submit(data.channel,values);}catch(error){err.textContent=String(error&&error.message||error);resize();}});document.getElementById('cancel').addEventListener('click',()=>api.close());</script></body></html>`;
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
@@ -608,6 +638,7 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
 }
 
 export function preparePetTransientDisplay(display: PetTransientDisplay): PetTransientDisplay {
+  if (display.suppressReactionMessage) return display;
   if (!display.reaction || display.message || display.reactionMessage) return display;
   return { ...display, reactionMessage: pickReactionMessage(display.reaction, Math.random, getActiveLocale()) };
 }
@@ -740,7 +771,8 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   }
 
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", defaultPetSprite.fileName)).toString();
-  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles));
+  const hasPinned = Boolean(pluginBubbles?.pinned);
+  const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
   const scale = getAppStateSnapshot().preferences.petScale as PetScaleValue;
@@ -817,7 +849,8 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   }
 
   const imageUrl = pathToFileURL(spritesheetPath).toString();
-  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles));
+  const hasPinned = Boolean(pluginBubbles?.pinned);
+  const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
 
@@ -868,8 +901,8 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   };
 }
 
-function createPetBodyMarkup(stageLabel: string, bubble: string, spriteMarkup: string, pinnedBubble = ""): string {
-  return `<div class="stage" aria-label="${stageLabel}">
+function createPetBodyMarkup(stageLabel: string, bubble: string, spriteMarkup: string, pinnedBubble = "", hasPinned = false): string {
+  return `<div class="stage${hasPinned ? " has-pinned" : ""}" aria-label="${stageLabel}">
     ${pinnedBubble}
     ${bubble}
     <div class="pet-hitbox" aria-hidden="true">
@@ -906,6 +939,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-status-icon::before { content: attr(data-icon); display: block; width: 18px; height: 18px; line-height: 18px; text-align: center; transform: none; }
     .bubble-status-icon.has-svg::before { content: none; }
     .bubble-status-icon svg { display: block; width: 14px; height: 14px; color: currentColor; }
+    .bubble-status-icon img { display: block; width: 14px; height: 14px; object-fit: contain; }
     .bubble-status-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .bubble-divider { height: 1px; width: 100%; margin: 8px 0; background: rgba(30, 58, 138, 0.12); }
     .bubble-body { min-width: 0; width: 100%; color: #172033; font: 720 10.5px/13.5px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Malgun Gothic", "Apple SD Gothic Neo", "PingFang SC", "PingFang TC", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", sans-serif; }
@@ -913,6 +947,7 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-status-only { max-width: min(156px, calc(100vw - 18px)); padding: 8px 11px; border-radius: 999px; }
     .bubble.is-status-only .bubble-header { display: grid; grid-template-columns: 18px minmax(0, auto); align-items: center; justify-content: center; }
     .bubble.is-message-only { border-radius: 14px 14px 3px 14px; }
+    .bubble.has-actions { min-width: min(176px, calc(100vw - 18px)); }
     .bubble.is-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 138px; }
     .bubble.is-long-message .bubble-text { -webkit-line-clamp: 6; font-size: 10px; line-height: 13px; }
     .bubble.is-very-long-message { max-width: min(220px, calc(100vw - 18px)); max-height: 156px; }
@@ -922,6 +957,10 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-success .bubble-status-icon { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }
     .bubble.is-error .bubble-status-icon { background: #ef4444; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(239, 68, 68, 0.34); }
     .bubble.is-info .bubble-status-icon { background: #38bdf8; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(56, 189, 248, 0.34); }
+    .bubble-status-icon.is-success { background: #10b981; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(16, 185, 129, 0.34); }
+    .bubble-status-icon.is-error { background: #ef4444; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(239, 68, 68, 0.34); }
+    .bubble-status-icon.is-warning { background: #f59e0b; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(245, 158, 11, 0.34); }
+    .bubble-status-icon.is-info { background: #38bdf8; box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.28), 0 2px 7px rgba(56, 189, 248, 0.34); }
     .bubble.is-busy .bubble-status-icon::before { content: ""; position: absolute; inset: 0; width: 18px; height: 18px; background: radial-gradient(circle at 50% 50%, #fff 0 4px, transparent 4.5px); animation: status-pulse 820ms ease-in-out infinite; }
     .bubble.is-waiting .bubble-status-icon::before { content: ""; position: absolute; left: 3px; top: 3px; box-sizing: border-box; width: 12px; height: 12px; border: 2px solid rgba(255, 255, 255, 0.96); border-top-color: rgba(255, 255, 255, 0.28); border-radius: 999px; }
     .bubble.is-plugin { gap: 6px; }
@@ -930,8 +969,8 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-plugin .bubble-markdown code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; background: rgba(30, 58, 138, 0.08); border-radius: 4px; padding: 0 3px; }
     .bubble-media { display: block; max-width: 96px; max-height: 64px; margin: 0 auto 2px; pointer-events: none; }
     .bubble-plugin-icon { display: inline-block; font-size: 13px; line-height: 14px; margin-bottom: 2px; }
-    .bubble-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-    .bubble-action { border: 0; border-radius: 8px; padding: 4px 9px; font: 760 10px/12px Inter, ui-sans-serif, system-ui, sans-serif; background: rgba(30, 58, 138, 0.10); color: #172033; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
+    .bubble-actions { display: flex; flex-wrap: nowrap; gap: 5px; width: 100%; margin-top: 6px; min-width: 0; }
+    .bubble-action { flex: 1 1 0; min-width: 0; border: 0; border-radius: 8px; padding: 4px 7px; font: 760 10px/12px Inter, ui-sans-serif, system-ui, sans-serif; background: rgba(30, 58, 138, 0.10); color: #172033; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .bubble-action:hover { background: rgba(30, 58, 138, 0.18); }
     .bubble-action.is-primary { background: #2563eb; color: #fff; }
     .bubble-action.is-primary:hover { background: #1d4ed8; }
@@ -939,9 +978,48 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble-action.is-danger:hover { background: #dc2626; }
     .bubble-input { display: flex; gap: 5px; margin-top: 6px; align-items: center; }
     .bubble-input-control { box-sizing: border-box; flex: 1 1 auto; min-width: 0; border: 1px solid rgba(30, 58, 138, 0.25); border-radius: 8px; padding: 4px 7px; font: 700 10px/12px Inter, ui-sans-serif, system-ui, sans-serif; background: rgba(255, 255, 255, 0.9); color: #172033; pointer-events: auto; -webkit-app-region: no-drag; }
-    .bubble.is-pinned { bottom: ${Math.ceil(petBottom + scaledHeight + 8) + 140}px; max-height: 72px; max-width: min(200px, calc(100vw - 18px)); padding: 7px 10px; border-radius: 11px; background: linear-gradient(135deg, rgba(254, 249, 231, 0.97), rgba(253, 242, 213, 0.96)); }
-    .bubble.is-pinned::after { content: none; }
-    .bubble.is-pinned .bubble-text { -webkit-line-clamp: 3; font-size: 10px; line-height: 12.5px; }
+    .bubble.is-pinned {
+      position: absolute;
+      left: 50%;
+      bottom: 6px;
+      z-index: 4;
+      transform: translateX(-50%);
+      width: 188px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 8px;
+      background: linear-gradient(135deg, rgba(241, 245, 249, 0.94), rgba(226, 232, 240, 0.92));
+      color: #334155;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(8px);
+      text-align: center;
+      max-height: none;
+      max-width: none;
+      animation: bubble-in 200ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    .bubble.is-pinned::after { content: none !important; }
+    .bubble.is-pinned .bubble-body { width: 100%; text-align: center; }
+    .bubble.is-pinned .bubble-text { display: inline-block; -webkit-line-clamp: unset; -webkit-box-orient: initial; white-space: pre; overflow-wrap: normal; word-break: keep-all; font: 800 10px/13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; letter-spacing: -0.03em; color: #334155; text-align: left; }
+    .bubble.is-pinned .bubble-actions { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 4px; width: 100%; margin-top: 5px; justify-content: center; }
+    .bubble.is-pinned .bubble-action { flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 9px; font-weight: 700; line-height: 11px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; background: rgba(30, 58, 138, 0.08); color: #1e293b; transition: background 150ms ease; }
+    .bubble.is-pinned .bubble-action:hover { background: rgba(30, 58, 138, 0.14); }
+    .bubble.is-pinned .bubble-action.is-primary { background: #2563eb; color: #ffffff; }
+    .bubble.is-pinned .bubble-action.is-primary:hover { background: #1d4ed8; }
+    .bubble.is-pinned .bubble-action.is-danger { background: #ef4444; color: #ffffff; }
+    .bubble.is-pinned .bubble-action.is-danger:hover { background: #dc2626; }
+    .bubble.is-pinned.accent-blue { background: linear-gradient(135deg, rgba(219, 234, 254, 0.94), rgba(191, 219, 254, 0.92)); }
+    .bubble.is-pinned.accent-purple { background: linear-gradient(135deg, rgba(237, 233, 254, 0.94), rgba(221, 214, 254, 0.92)); }
+    .bubble.is-pinned.accent-green { background: linear-gradient(135deg, rgba(220, 252, 231, 0.94), rgba(187, 247, 208, 0.92)); }
+    .bubble.is-pinned.accent-amber { background: linear-gradient(135deg, rgba(254, 243, 199, 0.94), rgba(253, 230, 138, 0.92)); }
+    .bubble.is-pinned.accent-red { background: linear-gradient(135deg, rgba(254, 226, 226, 0.94), rgba(254, 202, 202, 0.92)); }
+    .bubble.is-pinned.accent-pink { background: linear-gradient(135deg, rgba(252, 231, 243, 0.94), rgba(251, 207, 232, 0.92)); }
+    .bubble.is-pinned.accent-slate { background: linear-gradient(135deg, rgba(241, 245, 249, 0.94), rgba(226, 232, 240, 0.92)); }
+    .stage.has-pinned .pet-hitbox { bottom: ${Math.max(0, petBottom - hitPadding) + 28}px; }
+    .stage.has-pinned .bubble:not(.is-pinned) { bottom: ${bubbleBottom + 28}px; }
     .bubble.is-plugin.accent-blue { background: linear-gradient(135deg, rgba(219, 234, 254, 0.97), rgba(191, 219, 254, 0.94)); }
     .bubble.is-plugin.accent-purple { background: linear-gradient(135deg, rgba(237, 233, 254, 0.97), rgba(221, 214, 254, 0.94)); }
     .bubble.is-plugin.accent-green { background: linear-gradient(135deg, rgba(220, 252, 231, 0.97), rgba(187, 247, 208, 0.94)); }
@@ -949,6 +1027,86 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .bubble.is-plugin.accent-red { background: linear-gradient(135deg, rgba(254, 226, 226, 0.97), rgba(254, 202, 202, 0.94)); }
     .bubble.is-plugin.accent-pink { background: linear-gradient(135deg, rgba(252, 231, 243, 0.97), rgba(251, 207, 232, 0.94)); }
     .bubble.is-plugin.accent-slate { background: linear-gradient(135deg, rgba(241, 245, 249, 0.97), rgba(226, 232, 240, 0.94)); }
+    .bubble-hud {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 8px;
+      width: 100%;
+      margin: 2px 0;
+      box-sizing: border-box;
+    }
+    .bubble-hud.items-1 {
+      grid-template-columns: 1fr;
+    }
+    .bubble-hud.items-3 .bubble-hud-item:last-child {
+      grid-column: span 2;
+    }
+    .bubble-hud-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      width: 100%;
+    }
+    .bubble-hud-item-icon {
+      flex: 0 0 12px;
+      width: 12px;
+      height: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", system-ui, sans-serif;
+    }
+    .bubble-hud-item-icon img, .bubble-hud-item-icon svg {
+      width: 12px;
+      height: 12px;
+      object-fit: contain;
+      display: block;
+    }
+    .bubble-hud-item-content {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .bubble-hud-item-meta {
+      display: flex;
+      justify-content: flex-start;
+      align-items: baseline;
+      gap: 2px;
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1;
+      color: #475569;
+    }
+    .bubble-hud-item-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .bubble-hud-item-bar {
+      height: 4px;
+      background: rgba(71, 85, 105, 0.15);
+      border-radius: 99px;
+      overflow: hidden;
+      position: relative;
+      width: 100%;
+    }
+    .bubble-hud-item-fill {
+      height: 100%;
+      border-radius: 99px;
+      width: 0%;
+      transition: width 200ms ease;
+    }
+    .bubble-hud-item-fill.tone-amber { background: #d97706; }
+    .bubble-hud-item-fill.tone-blue { background: #2563eb; }
+    .bubble-hud-item-fill.tone-green { background: #16a34a; }
+    .bubble-hud-item-fill.tone-pink { background: #db2777; }
+    .bubble-hud-item-fill.tone-slate { background: #475569; }
+    .bubble-hud-item-fill.tone-red { background: #dc2626; }
     @keyframes bubble-in { from { opacity: 0; transform: translateX(-50%) translateY(4px) scale(0.96); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
     @keyframes status-pulse { 0%, 100% { opacity: 0.52; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .sprite, .installed-sprite, .bubble, .bubble-status-icon::before { animation: none !important; } }
@@ -974,9 +1132,32 @@ function getReactionSpriteState(reaction: OpenPetsReaction | undefined): Univers
 }
 
 const namedHostIconGlyphs: Record<string, string> = {
-  info: "ℹ", check: "✓", alert: "⚠", heart: "♥", star: "★", bell: "🔔", coffee: "☕", timer: "⏱",
-  sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "▶", pause: "⏸",
+  info: "ℹ", check: "✓", alert: "⚠", heart: "💛", star: "★", bell: "🔔", coffee: "☕", timer: "⏱",
+  droplet: "💧", sparkles: "✨", zap: "⚡", moon: "☾", sun: "☀", food: "🍖", play: "🎾", pause: "⏸",
 };
+
+function createHudIconMarkup(item: PluginBubbleHudItem): string {
+  if (item.svgPath) {
+    const svg = readSafePluginSvg(item.svgPath);
+    if (svg) return svg;
+  }
+  if (item.iconName) {
+    return escapeHtml(namedHostIconGlyphs[item.iconName] ?? "•");
+  }
+  return "•";
+}
+
+function createPluginHudMarkup(hud: PluginBubbleHud): string {
+  const itemsHtml = hud.items.map((item) => {
+    const value = Math.round(Math.max(0, Math.min(100, item.value)));
+    const iconMarkup = createHudIconMarkup(item);
+    const labelHtml = item.label ? `<span class="bubble-hud-item-label">${escapeHtml(item.label)}</span>` : "";
+    const tone = item.tone ?? "slate";
+    const ariaLabel = item.label ? ` aria-label="${escapeHtml(`${item.label} ${value}%`)}"` : "";
+    return `<div class="bubble-hud-item"${ariaLabel}><div class="bubble-hud-item-icon" aria-hidden="true">${iconMarkup}</div><div class="bubble-hud-item-content"><div class="bubble-hud-item-meta">${labelHtml}</div><div class="bubble-hud-item-bar"><div class="bubble-hud-item-fill tone-${tone}" style="width:${value}%"></div></div></div></div>`;
+  }).join("");
+  return `<div class="bubble-hud items-${hud.items.length}">${itemsHtml}</div>`;
+}
 
 /** Render a plugin-arbiter bubble descriptor into host markup (descriptor-only — no plugin markup). */
 function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string {
@@ -988,6 +1169,7 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
   const clickDismiss = bubble.dismissOn ? bubble.dismissOn.includes("click") : !interactive;
   const dismissAttr = clickDismiss ? ` data-dismiss-token="${token}"` : "";
   const parts: string[] = [];
+  if (bubble.indicator) parts.push(createPluginIndicatorMarkup(bubble.indicator));
   if (bubble.iconName || bubble.svgPath || bubble.imagePath) {
     const media = bubble.svgPath || bubble.imagePath;
     if (media) parts.push(`<img class="bubble-media" src="${escapeHtml(pathToFileURL(media).toString())}" alt="" draggable="false">`);
@@ -998,7 +1180,11 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
     : bubble.text !== undefined
       ? `<div class="bubble-body"><span class="bubble-text">${escapeHtml(bubble.text)}</span></div>`
       : "";
+  if (bubble.indicator && body) parts.push(`<div class="bubble-divider" aria-hidden="true"></div>`);
   if (body) parts.push(body);
+  if (bubble.hud) {
+    parts.push(createPluginHudMarkup(bubble.hud));
+  }
   if (bubble.input) {
     const input = bubble.input;
     const inputId = escapeHtml(input.id);
@@ -1013,7 +1199,41 @@ function createPluginBubbleMarkup(active: ActiveBubble, pinned: boolean): string
     const buttons = bubble.actions.map((action) => `<button type="button" class="bubble-action is-${action.style}" data-bubble-token="${token}" data-bubble-action="${escapeHtml(action.id)}">${action.iconName ? `<span aria-hidden="true">${escapeHtml(namedHostIconGlyphs[action.iconName] ?? "")}</span> ` : ""}${escapeHtml(action.label)}</button>`).join("");
     parts.push(`<div class="bubble-actions">${buttons}</div>`);
   }
-  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
+  const actionsClass = bubble.actions?.length ? " has-actions" : "";
+  const hudClass = bubble.hud ? " has-hud" : "";
+  return `<div class="bubble is-plugin${pinned ? " is-pinned" : ""}${actionsClass}${hudClass}${toneClass}${accentClass}" role="status" aria-live="polite"${dismissAttr} data-bubble-token="${token}">${parts.join("")}</div>`;
+}
+
+function createPluginIndicatorMarkup(indicator: PluginBubbleIndicator): string {
+  const toneClass = indicator.tone ? ` is-${indicator.tone}` : " is-info";
+  const style = createIndicatorStyle(indicator);
+  const styleAttr = style ? ` style="${escapeHtml(style)}"` : "";
+  const label = indicator.label ?? "";
+  const icon = createIndicatorIconMarkup(indicator);
+  return `<div class="bubble-header"><span class="bubble-status-icon${icon.hasSvg ? " has-svg" : ""}${toneClass}" data-icon="${escapeHtml(icon.glyph)}" aria-hidden="true"${styleAttr}>${icon.markup}</span>${label ? `<span class="bubble-status-label">${escapeHtml(label)}</span>` : ""}</div>`;
+}
+
+function createIndicatorIconMarkup(indicator: PluginBubbleIndicator): { glyph: string; markup: string; hasSvg: boolean } {
+  if (indicator.iconSvgPath) {
+    const svg = readSafePluginSvg(indicator.iconSvgPath);
+    if (svg) return { glyph: "", markup: svg, hasSvg: true };
+  }
+  if (indicator.imagePath) return { glyph: "", markup: `<img src="${escapeHtml(pathToFileURL(indicator.imagePath).toString())}" alt="" draggable="false">`, hasSvg: true };
+  if (indicator.iconName) return { glyph: namedHostIconGlyphs[indicator.iconName] ?? "•", markup: "", hasSvg: false };
+  return { glyph: "", markup: "", hasSvg: false };
+}
+
+function readSafePluginSvg(path: string): string {
+  try { return readFileSync(path, "utf8"); }
+  catch { return ""; }
+}
+
+function createIndicatorStyle(indicator: PluginBubbleIndicator): string {
+  const declarations: string[] = [];
+  if (indicator.color) declarations.push(`color:${indicator.color}`);
+  if (indicator.background) declarations.push(`background:${indicator.background}`);
+  if (indicator.borderColor) declarations.push(`border:1px solid ${indicator.borderColor}`);
+  return declarations.join(";");
 }
 
 function createPinnedBubbleMarkup(pluginBubbles: PetPluginBubbles | null): string {
@@ -1028,8 +1248,9 @@ export function pluginBubblesCacheKey(pluginBubbles: PetPluginBubbles | null): s
 
 function createBubbleMarkup(display: PetTransientDisplay | null, paused: boolean, badgeReaction: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): string {
   if (pluginBubbles?.transient) return createPluginBubbleMarkup(pluginBubbles.transient, false);
-  const text = display?.message ?? display?.reactionMessage ?? (display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
-  const status = !paused && badgeReaction ? getStatusBadge(badgeReaction) : null;
+  const suppressReactionMessage = display?.suppressReactionMessage === true;
+  const text = display?.message ?? display?.reactionMessage ?? (!suppressReactionMessage && display?.reaction ? pickReactionMessage(display.reaction, Math.random, getActiveLocale()) : undefined) ?? (paused ? t("pet.paused") : "");
+  const status = !paused && !suppressReactionMessage && badgeReaction ? getStatusBadge(badgeReaction) : null;
   if (!text && !status) return "";
   const isExplicitMessage = Boolean(display?.message && !display?.reactionMessage);
   const className = getBubbleClassName(text, isExplicitMessage, status?.className);
