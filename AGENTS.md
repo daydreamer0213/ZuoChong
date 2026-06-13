@@ -33,6 +33,16 @@ Before changing plugin platform code, official plugins, plugin catalog generatio
 
 When plugin work is finished, update these docs if behavior, commands, manifests, plugin IDs, default bundled/enabled status, catalog workflow, permissions, or the planned plugin lineup changed. Do not leave plugin docs stale after implementation.
 
+For plugin release/catalog work, run the release validator before shipping:
+- `pnpm plugins:package`
+- `pnpm plugins:validate-release`
+- after deploy/R2 upload, `pnpm plugins:validate-live`
+
+The validator exists to catch production-breaking plugin mistakes: unresolved
+`$t:` names/descriptions in catalog cards, missing plugin ZIPs, SHA mismatches,
+missing `locales/en.json`, missing declared assets/entry files, and catalog/package
+drift. Do not rely on `plugins:check` alone for release readiness.
+
 ## Logging for Fast DX
 
 When working on desktop UI, renderer, IPC, catalog, plugin, or pet-window behavior, add targeted logging as part of the implementation when it helps diagnose issues quickly.

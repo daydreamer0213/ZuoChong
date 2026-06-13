@@ -24,6 +24,8 @@
     "plugins:locales": "node scripts/check-plugin-locales.mjs",
     "plugins:test": "pnpm plugins:locales && node scripts/test-plugins.mjs",
     "plugins:check": "node web/scripts/sync-plugins.js --dry-run --skip-r2",
+    "plugins:validate-release": "node scripts/validate-plugin-release.mjs",
+    "plugins:validate-live": "node scripts/validate-plugin-release.mjs --live",
     "plugins:package": "node web/scripts/sync-plugins.js --skip-r2",
     "plugins:publish": "node web/scripts/sync-plugins.js",
     "plugins:deploy": "pnpm --dir web deploy",
