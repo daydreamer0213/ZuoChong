@@ -3,12 +3,13 @@ export interface OnboardingPreferenceLike {
 }
 
 export const petScaleOptions = [
-  { label: "Small", value: 0.44 },
-  { label: "Medium", value: 0.56 },
-  { label: "Large", value: 0.72 },
+  { label: "Small", value: 0.75 },
+  { label: "Medium", value: 1 },
+  { label: "Large", value: 1.25 },
+  { label: "Huge", value: 1.5 },
 ] as const;
 export type PetScaleValue = typeof petScaleOptions[number]["value"];
-export const defaultPetScale: PetScaleValue = 0.56;
+export const defaultPetScale: PetScaleValue = 1;
 
 export function normalizePetScale(value: unknown): PetScaleValue {
   return petScaleOptions.find((option) => option.value === value)?.value ?? defaultPetScale;

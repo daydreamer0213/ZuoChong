@@ -120,8 +120,8 @@ assert.match(petWindowSource, /webContents\.send\("openpets:pet-reaction-state"/
 assert.match(petPreloadSource, /openpets:pet-reaction-state/, "pet preload must accept in-place reaction state updates.");
 assert.match(petWindowSource, /const webContents = window\.webContents[\s\S]*?const removeListeners = \(\): void => \{[\s\S]*?if \(!webContents\.isDestroyed\(\)\)/, "pet window cleanup must capture webContents and avoid touching destroyed BrowserWindow objects.");
 assert.match(petWindowSource, /window\.on\("close", removeListeners\);\s*window\.once\("closed", removeListeners\);/, "pet window cleanup must run before and after close so agent lease release and Cmd/Ctrl+W are idempotent.");
-assert.match(displaySource, /width:\s*220/, "pet windows must stay tightly bounded around pet and bubble.");
-assert.match(displaySource, /height:\s*320/, "pet windows must be tall enough for adaptive long message bubbles at large pet scale without becoming a huge click shield.");
+assert.match(displaySource, /width:\s*340/, "pet windows must fit the huge pet scale without clipping while staying bounded around pet and bubble.");
+assert.match(displaySource, /height:\s*420/, "pet windows must be tall enough for adaptive long message bubbles at huge pet scale without becoming a huge click shield.");
 assert.match(petWindowSource, /function getBubbleClassName/, "pet bubbles must classify explicit messages by length.");
 assert.match(petWindowSource, /is-long-message/, "pet bubbles must have a long-message layout.");
 assert.match(petWindowSource, /is-very-long-message/, "pet bubbles must have a very-long-message layout for 140-character say messages.");

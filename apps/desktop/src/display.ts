@@ -11,8 +11,8 @@ export interface WindowSize {
 }
 
 export const defaultPetWindowSize: WindowSize = {
-  width: 220,
-  height: 320,
+  width: 340,
+  height: 420,
 };
 
 export const defaultPetWindowMargin = 24;
