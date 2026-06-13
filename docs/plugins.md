@@ -1,265 +1,210 @@
-# OpenPets Plugin Platform (SDK v3 / SuperPlugins)
+# Plugin Platform
 
-This is the reference for the current plugin platform. The forward-looking
-spec that drove this implementation is `docs/superplugins.md`; this document
-describes what is actually built and how to work with it.
+OpenPets plugins are small companion programs that extend the pet: reminders,
+focus timers, a Tamagotchi-style virtual pet, GitHub notifications, and so on.
+This doc is the platform architecture — the manifest contract, the permission
+model, the runtime and sandbox, install paths, and packaging/publishing. For the
+*author-facing* API see [sdk.md](sdk.md); for the product direction and the
+official lineup see [superplugins.md](superplugins.md).
 
-## Architecture
+This doc is required reading before changing plugin platform code, official
+plugins, catalog generation, packaging, runtime behavior, or plugin-facing UI
+(per `AGENTS.md`). When you change behavior, update this doc in the same change.
 
-```text
-plugin package (manifest + entry + assets + panels)
-  -> plugin-service.ts        install/seed/local-load, state, config
-  -> plugin-runtime.ts        per-plugin lifecycle, declarative timers
-  -> plugin-js-host.ts        sandboxed BrowserWindow per JS plugin + IPC dispatch table
-  -> plugin-sdk-preload.cjs   builds the plugin-facing ctx (handles, subscriptions)
-  -> plugin-sdk-bridge.ts     validation, permissions, quotas (the security boundary)
-  -> plugin-host-capabilities.ts  Electron side effects (one instance, injected at startup)
-       bubbles  -> plugin-bubble-arbiter.ts -> default-pet-controller / plugin-pet-registry -> pet-window.ts
-       audio/tts -> pet window renderer (WebAudio recipes, data-URL playback, speechSynthesis)
-       events   -> plugin-events-source.ts (pet windows, powerMonitor, screen, pollers)
-       pets     -> plugin-pet-registry.ts + pet-motion-engine.ts (spawn, moveTo, followCursor, physics, onTick)
-       panels   -> plugin-panels.ts (+ panel-preload.cjs)
-       ai       -> plugin-ai-gateway.ts (Anthropic / OpenAI / Ollama)
-       secrets  -> plugin-secrets.ts (safeStorage-encrypted, per plugin)
-       auth     -> plugin-oauth.ts (PKCE loopback, system browser)
-       voice    -> plugin-voice.ts (TTS via renderer; one-shot STT via capture window + provider)
-       toast    -> plugin-toast.ts; notify -> Electron Notification
-       settings -> plugin-platform-settings.ts (sound/AI-speech/voice/mic toggles + quiet hours + AI provider)
+Source maps: `apps/desktop/src/codemap.md` (the `plugin-*.ts` modules),
+`plugins/codemap.md`, `plugins/official/codemap.md`, `packages/sdk/codemap.md`.
+
+## Mental model
+
+A plugin is a **package** validated by a **manifest**, run inside a **sandbox**,
+talking to the host only through a **permission-checked SDK bridge**. The host
+owns every side effect — the plugin only *describes* what it wants (a bubble, an
+alert, a scheduled job, a stored value), and the host validates and renders it.
+This is the "companion-first" stance: plugins never inject UI into pet windows
+directly; they hand the host descriptors and the host owns layout and lifecycle.
+
+```
+openpets.plugin.json ──validate──▶ plugin-service ──▶ plugin-runtime
+                                                          │
+                              ┌───────────────────────────┤
+                              ▼                            ▼
+                    declarative timers           plugin-js-host (sandbox)
+                              │                            │  SDK calls (IPC, tokened)
+                              └────────────┬───────────────┘
+                                           ▼
+                                  plugin-sdk-bridge
+                          (permission + quota checks, then dispatch)
+                                           ▼
+              pet · schedule · storage · ui · audio · events · bus · ai · …
 ```
 
-The single governing rule: **plugins describe; the host renders.** Bubbles are
-descriptors validated in the bridge and rendered by `pet-window.ts`. Plugin
-HTML runs only inside the sandboxed *panel* window (`ui:panel`), never in a pet
-window.
+## The manifest — `openpets.plugin.json`
 
-## Manifest
+The manifest is the contract the host validates before *any* plugin code runs
+(`plugin-manifest.ts`, schema versions v1/v2/v3). Current plugins are
+`manifestVersion: 3` / `sdkVersion: 3.x`. Key fields:
 
-`openpets.plugin.json`, validated by `apps/desktop/src/plugin-manifest.ts`.
-A JSON Schema ships with the CLI (`packages/cli/schemas/openpets.plugin.schema.json`);
-manifests may carry `$schema` for editor validation.
+- `manifestVersion`, `id` (e.g. `openpets.reminders`), `name`, `description`,
+  `version`, `sdkVersion`.
+- `runtime`: `javascript` for SDK plugins (declarative timer-only plugins also
+  exist for the simplest cases).
+- `entry`: the JS entry file (e.g. `index.js`).
+- `permissions`: the capabilities the plugin requests (see below).
+- `configSchema`: typed config fields rendered as a no-JSON settings form.
+  Field types include `string`, `number`, `boolean`, `time`, plus v3 types
+  `date`, `secret`, `sound`.
+- `assets`: declared icon/image/svg/sprite/sound refs (validated, see below).
+- `commands`, `status`, `panels`, `network` hosts, and timer triggers as
+  applicable.
+- Localization: `name`/`description`/labels can be `$t:` keys resolved from
+  `locales/en.json` (see [i18n.md](i18n.md)).
 
-- `manifestVersion: 1` — declarative timer plugins (legacy).
-- `manifestVersion: 2` — JavaScript SDK v2 surface (legacy; keeps working unchanged).
-- `manifestVersion: 3` — SDK v3. Requires `sdkVersion: "3.x.y"`. Adds:
-  - `assets`: `{ icons | images | svgs | sprites | sounds: { name: relativePath } }` —
-    up to 32 entries per kind. Validated at install: path containment, format,
-    per-kind size caps (`pluginAssetMaxBytes`), and SVG sanitization
-    (`plugin-assets.ts` strips script/foreignObject/event handlers/external hrefs).
-  - `panels`: `{ name: relative .html path }` (max 8). Panel HTML gets a strict
-    CSP injected at install.
-  - New config field types `date`, `sound`, and `secret` (masked input; no defaults allowed).
+`name`/`description`/labels in the manifest use `$t:` references; the catalog
+generator and release validator fail if those don't resolve.
 
-Minimum unblock note: Control Center `sound` config fields now support importing
-`.ogg`, `.mp3`, and `.wav` files through the host picker. Imported sounds are
-stored as opaque `{ kind: "user-sound", id, name }` refs; raw filesystem paths
-are rejected by config validation. Near-term debt remains to split
-`plugin-sdk-bridge.ts` by namespace, centralize preload/host route contracts,
-extract the user-sound store from host capabilities, and add parity tests for
-renderer preload routes.
+### Manifest reading is hardened
 
-## Permissions (v3)
+`plugin-manifest-reader.ts` enforces realpath/allowed-root checks, requires the
+manifest to be the root file, caps size, and matches the expected id/version.
+The manifest is never trusted blindly.
 
-Existing: `pet:speak`, `pet:reaction`, `pet:move`, `schedule`, `storage`,
-`status`, `commands`, `network` (+ declarative-only `timer`).
+## Permission model
 
-New in v3: `pet:interact` (bubble buttons/inputs), `pet:pin` (pinned slot),
-`pet:animate` (custom sprites/scale), `pet:speak:dynamic` (AI-generated speech),
-`pet:drop` (drag-and-drop onto the pet), `pets:read`, `pets:manage` (spawn/close),
-`audio`, `events`, `ui:toast`, `ui:panel`, `notify`, `bus`, `ai`, `secrets`,
-`voice:speak`, `voice:listen`, `auth`, `files`, `system:openExternal`,
-`system:metrics`, `clipboard`, `network:write`.
+Permissions are declared in the manifest, **approved** by the user at install,
+persisted in plugin state, and **re-checked on every SDK call** by the bridge.
+The permission surface (from `plugin-manifest.ts`):
 
-Flagged **sensitive** (louder consent, gated by global settings, default off):
-`voice:listen`, `clipboard`, `pet:speak:dynamic`
-(`sensitivePluginPermissions` in `plugin-manifest.ts`).
+`timer`/`schedule`, `pet:*`, `pets:*`, `audio`, `events`, `ui:*`, `notify`,
+`bus`, `ai`, `secrets`, `voice:*`, `auth`, `files`, `system:*`, `clipboard`,
+`network:*`.
 
-Trust model: declared permissions + user approval at install + catalog review.
-No signing tier (deliberate — see `docs/superplugins.md` §15).
+A plugin that calls a namespace it didn't declare (or wasn't approved for) is
+denied and the block is recorded in diagnostics. `network:*` is further
+constrained to declared hosts. This is defense in depth: manifest validation,
+user approval, runtime permission check, and quotas all apply.
 
-## The SDK surface
+## Runtime & sandbox
 
-Types: `packages/sdk/src/index.ts` (`@open-pets/plugin-sdk`, v3). The
-namespaces on `ctx`: `pets`, `pet` (alias of `pets.default`), `ui` (bubbles,
-alert, toast, panel, dynamic menu), `audio`, `events`, `assets`, `bus`, `schedule`
-(`once`/`every`/`daily`/`cron`/`at`/`list`), `storage` (now with `keys` +
-`subscribe`, ~5 MB quota), `config`, `net` (`fetch` with non-GET +
-`stream`), `notify`, `ai`, `secrets`, `voice`, `auth`, `files`, `system`,
-`commands`, `status`, `http` (v2 GET-only alias), `log`.
+`plugin-runtime.ts` is the engine:
 
-Hard lines kept regardless of permissions:
+- Compiles **declarative timer triggers** for enabled manifests and schedules
+  cancellable timers.
+- Starts/stops a **JavaScript host** per JS plugin and verifies approved
+  permissions before dispatching actions.
+- Exposes public **command/status** state to the UI, validates actions, and
+  **marks a plugin broken** on validation/action failure (surfaced in the
+  inspector/health UI).
 
-- The render rule above (no raw markup into pet windows).
-- The privacy line (§3.1): no keystrokes, no screen contents, no other apps'
+`plugin-js-host.ts` is the sandbox: a hidden `BrowserWindow` with a per-plugin
+session partition, navigation/window-open hardening, an SDK IPC **token**, a
+registration handshake at startup, config-listener cleanup, and teardown. The
+plugin's `index.js` runs here, isolated from the renderer and the main process.
 
-- `ctx.ui.alert(...)` is the must-not-miss delivery helper: it renders a sticky,
-high-priority pet bubble and can optionally request `sound`, `notify`, actions,
-`dismissOn`, an `indicator`, and rich bubble content (`text`, limited
-`markdown`, `icon`, `svg`, `image`, `tone`). `indicator` renders the top header
-row used by pet status messages, but is alert-owned instead of a pet reaction: it
-accepts a named host icon or a manifest-declared asset via `ctx.assets.icon(...)`
-/ `ctx.assets.svg(...)` / `ctx.assets.image(...)`, plus safe `color`,
-`background`/`backgroundColor`, and `borderColor` values. Raw SVG strings are
-not accepted at runtime; bundle SVGs in `assets` so the host can validate and
-sanitize them at install. Bubble body media (`icon`, `svg`, `image`) is
-icon-only and cannot be combined with `text`/`markdown`; use `indicator` for
-icon + message alerts. Alerts require `pet:speak`; `pet:interact` is only
-needed for actions/input, `audio` only when `sound` is set, and `notify` only
-when `notify` is set. The returned handle behaves like a bubble handle and adds
-`acknowledge()`.
-- Config schemas may use `type: "sound"` for host-managed plugin sound
-  preferences. The saved value is a named host sound, an opaque user sound ref,
-  or empty; plugins never receive raw filesystem paths.
-- The privacy line (§3.1): no keystrokes, no screen contents, no other apps'
-  window titles, no ambient clipboard/microphone/filesystem. Clipboard read is
-  allowed only *inside a user-invoked command handler*; STT is one-shot
-  push-to-talk behind a default-off toggle; drops fire only on explicit drags.
-- Network: HTTPS-only, manifest-declared + user-approved exact hosts, manual
-  redirects, response caps, DNS/private-IP SSRF guard (`assertPublicHost`).
+`plugin-sdk-bridge.ts` is the gate between the sandbox and the host. It
+validates routes, builds the per-plugin context, enforces permissions + quotas,
+and delegates to focused namespace modules (`plugin-sdk-audio`, `-bus`,
+`-config`, `-events`, `-quotas`, `-routes`, `-state`, `-storage`, `-ui`, plus
+`plugin-voice`, `plugin-oauth`, `plugin-secrets`, `plugin-ai-gateway`,
+`plugin-panels`, `plugin-pet-api`/`plugin-pet-registry`). The split keeps each
+capability's permission check and host effect localized. The author-facing
+mirror of all this is the SDK in [sdk.md](sdk.md).
 
-Quotas live in `pluginSdkQuotas` (`plugin-sdk-bridge.ts`).
+### Supporting modules
 
-Reactions require `pet:reaction`: `ctx.pet.react(reaction)` preserves the built-in
-reaction/status bubble, while `ctx.pet.react(reaction, { showMessage: false })`
-plays the animation without generating that default text.
+- `plugin-state.ts` — atomic JSON store (`userData/openpets-plugin-state.json`):
+  installed plugins, enabled flag, approved permissions, config, source, broken
+  reason, update metadata.
+- `plugin-config.ts` — default/effective config validation and reference
+  resolution.
+- `plugin-assets.ts` — validates/resolves declared assets (formats + size caps)
+  for SDK refs and catalog cards.
+- `plugin-bubble-arbiter.ts` — priority/coalescing of transient vs pinned bubble
+  slots.
+- `plugin-diagnostics.ts` — per-plugin error/quota/settings-block collector for
+  the inspector and health UI.
+- `plugin-platform-settings.ts` — global gates for audio, voice, speech,
+  microphone, quiet hours, and AI provider choices.
+- `plugin-user-sound-store.ts` — stores imported user sounds as opaque refs, not
+  raw filesystem paths.
+- `plugin-i18n.ts` — resolves plugin locales, manifest `$t:`, and `ctx.t()`.
 
-## Plugin i18n
+## Install paths
 
-A plugin ships its translations as `locales/<locale>.json` — one file per
-supported locale, the same convention as the host catalog: a flat map of dotted
-keys to strings, with `{var}` interpolation. `locales/en.json` is the source and
-the fallback; missing locales (or missing keys within a locale) fall back to
-`en`, then to the raw key. The host packages and loads any present `locales/`;
-no file is required.
+### Catalog install
 
-Two ways to use those keys:
+`plugin-catalog.ts` fetches the active plugin catalog (v2; see
+[catalog.md](catalog.md)) with timeout, redirect rejection, size cap, and cache.
+`plugin-catalog-validation.ts` validates the catalog strictly. `plugin-package.ts`
+downloads the ZIP from `zip.openpets.dev/plugins/`, **verifies SHA-256**,
+restricts ZIP size/entries, extracts the **root manifest only**, checks
+manifest↔catalog consistency, and installs to `userData/plugins/{id}`. It also
+owns safe uninstall path resolution.
 
-- **`$t:key` references in manifest static fields** — wherever the host renders
-  a plugin-authored string at display time: `name`, `description`, `configSchema`
-  labels/descriptions/option labels, command titles/descriptions, and dynamic
-  menu item titles. Write the value as `"$t:plugin.name"`; the host resolves it
-  against the plugin's catalog for the active locale (→ plugin `en` → raw key) at
-  display time, so labels re-render translated when the user switches language.
-- **`ctx.t(key, vars?)` + `ctx.locale`** — for strings the plugin composes at
-  runtime (bubble / notify / status bodies with interpolation). `ctx.t` reads the
-  active locale live and interpolates `{var}` placeholders; `ctx.locale` is the
-  current locale string. Example: `ctx.t("reminder.due", { message })`.
+### Local development
 
-Keep placeholders intact across locales and leave brand names untranslated. The
-reference implementations include `openpets.reminders` ("Quick Reminders") and
-`openpets.launch-buddy` ("Launch Buddy"), with the reminder flow mirrored by the
-CLI `reminder` template.
+`plugin-local-loader.ts` validates a selected local folder and **snapshots only
+`openpets.plugin.json`** into `userData/plugins-dev/{id}`, with symlink/path/size
+protections. Point the desktop dev build at a plugin root with
+`OPENPETS_DEV_PLUGIN_ROOTS` (e.g. `plugins/official`) and run
+`pnpm dev:desktop:plugins` for hot-load. See [development.md](development.md).
 
-## Bubbles & the arbiter
+## Authoring workflow (end to end)
 
-`ctx.ui.bubble(spec)` / `pet.speak(spec)` accept a string or a descriptor
-(text, limited markdown, icon/svg/image refs, tone, accent token, duration,
-sticky, pin, dismissOn, priority, actions, input, hud) and return a live handle
-(`update`, `dismiss`, `pin`, `unpin`, `onAction`, `onSubmit`, `onDismiss`).
+1. **Scaffold**: `openpets plugin new <name> --template <blank|reminder|ambient|ai-chat|tamagotchi|calendar>`
+   generates a `manifestVersion: 3` package with `index.js`, `test.js`, README,
+   and `locales/en.json`. (`packages/cli/src/plugin-templates.ts`.)
+2. **Develop**: write against the SDK ([sdk.md](sdk.md)); hot-load via dev mode.
+3. **Test**: `test.js` uses `@open-pets/plugin-sdk/testing` to fake time/events
+   and assert descriptor-level effects — no Electron. See [sdk.md](sdk.md).
+4. **Validate**: `openpets plugin validate <dir>` checks manifest, permissions,
+   SDK compatibility, config field types, network hosts, asset formats/size
+   caps, entry files, and HTML panels. (`packages/cli/src/plugin-validate.ts`.)
+5. **Package & publish**: see below.
 
-A **pinned mini HUD bubble** can be rendered using the `hud` descriptor (requires `pin: true`). The `hud` property takes an `items` array (1–4 items), where each item has `icon` (named host icon or asset ref), `value` (0–100), optional `label`, and optional `tone` ("amber", "blue", "green", "pink", "slate", "red"). When `hud` is present, it must not be combined with text, markdown, body media, or indicator. Pinned bubbles with `hud` render as a compact, polished 2x2 grid with CSS progress bars, avoiding emoji alignment issues.
+## Packaging, catalog & release validation
 
-`plugin-bubble-arbiter.ts` (one per pet surface) arbitrates: priority queue,
-do-not-interrupt for sticky/urgent, coalescing of identical back-to-back
-messages, and a single **pinned slot** above the transient slot with
-priority-aware replace semantics. Non-dynamic transient text goes through the
-static content filter and stays single-line; pinned text may use a few safe lines
-for compact status HUDs. `dynamic: true` content needs `pet:speak:dynamic` plus
-the global toggle and gets the relaxed screen (2,000 chars, secret redaction).
+The release path is documented operationally in `web/docs/plugin-publishing.md`
+and gated by the validators in [testing-and-validation.md](testing-and-validation.md).
+The command surface (run from repo root):
 
-## Multi-pet & liveness
+| Command | Purpose |
+|---------|---------|
+| `pnpm plugins:check` | Validate the package plan (dry-run, no writes) |
+| `pnpm plugins:package` | Write local catalog files + ZIP staging (no R2 upload) |
+| `pnpm plugins:validate-release` | **Release gate** — catch production-breaking mistakes before shipping |
+| `pnpm plugins:publish` | Generate + upload ZIPs to R2 |
+| `pnpm plugins:validate-live` | Post-deploy validation against the live catalog |
+| `pnpm plugins:deploy` | Deploy the web catalog |
+| `pnpm plugins:test` | Run plugin locale checks + the official-plugin harness tests |
 
-`ctx.pets.spawn({ petId })` opens an ephemeral window for an installed pet
-(max 4 per plugin), addressable via handles. `onTick` is the host-driven brain
-loop (~10 fps, paused while hidden/dragging); `getState` gives self-perception;
-`moveTo`/`followCursor`/`physics` run in `pet-motion-engine.ts`. Spawned pets
-are torn down with their plugin.
-
-## Host integrations
-
-- **AI gateway** — one user-configured provider (Settings → Plugin Platform):
-  Anthropic, OpenAI, or Ollama. Keys are safeStorage-encrypted and never reach
-  plugin code. `complete` supports tools (function calling); `stream` streams
-  tokens. BYO-provider plugins can use `net.stream` + `secrets` instead.
-- **OAuth** — `ctx.auth.oauth` runs PKCE against a loopback listener in the
-  system browser; tokens persist in the plugin's secrets and are returned to
-  the plugin. `refresh`/`signOut` manage the stored session.
-- **Files** — OS dialogs only (`pick`/`save`); reads are size-capped, one-shot
-  handles. Dropped files (`pet:drop`) are readable through the same accessor.
-- **System** — `info()` (platform/locale/timezone/theme/version/online) is
-  always available; `metrics()` (aggregate CPU/mem only) needs
-  `system:metrics`; `openExternal` is HTTPS-only.
-- **Commands** — `ctx.commands.register(...)` accepts `icon` as either one of
-  the host's named icon strings (for example `"info"`, `"check"`, `"timer"`) or
-  a manifest-declared bundled icon reference from `ctx.assets.icon(name)`. Raw SVG
-  strings are rejected; put custom SVG/PNG icons under `assets.icons` so the host
-  can validate and sanitize them before the command reaches runtime/UI state.
-- **Quiet hours** are a host primitive (Settings → Plugin Platform) gating
-  speech audio, plugin sound, voice, and notification sound together.
-
-## Developer workflow
-
-```bash
-# scaffold (templates: blank | reminder | ambient | ai-chat | tamagotchi | calendar)
-npx @open-pets/cli plugin new "My Plugin" --template tamagotchi
-
-# author-time validation: manifest, config schema, permissions, declared files
-npx @open-pets/cli plugin validate ./my-plugin
-
-# deterministic tests without the app (fake clock, event injection, mocks)
-npm test            # runs test.js against @open-pets/plugin-sdk/testing
-
-# live with hot reload — saving a file re-snapshots and reloads just that
-# plugin, preserving enabled state, storage, and approved permissions
-OPENPETS_DEV_PLUGIN_PATHS=$(pwd)/my-plugin pnpm dev:desktop
-# or for a folder of plugins (this is what pnpm dev:desktop:plugins uses)
-OPENPETS_DEV_PLUGIN_ROOTS=$(pwd)/plugins/official pnpm dev:desktop
-```
-
-The test kit is `@open-pets/plugin-sdk/testing` (`createTestHarness`): fake
-clock (`clock.advance("90m")` drives `once`/`every`/`daily`/`cron`/`at`),
-curated event injection (`emit`), bubble interaction
-(`fireBubbleAction`/`fireBubbleSubmit`), command runs, permission simulation
-(unapproved namespaces throw), and mocks for `net`, `ai`, `secrets`, `files`,
-`auth`, `voice`, and `system`. Assertions: `expectSpoke`, `expectReacted`,
-`expectScheduled`, `expectBubble` (matches descriptors, not pixels),
-`expectStored`, `expectNetCall`, `expectNotified`, `expectNoErrors`.
-
-Runtime introspection: `openpets:plugins-inspector` IPC
-(`runtime.getInspectorState(id)`) returns schedules + next runs, registered
-commands/menu items, active bubbles/panels, subscription counts, quota
-counters, and the last error.
-
-## Publishing
-
-Unchanged flow: `pnpm plugins:check` validates and packages `plugins/official`
-into ZIPs + catalog (dry-run); `plugins:publish` uploads. v3 ZIPs may contain
-the manifest, the entry, and every declared asset/panel file — nothing else.
-Catalog min/max-OpenPets-version metadata gates what loads where; v2 plugins
-keep loading through the same runtime (the v3 context is a superset).
-
-## Drift guards & CI
-
-- `apps/desktop/src/check-plugin-sdk-conformance.ts` — compile-time guard that
-  the bridge surface and permission union match the published SDK types.
-- `packages/sdk/src/check-plugin-sdk.ts` — runtime contract test of the mock
-  context (used by `pnpm --filter @open-pets/plugin-sdk test`).
-- `apps/desktop/tests/plugin-bridge-fuzz.test.ts` — property/fuzz tests over
-  the bridge validators (cron, markdown, dynamic-text redaction, SVG/panel
-  sanitizers, private-IP guard, form values, arbiter invariants).
-- `pnpm check` runs all of the above.
+The release validator exists to catch exactly the production-breakers
+`plugins:check` alone misses: unresolved `$t:` names/descriptions in catalog
+cards, missing ZIPs, SHA mismatches, missing `locales/en.json`, missing declared
+assets/entry files, and catalog/package drift. **Always run it before shipping a
+plugin release.**
 
 ## Troubleshooting
 
-- *Bubble never shows*: check the inspector for quota counters and the
-  arbiter state; sticky/urgent bubbles block lower-priority ones.
-- *`Plugin permission is not approved`*: the manifest must declare it AND the
-  user must have approved it (re-load local plugins after permission changes).
-- *Audio/voice silent*: check Settings → Plugin Platform toggles and quiet
-  hours.
-- *`ai.*` throws*: configure a provider + key in Settings → Plugin Platform.
-- *Sprite override not rendering*: sprites must be a horizontal strip with
-  square frames (frame size = image height); fps 1–30.
-- *Renderer-visible URL schemes*: per `AGENTS.md`, any new scheme needs CSP
-  updates in `apps/desktop/vite.config.ts` and
-  `apps/desktop/src/renderer/index.html`. The v3 features deliberately reuse
-  `file:` (already allowed in pet windows) and add no new schemes.
+| Symptom | Likely cause |
+|---------|--------------|
+| Plugin marked "broken" | Manifest/action validation failed — check `plugin-diagnostics` / the inspector |
+| SDK call silently does nothing | Permission not declared or not approved; or blocked by a global platform setting (audio/voice/quiet hours) |
+| Network call rejected | Host not in declared `network` hosts |
+| Catalog card shows raw `$t:...` | Missing locale key — `validate-release` should have caught it |
+| ZIP install fails | SHA mismatch, non-HTTPS/disallowed host, or oversized/invalid ZIP entries |
+| Local plugin won't load | Local loader rejected the folder (symlink/path/size) or manifest isn't at root |
+| Icon/image missing | Asset not declared in `assets`, wrong format, or over size cap |
+
+## Where to look first
+
+| Concern | File |
+|---------|------|
+| Manifest schema/validation | `plugin-manifest.ts`, `plugin-manifest-reader.ts` |
+| Orchestration / UI actions | `plugin-service.ts` |
+| Runtime / scheduling / broken-state | `plugin-runtime.ts` |
+| Sandbox host | `plugin-js-host.ts` |
+| Permission + dispatch | `plugin-sdk-bridge.ts` + `plugin-sdk-*.ts` |
+| Catalog install/verify | `plugin-catalog.ts`, `plugin-package.ts` |
+| Local dev load | `plugin-local-loader.ts` |
+| Official plugin examples | `plugins/official/*` |
+</content>

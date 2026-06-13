@@ -9,11 +9,44 @@ Before working on any task, read `codemap.md` to understand:
 
 For deep work on a specific folder, also read that folder's `codemap.md`.
 
+## Documentation Map
+
+`docs/` holds the maintained, conceptual documentation — the narrative layer on
+top of the codemaps. It explains concepts and contracts and points at the files
+that own each behavior (it deliberately avoids pasting code, which rots). Start
+at `docs/README.md`, then read the doc for the area you're touching:
+
+- **`docs/architecture.md`** — system overview, runtime topology, package spine,
+  end-to-end flows, cross-cutting invariants, glossary. Read first.
+- **`docs/desktop.md`** — the Electron app: process model, tray/Control Center,
+  windows, app state, lifecycle, security, logging, CSP.
+- **`docs/ipc.md`** — local IPC protocol + `@open-pets/client`: discovery,
+  transports, the lease model, request surface, security.
+- **`docs/pets.md`** — pet model, reactions→animations→speech, installation,
+  Codex pets, motion.
+- **`docs/catalog.md`** — pet/plugin catalog contracts (v3/v2), pagination,
+  search, R2 ZIP hosting, and how the app consumes them.
+- **`docs/agent-integrations.md`** — Claude/MCP/OpenCode/Cursor/Pi + the CLI.
+- **`docs/plugins.md`** — plugin platform: manifest, permissions, runtime,
+  sandbox, install paths, packaging/publishing, troubleshooting.
+- **`docs/superplugins.md`** — companion-first direction, official lineup,
+  bundling/enabled defaults, right-click action strategy.
+- **`docs/sdk.md`** — public SDK v3 contract + the deterministic test harness.
+- **`docs/i18n.md`** — translations across host UI, reaction speech, and plugins.
+- **`docs/development.md`** — DX: layout, command surface, dev modes, releases.
+- **`docs/testing-and-validation.md`** — tests, contracts, release validators,
+  catalog verification, and what "production-valid" means before shipping.
+
+When you change behavior, update the matching `docs/*.md` in the same change.
+Ongoing improvement ideas / known issues are tracked in the root `improvements.md`.
+
 ## Catalog Direction
 
 Catalog v2 is legacy and exists only for old app versions/fallback compatibility.
 For new work, migrations, and Control Center UI, do not optimize for v2 behavior.
 Use catalog v3 (`thumbnail`, `spritesheet`, paginated pages, and search index) as the source of truth.
+
+See `docs/catalog.md` for the v3/v2 contracts, pagination/search, ZIP hosting, and how the app consumes them.
 
 ## Forward-Only Product Direction
 
@@ -43,6 +76,8 @@ The validator exists to catch production-breaking plugin mistakes: unresolved
 missing `locales/en.json`, missing declared assets/entry files, and catalog/package
 drift. Do not rely on `plugins:check` alone for release readiness.
 
+See `docs/testing-and-validation.md` for the full quality ladder and what "production-valid" means per change type.
+
 ## Logging for Fast DX
 
 When working on desktop UI, renderer, IPC, catalog, plugin, or pet-window behavior, add targeted logging as part of the implementation when it helps diagnose issues quickly.
@@ -50,10 +85,14 @@ Prefer concise, scoped logs that capture data shape, selected IDs, load/error st
 Route renderer diagnostics into the app log when possible so failures are visible in `openpets.log`, not only DevTools.
 Avoid noisy permanent logs, secrets, full payload dumps, or logging in tight animation/render loops.
 
+See `docs/development.md` (DX) and `docs/desktop.md` (logging subsystem and scopes).
+
 ## Control Center CSP
 
 When adding any renderer-visible URL scheme, image source, dev server endpoint, or internal protocol, update the Control Center CSP in both `apps/desktop/vite.config.ts` and `apps/desktop/src/renderer/index.html`.
 Common pet image protocols include `openpets-codex:`, `openpets-installed:`, and `openpets-pet-preview:`; forgetting CSP causes images to load as the default/fallback pet even when install/render logic is correct.
+
+See `docs/desktop.md` (security model) and `docs/pets.md` (image protocols).
 
 ## Ubuntu VMware Testing
 
@@ -74,6 +113,8 @@ For Linux GUI bug reproduction or Electron desktop testing:
 4. Check guest logs at `~/.config/@open-pets/desktop/logs/openpets.log`.
 
 The VM is configured to boot into the Ubuntu desktop (`graphical.target`) with GDM auto-login for the `vagrant` user. Prefer this VM when validating Linux-specific renderer, Electron, tray, pet-window, IPC, plugin, or packaging behavior.
+
+See `docs/development.md` (cross-platform & Linux testing) for how this fits the wider DX/testing workflow.
 
 ## Cloned Dependency Source
 
