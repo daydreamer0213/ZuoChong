@@ -9,8 +9,6 @@ apps/desktop/dist-electron
 .DS_Store
 local/
 .slim/deepwork/
-docs/*
-!docs/wayland.md
 
 # BEGIN oh-my-opencode-slim clonedeps
 .slim/clonedeps/repos/
