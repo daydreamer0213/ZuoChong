@@ -1,6 +1,6 @@
 # OpenPets Desktop Release Guide
 
-This guide is for an AI agent creating a new OpenPets desktop release from a local macOS machine. The release flow builds Electron artifacts locally, creates a published GitHub Release, and uploads the assets.
+This guide is for an AI agent creating a new OpenPets desktop release. The historical release flow builds Electron artifacts locally from macOS, creates a published GitHub Release, and uploads the assets. Windows signing uses SignPath from GitHub Actions because SignPath's trusted-build checks require the artifact to be built and uploaded as a GitHub workflow artifact.
 
 ## Repository and app
 
@@ -8,6 +8,7 @@ This guide is for an AI agent creating a new OpenPets desktop release from a loc
 - Desktop app: `apps/desktop`
 - Release script: `apps/desktop/scripts/release-local.mjs`
 - Root command: `pnpm release:desktop`
+- SignPath Windows workflow: `.github/workflows/signpath-windows.yml`
 - Update checker expects GitHub release tags like `v2.0.0`.
 
 ## Current SDK v3, translations, and plugin release plan
@@ -240,6 +241,85 @@ pnpm release:desktop -- --yes --include-experimental-arm
 `--include-optional` includes mac zip, Windows portable, Linux deb, Linux rpm, and Linux tar.gz x64 targets.
 
 `--include-experimental-arm` adds Windows ARM64 and Linux ARM64 artifacts. Only use this if those artifacts can be tested.
+
+## Windows code signing with SignPath
+
+OpenPets is eligible for the SignPath Foundation program. Use SignPath for Windows Authenticode signing before publishing Windows release artifacts. SignPath's GitHub trusted-build integration requires signing inputs to be uploaded from a GitHub Actions workflow artifact, so do not expect the local macOS release script to produce trusted SignPath-signed Windows files by itself.
+
+Current repository support:
+
+- Workflow: `.github/workflows/signpath-windows.yml`
+- Output workflow artifact: `signed-openpets-windows-x64`
+- Signed files produced by the workflow:
+  - Nested app executable: `openpets.exe`
+  - `OpenPets-<version>-win-x64-setup.exe`
+  - `SHA256SUMS.windows.txt`
+
+The workflow builds the Windows x64 unpacked app on `windows-latest`, uploads `openpets.exe` for SignPath signing, replaces the unpacked app executable with the signed file, builds the NSIS installer from that signed app, uploads the installer for SignPath signing, then publishes the signed installer as a GitHub Actions artifact.
+
+### SignPath setup checklist
+
+These steps require SignPath/GitHub organization access and cannot be completed from the local checkout alone:
+
+1. Accept the SignPath OSS organization invitation.
+2. In SignPath, add the predefined trusted build system **GitHub.com** to the organization.
+3. Link the GitHub.com trusted build system to the OpenPets SignPath project.
+4. Install/authorize the SignPath GitHub App for `alvinunreal/openpets` if SignPath asks for source/build policy verification.
+5. Create a SignPath project for OpenPets and note its project slug.
+6. Create or identify a signing policy slug. Start with the self-signed test certificate policy; switch to the production certificate policy after SignPath reviews the setup.
+7. Add this GitHub repository secret:
+   - `SIGNPATH_API_TOKEN` — API token for a SignPath user with submitter permission for the project/signing policy.
+8. Add these GitHub repository variables:
+   - `SIGNPATH_ORGANIZATION_ID` — SignPath organization ID.
+   - `SIGNPATH_PROJECT_SLUG` — SignPath OpenPets project slug.
+
+### SignPath artifact configurations
+
+GitHub `actions/upload-artifact` stores each upload as a ZIP archive for SignPath, so each SignPath artifact configuration must use `<zip-file>` as the root element.
+
+Create one artifact configuration for the unpacked app executable, for example slug `openpets-windows-app-exe-zip`:
+
+```xml
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="openpets.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
+```
+
+Create a second artifact configuration for the NSIS installer, for example slug `openpets-windows-installer-zip`:
+
+```xml
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="OpenPets-*-win-x64-setup.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
+```
+
+For the first SignPath review, use the self-signed test certificate policy and run the workflow manually from GitHub Actions with:
+
+- `signing_policy_slug`: the test signing policy slug.
+- `artifact_configuration_app_exe_slug`: the app executable artifact configuration slug.
+- `artifact_configuration_installer_slug`: the installer artifact configuration slug.
+
+After the workflow succeeds, send SignPath the signing request links from the workflow log / SignPath dashboard so they can review the setup and provision the production certificate.
+
+### Publishing a signed Windows release artifact
+
+Until the local release script is replaced by a fully GitHub-hosted release flow, use this handoff:
+
+1. Run `.github/workflows/signpath-windows.yml` for the release commit/tag.
+2. Download the `signed-openpets-windows-x64` workflow artifact.
+3. Replace the locally built unsigned Windows setup artifact with the signed `OpenPets-<version>-win-x64-setup.exe` before uploading release assets, or upload the signed installer manually with:
+   ```bash
+   gh release upload v<version> --repo alvinunreal/openpets OpenPets-<version>-win-x64-setup.exe SHA256SUMS.windows.txt
+   ```
+4. Do not publish both signed and unsigned Windows setup artifacts with the same filename. The GitHub Release should expose the signed installer.
 
 ## Full release procedure
 
