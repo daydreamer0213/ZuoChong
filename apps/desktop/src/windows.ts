@@ -352,6 +352,7 @@ export function installInternalUiHandlers(): void {
     const previousScale = getAppStateSnapshot().preferences.petScale;
     const previousOverrides = JSON.stringify(getAppStateSnapshot().preferences.reactionAnimationOverrides ?? {});
     const previousLocale = getActiveLocale();
+    const previousPoolEnabled = getAppStateSnapshot().preferences.petPoolEnabled;
     const state = updatePreferences(validatePreferencePatch(patch));
     const nextOverrides = JSON.stringify(state.preferences.reactionAnimationOverrides ?? {});
     if (state.preferences.petScale !== previousScale || nextOverrides !== previousOverrides) {
@@ -369,6 +370,10 @@ export function installInternalUiHandlers(): void {
     setConfinementEnabled(state.preferences.petConfinementEnabled);
     // Propagate petCrossDisplayEnabled into the display-module flag on every pref update.
     setCrossDisplayRoamingEnabled(state.preferences.petCrossDisplayEnabled);
+    // Propagate petPoolEnabled — despawn on disable, respawn on enable.
+    if (state.preferences.petPoolEnabled !== previousPoolEnabled) {
+      void import("./local-ipc.js").then(({ dispatchPoolToggle }) => dispatchPoolToggle(state.preferences.petPoolEnabled));
+    }
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getSettingsStateSnapshot() : state;
   });
 

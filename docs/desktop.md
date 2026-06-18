@@ -45,9 +45,11 @@ Key files: `main.ts` (entry/bootstrap), `lifecycle.ts` (app events + cleanup),
 
 ### Tray & windows
 
-- `tray.ts` builds the tray icon (`assets.ts` loads it with a generated
-  fallback) and the context menu, including update status and route-targeted
-  Control Center entries and a "open logs" action.
+- `tray.ts` builds the tray icon (`assets.ts` loads `assets/tray-icon.png`,
+  marks it as a macOS template image so it adapts to light/dark menu bars, and
+  falls back to a generated icon if the asset is missing) and the context menu,
+  including update status and route-targeted Control Center entries and a "open
+  logs" action.
 - `windows.ts` is the Control Center coordinator: it creates the hardened
   `BrowserWindow`, loads the Vite renderer (dev) or packaged `dist/renderer`
   (prod), targets a route, registers all renderer-facing IPC handlers, builds
@@ -99,7 +101,7 @@ options, onboarding normalization) that are testable without Electron.
 #### Pet pool preference
 
 The **pet pool** is an ordered list of installed pets plus a master enable/disable
-toggle (`petPoolEnabled`, default `false`), both configurable in Control Center →
+toggle (`petPoolEnabled`, default `true`), both configurable in Control Center →
 Settings → General. When enabled, the lease manager uses the ordered list to
 assign a distinct pet to each concurrent agent session that does not explicitly
 request one via `--pet <id>`. Slot 1 is the primary/default pet; slot 2 onwards
@@ -108,7 +110,16 @@ further sessions receive a random eligible pet (installed, non-broken, not the
 built-in default). Slots free up when their session ends. `--pet <id>` bypasses
 the pool entirely. When disabled, all sessions without `--pet` share the single
 default pet (legacy behavior). Pool assignment is pure lease logic and works on
-all platforms. See [agent-integrations.md](agent-integrations.md) for the
+all platforms.
+
+**Toggle side-effects:** disabling the pool immediately despawns all active pool
+pets (releases their leases, which closes their windows). Re-enabling respawns a
+pool pet for every session whose client PID is still alive — those sessions
+acquire new leases and their windows reopen. Sessions whose processes have already
+terminated are skipped. This is handled by `dispatchPoolToggle` in `local-ipc.ts`,
+wired from the `update-preferences` IPC handler in `windows.ts`.
+
+See [agent-integrations.md](agent-integrations.md) for the
 full behavioral description.
 
 ### Plugin subsystem

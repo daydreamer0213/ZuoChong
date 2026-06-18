@@ -2,7 +2,9 @@ import { BrowserWindow, powerMonitor, screen, type Display } from "electron";
 
 import { getAppStateSnapshot, getDefaultPetPosition, getPerMonitorPetPosition, resetDefaultPetPosition, setDefaultPetPosition, setPerMonitorPetPosition, updatePreferences } from "./app-state.js";
 import { shouldShowDefaultPetForExternalEvent } from "./app-state-core.js";
-import { defaultPetWindowSize, getAllDisplayKeys, getDefaultPetInitialPosition, getDisplayKey, getDisplayKeyForPosition, type Point } from "./display.js";
+import { defaultPetWindowSize, getAllDisplayKeys, getDefaultPetInitialPosition, getDisplayKey, getDisplayKeyForPosition, invalidateDisplayCache, type Point } from "./display.js";
+import { motionMoveTo } from "./pet-motion-engine.js";
+import { registerRoamingPet } from "./pet-roaming-controller.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
@@ -66,6 +68,7 @@ function showDefaultPetWindow(source: "user" | "external-event"): void {
   }
 
   window.showInactive();
+  registerRoamingPet("default", getDefaultPetWindowForPlugins);
 }
 
 export function hideDefaultPet(): void {
@@ -157,9 +160,24 @@ export function applyExternalPetMoveBy(options: PetMoveOptions): Promise<{ reado
 }
 
 export function applyExternalPetWander(options: PetWanderOptions): Promise<{ readonly moved: boolean; readonly reason?: string }> {
+  if (!defaultPetWindow || defaultPetWindow.isDestroyed()) return Promise.resolve({ moved: false, reason: "no-window" });
+  const blockedReason = getMovementBlockedReason(defaultPetWindow);
+  if (blockedReason) {
+    debug("pet.default", "wander skipped", { reason: blockedReason });
+    return Promise.resolve({ moved: false, reason: blockedReason });
+  }
   const distance = clampNumber(Number(options.distance ?? 80), 0, maxPluginMoveDistance);
   const angle = Math.random() * Math.PI * 2;
-  return moveDefaultPetBy(Math.cos(angle) * distance, Math.sin(angle) * distance, options.durationMs);
+  const current = readWindowPosition(defaultPetWindow);
+  const durationMs = clampNumber(Number(options.durationMs ?? 700), minPluginMoveDurationMs, maxPluginMoveDurationMs);
+  const rawTarget = {
+    x: current.x + Math.cos(angle) * distance,
+    y: current.y + Math.sin(angle) * distance,
+  };
+  const target = getSafeDefaultPetPosition(rawTarget);
+  return motionMoveTo("default", getDefaultPetWindowForPlugins, target, { durationMs })
+    .then(() => ({ moved: true } as const))
+    .catch(() => ({ moved: false, reason: "engine-error" } as const));
 }
 
 export function applyExternalPetMoveToHome(): Promise<{ readonly moved: boolean; readonly reason?: string }> {
@@ -188,10 +206,26 @@ export function destroyDefaultPet(): void {
 }
 
 export function installDefaultPetDisplayHandlers(): void {
-  screen.on("display-added", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-added", display));
-  screen.on("display-removed", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-removed", display));
-  screen.on("display-metrics-changed", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-metrics-changed", display));
+  screen.on("display-added", debounceDisplayChange("display-added"));
+  screen.on("display-removed", debounceDisplayChange("display-removed"));
+  screen.on("display-metrics-changed", debounceDisplayChange("display-metrics-changed"));
   powerMonitor.on("resume", recoverDefaultPetWindowAfterResume);
+}
+
+type DisplayChangeReason = "display-added" | "display-removed" | "display-metrics-changed";
+
+function debounceDisplayChange(reason: DisplayChangeReason): (_event: unknown, display: Display) => void {
+  let timer: NodeJS.Timeout | null = null;
+  let latestDisplay: Display | undefined;
+  return (_event: unknown, display: Display) => {
+    latestDisplay = display;
+    invalidateDisplayCache();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      reclampAllLivePetWindows(reason, latestDisplay);
+    }, 200);
+  };
 }
 
 function handleBubbleDismissed(dismissToken: string): void {
@@ -395,8 +429,6 @@ function handlePositionChanged(position: Point): void {
   const displayKey = getDisplayKeyForPosition(position);
   setPerMonitorPetPosition(displayKey, position);
 }
-
-type DisplayChangeReason = "display-added" | "display-removed" | "display-metrics-changed";
 
 function reclampDefaultPetWindow(reason: DisplayChangeReason, changedDisplay?: Display): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {

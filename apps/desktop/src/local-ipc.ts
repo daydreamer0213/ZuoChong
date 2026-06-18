@@ -39,6 +39,9 @@ const leaseManager = new LeaseManager({
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
 
+/** PIDs of sessions that had pool pets when pool was disabled. Used to respawn on re-enable. */
+const suspendedPoolPids = new Set<number>();
+
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export async function startLocalIpcServer(): Promise<void> {
@@ -69,7 +72,10 @@ export async function startLocalIpcServer(): Promise<void> {
   ipcServer = server;
   const listeningEndpoint = getListeningEndpoint(server, endpointConfig);
   ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
-  leaseCleanupTimer = setInterval(() => leaseManager.cleanupExpired(), 5_000);
+  leaseCleanupTimer = setInterval(() => {
+    leaseManager.cleanupExpired();
+    leaseManager.checkPidLiveness();
+  }, 5_000);
   leaseCleanupTimer.unref?.();
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
@@ -91,6 +97,41 @@ export function stopLocalIpcServer(): void {
 
   if (discovery) {
     cleanupUnixSocket(discovery.endpoint);
+  }
+}
+
+/**
+ * Handle petPoolEnabled toggle: despawn all active pool pets on disable,
+ * respawn pets for still-alive sessions on re-enable.
+ * Must be called AFTER the preference has been updated in app state.
+ */
+export function dispatchPoolToggle(enabled: boolean): void {
+  if (!enabled) {
+    // Despawn all active pool pets and remember their PIDs for respawn.
+    const explicitLeases = leaseManager.getExplicitLeaseSnapshots();
+    for (const lease of explicitLeases) {
+      if (lease.clientPid && lease.clientPid > 0) {
+        suspendedPoolPids.add(lease.clientPid);
+      }
+      leaseManager.release(lease.leaseId);
+    }
+  } else {
+    // Re-enable: spawn pets for suspended sessions whose PIDs are still alive.
+    const pidsToRespawn = [...suspendedPoolPids];
+    suspendedPoolPids.clear();
+    for (const pid of pidsToRespawn) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        continue; // Dead process — skip.
+      }
+      try {
+        leaseManager.acquire(undefined, pid);
+        info("ipc", "respawned pool pet for suspended session", { pid });
+      } catch (err) {
+        debug("ipc", "pool respawn acquire failed", { pid, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
   }
 }
 
@@ -449,15 +490,23 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
     applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo),
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId, petId),
-    // Phase 2: Screen Recording permission — READ-ONLY, no prompt.
-    getScreenPermissionStatus: () => systemPreferences.getMediaAccessStatus("screen"),
-    // Phase 2: opens the SR pane in System Settings when the user clicks the
-    // notification. Lazy so it only runs on user action.
+    // Phase 2: Screen Recording permission — macOS only.
+    // On Windows and Linux there is no SR permission concept; window enumeration
+    // is available without it, so we treat the status as always "granted".
+    getScreenPermissionStatus: () =>
+      process.platform === "darwin"
+        ? systemPreferences.getMediaAccessStatus("screen")
+        : "granted",
+    // Phase 2: opens the SR pane in System Settings on macOS.
+    // No-op on other platforms (they have no equivalent permission to grant).
     promptScreenPermission: () => {
-      void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      if (process.platform === "darwin") {
+        void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      }
     },
-    // Phase 2: fires the one-time actionable notification.
+    // Phase 2: fires the one-time actionable notification (macOS only).
     notifyScreenPermission: (onAction) => {
+      if (process.platform !== "darwin") return;
       info("ipc", "Screen Recording permission not granted — showing notification", {
         leaseId,
         status: systemPreferences.getMediaAccessStatus("screen"),

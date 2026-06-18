@@ -152,6 +152,50 @@ export class LeaseManager {
     return expired;
   }
 
+  /**
+   * Check PID liveness for all leases that have a clientPid.
+   * Releases leases whose client process has terminated.
+   * Called from the cleanup loop (~every 5s).
+   *
+   * Uses process.kill(pid, 0) — throws ESRCH when process does not exist.
+   * Only valid when clientPid is set (>0). Never throws; logs failures.
+   */
+  checkPidLiveness(): readonly LeaseSnapshot[] {
+    const released: LeaseSnapshot[] = [];
+    for (const lease of [...this.#leases.values()]) {
+      if (!lease.clientPid || lease.clientPid <= 0) continue;
+      try {
+        process.kill(lease.clientPid, 0);
+        // Process is alive — no action.
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") {
+          // Process does not exist — release lease.
+          this.#onLog("info", "pid dead — releasing lease", { leaseId: lease.leaseId, clientPid: lease.clientPid, actualPetId: lease.actualPetId });
+          released.push(this.snapshot(lease));
+          this.release(lease.leaseId);
+        } else if (code === "EPERM") {
+          // Process exists but we can't signal it — treat as alive.
+          this.#onLog("debug", "pid liveness check EPERM — treating as alive", { leaseId: lease.leaseId, clientPid: lease.clientPid });
+        }
+        // Other errors: log and skip.
+      }
+    }
+    return released;
+  }
+
+  /** Return all current non-expired explicit leases as snapshots. Used by dispatchPoolToggle. */
+  getExplicitLeaseSnapshots(): readonly LeaseSnapshot[] {
+    const now = this.#now();
+    const result: LeaseSnapshot[] = [];
+    for (const lease of this.#leases.values()) {
+      if (lease.targetKind === "explicit" && lease.expiresAt > now) {
+        result.push(this.snapshot(lease));
+      }
+    }
+    return result;
+  }
+
   countExplicitLeases(petId: string): number {
     let count = 0;
     for (const lease of this.#leases.values()) {

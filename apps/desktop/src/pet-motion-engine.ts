@@ -57,6 +57,17 @@ export function _setIsPetWindowDraggingForTesting(fn: IsPetWindowDraggingFn | nu
   _isPetWindowDragging = fn;
 }
 
+/** ONLY call from unit tests. Returns whether the shared ticker is currently running. */
+export function _sharedTickerActiveForTesting(): boolean {
+  return sharedTicker !== null;
+}
+
+/** ONLY call from unit tests. Resets the motionStates map (for test isolation). */
+export function _resetMotionStatesForTesting(): void {
+  motionStates.clear();
+  stopSharedTicker();
+}
+
 /**
  * Liveness motion primitives (§13.6): animated absolute moves, continuous
  * cursor following with lag, and lightweight gravity/bounce physics. Operates
@@ -71,15 +82,44 @@ type MotionState = {
   physics: { gravity: boolean; bounce: number; vy: number } | null;
   loop: NodeJS.Timeout | null;
   moveGeneration: number;
+  /** Active move-to interpolation target. Null when idle. */
+  moveTarget: { x: number; y: number; startX: number; startY: number; elapsed: number; durationMs: number; easing: string } | null;
+  /** Sub-pixel fractional accumulator to prevent rounding-induced stall. */
+  fracX: number;
+  fracY: number;
 };
 
 const motionStates = new Map<string, { accessor: WindowAccessor; state: MotionState }>();
-const loopIntervalMs = 50;
+const loopIntervalMs = 16;
+
+// Shared ticker — one interval for all pets
+let sharedTicker: NodeJS.Timeout | null = null;
+
+function startSharedTicker(): void {
+  if (sharedTicker) return;
+  sharedTicker = setInterval(tickAll, loopIntervalMs);
+  sharedTicker.unref?.();
+}
+
+function stopSharedTicker(): void {
+  if (sharedTicker) { clearInterval(sharedTicker); sharedTicker = null; }
+}
+
+function tickAll(): void {
+  for (const [petHandleId, { accessor, state }] of motionStates) {
+    if (state.follow === null && state.physics === null) continue;
+    tickPet(petHandleId, accessor, state);
+  }
+  // Stop ticker when no pet needs continuous motion
+  if ([...motionStates.values()].every(e => e.state.follow === null && e.state.physics === null)) {
+    stopSharedTicker();
+  }
+}
 
 function stateFor(petHandleId: string, accessor: WindowAccessor): MotionState {
   let entry = motionStates.get(petHandleId);
   if (!entry) {
-    entry = { accessor, state: { follow: null, physics: null, loop: null, moveGeneration: 0 } };
+    entry = { accessor, state: { follow: null, physics: null, loop: null, moveGeneration: 0, moveTarget: null, fracX: 0, fracY: 0 } };
     motionStates.set(petHandleId, entry);
   }
   entry.accessor = accessor;
@@ -93,6 +133,27 @@ function easeProgress(t: number, easing: string): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; // ease-in-out
 }
 
+/**
+ * Register a pet window accessor with the motion engine.
+ * Call when a new pet window is shown/created (before starting motion).
+ */
+export function registerPet(petHandleId: string, accessor: WindowAccessor): void {
+  stateFor(petHandleId, accessor); // ensures entry exists, updates accessor
+}
+
+/**
+ * Unregister a pet and stop its motion. Call before destroying the pet window.
+ * Safe to call if petHandleId is not registered.
+ */
+export function unregisterPet(petHandleId: string): void {
+  motionStop(petHandleId);
+  motionStates.delete(petHandleId);
+  // Eagerly stop ticker if no remaining pets need motion
+  if ([...motionStates.values()].every(e => e.state.follow === null && e.state.physics === null)) {
+    stopSharedTicker();
+  }
+}
+
 export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor, target: Point, opts: { durationMs?: number; easing?: string } = {}): Promise<void> {
   const state = stateFor(petHandleId, accessor);
   const window = accessor();
@@ -100,6 +161,25 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
   const generation = ++state.moveGeneration;
   const durationMs = Math.min(Math.max(opts.durationMs ?? 700, 100), 10_000);
   const easing = opts.easing ?? "ease-in-out";
+
+  // If a continuous loop is running (follow or physics), store the target
+  // in MotionState and let syncLoop handle interpolation. This avoids the
+  // competing-writer race that causes jitter.
+  if (state.follow !== null || state.physics !== null) {
+    const [startX, startY] = window.getPosition();
+    const clamped = clampPosition(petHandleId, target);
+    state.moveTarget = { x: clamped.x, y: clamped.y, startX, startY, elapsed: 0, durationMs, easing };
+    // Return a promise that resolves when the generation changes (move completes or is superseded).
+    return new Promise<void>((resolve) => {
+      const check = () => {
+        if (state.moveGeneration !== generation || state.moveTarget === null) { resolve(); return; }
+        setTimeout(check, loopIntervalMs * 2).unref?.();
+      };
+      check();
+    });
+  }
+
+  // No continuous loop — drive it ourselves (legacy step loop).
   const [startX, startY] = window.getPosition();
   const clamped = clampPosition(petHandleId, target);
   const steps = Math.max(4, Math.round(durationMs / 33));
@@ -130,6 +210,9 @@ export function motionStop(petHandleId: string): void {
   entry.state.follow = null;
   entry.state.physics = null;
   entry.state.moveGeneration += 1;
+  entry.state.moveTarget = null;
+  entry.state.fracX = 0;
+  entry.state.fracY = 0;
   if (entry.state.loop) { clearInterval(entry.state.loop); entry.state.loop = null; }
 }
 
@@ -137,44 +220,83 @@ export function motionStopAll(): void {
   for (const petHandleId of motionStates.keys()) motionStop(petHandleId);
 }
 
-function syncLoop(petHandleId: string, accessor: WindowAccessor, state: MotionState): void {
+function syncLoop(petHandleId: string, _accessor: WindowAccessor, state: MotionState): void {
   const wantsLoop = state.follow !== null || state.physics !== null;
-  if (!wantsLoop && state.loop) { clearInterval(state.loop); state.loop = null; return; }
-  if (!wantsLoop || state.loop) return;
-  state.loop = setInterval(() => {
-    const window = accessor();
-    if (!window || window.isDestroyed()) { motionStop(petHandleId); return; }
-    if (!window.isVisible() || getIsPetWindowDragging()(window)) return;
-    const [x, y] = window.getPosition();
-    let nextX = x;
-    let nextY = y;
-    if (state.follow) {
-      const cursor = getScreen().getCursorScreenPoint();
-      // Aim the pet's bottom-center near the cursor; lag controls smoothing.
-      const targetX = cursor.x - Math.round(defaultPetWindowSize.width / 2);
-      const targetY = cursor.y - Math.round(defaultPetWindowSize.height * 0.7);
-      const smoothing = 1 - state.follow.lag;
-      nextX = Math.round(x + (targetX - x) * Math.max(0.02, smoothing * 0.35));
-      nextY = Math.round(y + (targetY - y) * Math.max(0.02, smoothing * 0.35));
+  if (!wantsLoop) {
+    // stop.loop field can be removed from MotionState eventually; keep null for now
+    if (state.loop) { clearInterval(state.loop); state.loop = null; }
+    return;
+  }
+  // If per-pet loop was somehow set (shouldn't happen), clear it
+  if (state.loop) { clearInterval(state.loop); state.loop = null; }
+  startSharedTicker();
+}
+
+function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionState): void {
+  const window = accessor();
+  if (!window || window.isDestroyed()) { unregisterPet(petHandleId); return; }
+  if (!window.isVisible() || getIsPetWindowDragging()(window)) return;
+  const [x, y] = window.getPosition();
+  let rawX = x + state.fracX;
+  let rawY = y + state.fracY;
+
+  if (state.follow) {
+    const cursor = getScreen().getCursorScreenPoint();
+    const targetX = cursor.x - Math.round(defaultPetWindowSize.width / 2);
+    const targetY = cursor.y - Math.round(defaultPetWindowSize.height * 0.7);
+    const smoothing = 1 - state.follow.lag;
+    const factor = Math.max(0.02, smoothing * 0.35);
+    rawX += (targetX - rawX) * factor;
+    rawY += (targetY - rawY) * factor;
+  }
+
+  // moveTarget overrides X (and Y when no physics) — single writer for wander/patrol
+  if (state.moveTarget) {
+    state.moveTarget.elapsed += loopIntervalMs;
+    const progress = Math.min(state.moveTarget.elapsed / state.moveTarget.durationMs, 1);
+    const t = easeProgress(progress, state.moveTarget.easing);
+    rawX = state.moveTarget.startX + (state.moveTarget.x - state.moveTarget.startX) * t;
+    if (!state.physics) {
+      rawY = state.moveTarget.startY + (state.moveTarget.y - state.moveTarget.startY) * t;
     }
-    if (state.physics?.gravity) {
-      const display = getScreen().getDisplayNearestPoint({ x: x + Math.round(defaultPetWindowSize.width / 2), y: y + Math.round(defaultPetWindowSize.height / 2) });
-      const confinementBounds = getEffectiveConfinementBounds(petHandleId);
-      const floor = computeGravityFloor(confinementBounds, display.workArea.y, display.workArea.height, defaultPetWindowSize.height);
-      state.physics.vy = Math.min(state.physics.vy + 2.2, 48);
-      nextY = y + Math.round(state.physics.vy);
-      if (nextY >= floor) {
-        nextY = floor;
-        if (Math.abs(state.physics.vy) > 6 && state.physics.bounce > 0) state.physics.vy = -state.physics.vy * state.physics.bounce;
-        else state.physics.vy = 0;
-      }
+    if (progress >= 1) {
+      state.moveTarget = null;
+      state.moveGeneration += 1;
     }
-    if (nextX !== x || nextY !== y) {
-      const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
-      window.setPosition(clamped.x, clamped.y, false);
+  }
+
+  if (state.physics?.gravity) {
+    // Use bottom-center anchor (not geometric center) for display lookup to match
+    // the anchor used by isOnAnyDisplay() in display.ts. This prevents floor flips
+    // when the pet straddles the seam between displays of different workArea heights.
+    const bottomCenterX = x + Math.round(defaultPetWindowSize.width / 2);
+    const bottomCenterY = y + defaultPetWindowSize.height;
+    const display = getScreen().getDisplayNearestPoint({ x: bottomCenterX, y: bottomCenterY });
+    const confinementBounds = getEffectiveConfinementBounds(petHandleId);
+    const floor = computeGravityFloor(confinementBounds, display.workArea.y, display.workArea.height, defaultPetWindowSize.height);
+    state.physics.vy = Math.min(state.physics.vy + 2.2, 48);
+    // Clamp per-tick delta to ≤200px to prevent gravity seam teleport
+    const rawDeltaY = Math.min(state.physics.vy, 200);
+    rawY = y + rawDeltaY;
+    if (rawY >= floor) {
+      rawY = floor;
+      if (Math.abs(state.physics.vy) > 6 && state.physics.bounce > 0) state.physics.vy = -state.physics.vy * state.physics.bounce;
+      else state.physics.vy = 0;
     }
-  }, loopIntervalMs);
-  state.loop.unref?.();
+  }
+
+  // Fractional accumulator: carry sub-pixel remainder to next tick
+  const nextXFull = rawX;
+  const nextYFull = rawY;
+  const nextX = Math.round(nextXFull);
+  const nextY = Math.round(nextYFull);
+  state.fracX = nextXFull - nextX;
+  state.fracY = nextYFull - nextY;
+
+  if (nextX !== x || nextY !== y) {
+    const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
+    window.setPosition(clamped.x, clamped.y, false);
+  }
 }
 
 function delay(ms: number): Promise<void> {

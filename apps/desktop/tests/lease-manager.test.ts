@@ -53,3 +53,57 @@ assert.throws(() => manager.heartbeat(expiredBeforeHeartbeat.leaseId));
 assert.equal(manager.get(expiredBeforeHeartbeat.leaseId), null, "Expired lease was still readable before cleanup.");
 
 console.log("Lease manager validation passed.");
+
+// --- checkPidLiveness tests ---
+
+{
+  // Test 1: no leases with clientPid — no-op, returns empty array
+  const pidManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+  });
+  const result = pidManager.checkPidLiveness();
+  assert.equal(result.length, 0, "checkPidLiveness with no leases should return empty array.");
+  console.log("checkPidLiveness: no leases — PASS");
+}
+
+{
+  // Test 2: lease with current process PID — alive, not released
+  const pidManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+  });
+  const lease = pidManager.acquire("fido", process.pid);
+  const result = pidManager.checkPidLiveness();
+  assert.equal(result.length, 0, "checkPidLiveness should not release alive process.");
+  // Lease should still be accessible
+  assert.notEqual(pidManager.get(lease.leaseId), null, "Alive lease should remain active.");
+  console.log("checkPidLiveness: alive PID — PASS");
+}
+
+{
+  // Test 3: lease with dead/invalid PID — released, onLastExplicitLease fires
+  const pidClosed: string[] = [];
+  const pidManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+    onLastExplicitLease: (petId) => pidClosed.push(petId),
+  });
+  const deadPid = 999_999_999;
+  const lease = pidManager.acquire("rex", deadPid);
+  const result = pidManager.checkPidLiveness();
+  assert.equal(result.length, 1, "checkPidLiveness should release dead PID lease.");
+  assert.equal(result[0].actualTargetPetId, "rex", "Released lease should have correct pet ID.");
+  assert.equal(pidManager.get(lease.leaseId), null, "Dead PID lease should no longer be active.");
+  assert.equal(pidClosed.join(","), "rex", "onLastExplicitLease should fire after dead PID lease release.");
+  console.log("checkPidLiveness: dead PID — PASS");
+}

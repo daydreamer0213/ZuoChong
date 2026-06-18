@@ -1,6 +1,7 @@
 import { BrowserWindow } from "electron";
 
 import { getAppStateSnapshot, type PetScaleValue } from "./app-state.js";
+import { registerRoamingPet, unregisterRoamingPet } from "./pet-roaming-controller.js";
 import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBounds } from "./confinement-manager.js";
 import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
@@ -29,6 +30,10 @@ export function showAgentPet(petId: string): boolean {
   // Pull the pet into its terminal window bounds if confinement is active.
   repositionConfinedPet(petId, window);
   window.showInactive();
+  const shownWin = agentPetWindows.get(petId);
+  if (shownWin && !shownWin.isDestroyed()) {
+    registerRoamingPet(petId, () => agentPetWindows.get(petId) ?? null);
+  }
   return true;
 }
 
@@ -59,6 +64,7 @@ export function closeAgentPetIfOpen(petId: string): void {
   info("pet.agent", "close requested", { petId, windowId: window.id, activeWindows: agentPetWindows.size });
   agentPetWindows.delete(petId);
   clearAgentDisplay(petId);
+  unregisterRoamingPet(petId);
   window.setIgnoreMouseEvents(false);
   window.destroy();
 }
@@ -193,6 +199,9 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
 
   window.on("closed", () => {
     info("pet.agent", "closed", { petId, windowId, activeWindowsBeforeDelete: agentPetWindows.size });
+    // Unregister from the motion engine BEFORE deleting the window map entry
+    // to prevent the shared ticker from touching the destroyed window.
+    unregisterRoamingPet(petId);
     agentPetWindows.delete(petId);
     clearAgentDisplay(petId);
   });

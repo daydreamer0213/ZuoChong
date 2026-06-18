@@ -27,7 +27,11 @@ export function createTrayIcon(): NativeImage {
   const assetImage = nativeImage.createFromPath(assetPath);
 
   if (!assetImage.isEmpty()) {
-    return assetImage.resize({ width: 22, height: 22 });
+    const resized = assetImage.resize({ width: 22, height: 22 });
+    if (process.platform === "darwin") {
+      resized.setTemplateImage(true);
+    }
+    return resized;
   }
 
   console.error(`OpenPets tray icon asset could not be loaded from ${assetPath}; using generated fallback icon.`);
