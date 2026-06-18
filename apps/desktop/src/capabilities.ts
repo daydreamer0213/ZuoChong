@@ -6,13 +6,16 @@
  * so the rest of the app can degrade gracefully.
  *
  * Graceful-degradation contract (from approved plan):
- * - Screen Recording: required for `get-windows` to enumerate windows. When
- *   denied, get-windows throws (exit 1) and confinement tracking falls back
- *   to free-roam. The confinement poller surfaces a one-time notification.
+ * - Screen Recording: required for `get-windows` on macOS only. When denied,
+ *   get-windows throws (exit 1) and confinement tracking falls back to
+ *   free-roam. The confinement poller surfaces a one-time notification.
  * - Accessibility (AXRaise/focus): required only for "Focus session window"
- *   context-menu action. When absent, confinement tracking still works; only
- *   the focus button is degraded.
- * - Windows / Linux: confinement is a no-op (out of scope). Free-roam applies.
+ *   context-menu action on macOS. When absent, confinement tracking still
+ *   works; only the focus button is degraded.
+ * - Windows: confinement is fully supported. No Screen Recording concept.
+ *   Focus action is not yet implemented (LOW priority).
+ * - Linux: best-effort confinement via /proc and get-windows (X11).
+ * - Other: confinement is a no-op. Free-roam applies.
  */
 
 import { systemPreferences } from "electron";
@@ -43,8 +46,32 @@ export interface ConfinementCapabilities {
  * This is synchronous — no side-effects, no permission prompts.
  */
 export function probeConfinementCapabilities(): ConfinementCapabilities {
+  // Windows: get-windows works without any special permission.
+  // Focus action is not yet implemented for win32 (LOW priority).
+  if (process.platform === "win32") {
+    debug("capabilities", "confinement probed — win32");
+    return {
+      supported: true,
+      trackingAvailable: true,
+      focusActionAvailable: false,
+      focusUnavailableReason: "not_macos",
+    };
+  }
+
+  // Linux: best-effort (X11 via get-windows + /proc PPID).
+  // Focus action not implemented.
+  if (process.platform === "linux") {
+    debug("capabilities", "confinement probed — linux (best-effort)");
+    return {
+      supported: true,
+      trackingAvailable: true,
+      focusActionAvailable: false,
+      focusUnavailableReason: "not_macos",
+    };
+  }
+
   if (process.platform !== "darwin") {
-    debug("capabilities", "confinement unsupported — non-macOS");
+    debug("capabilities", "confinement unsupported — non-macOS/win32/linux");
     return {
       supported: false,
       trackingAvailable: false,
@@ -53,10 +80,8 @@ export function probeConfinementCapabilities(): ConfinementCapabilities {
     };
   }
 
-  // Bounds + owner PID: always available on macOS (no permission needed).
+  // macOS: bounds + owner PID always available; Accessibility needed for focus.
   const trackingAvailable = true;
-
-  // Accessibility: needed only for the focus-window action.
   const trusted = systemPreferences.isTrustedAccessibilityClient(false);
 
   debug("capabilities", "confinement capabilities probed", {
@@ -74,10 +99,14 @@ export function probeConfinementCapabilities(): ConfinementCapabilities {
 
 /**
  * Returns true if the window-confinement tracking system should be active.
- * Safe to call at any time; returns false on non-macOS.
+ * Supported on macOS, Windows, and Linux (best-effort).
  */
 export function isConfinementSupported(): boolean {
-  return process.platform === "darwin";
+  return (
+    process.platform === "darwin" ||
+    process.platform === "win32" ||
+    process.platform === "linux"
+  );
 }
 
 /**
@@ -86,6 +115,7 @@ export function isConfinementSupported(): boolean {
  *
  * NOTE: The focus action itself handles the one-time Accessibility permission
  * prompt in terminal-focus.ts. This helper is for optional UI hints only.
+ * Currently only supported on macOS.
  */
 export function isFocusActionAvailable(): boolean {
   if (process.platform !== "darwin") return false;
