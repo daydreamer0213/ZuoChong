@@ -11,8 +11,9 @@
  *   1. Walk `orderedPool` in order; return the first petId that:
  *      - is in `eligiblePetIds` (installed, not broken, not built-in, not default)
  *      - has 0 active explicit leases (`countActiveExplicit(petId) === 0`)
- *   2. If no free slot exists, pick a random eligible pet preferring those
- *      with 0 active leases; if all occupied pick fully at random.
+ *   2. If no free slot exists (pool exhausted), return `null` so the caller
+ *      falls back to the DEFAULT pet — and keeps using the default for every
+ *      subsequent session until a pool slot frees up. No random assignment.
  *   3. Returns `null` when `orderedPool` is empty/undefined (legacy mode).
  */
 
@@ -56,14 +57,10 @@ export function resolvePoolAssignment(input: PoolAssignmentInput): PoolAssignmen
     }
   }
 
-  // 2. Random fallback among ALL eligible pets (not just those in the ordered pool).
-  //    When every ordered pool slot is already occupied, fall back to any eligible
-  //    pet — this matches the user intent "anything after the selected is just random."
-  //    Prefer pets with 0 active leases; if all are occupied pick fully at random.
-  const freeEligible = eligiblePetIds.filter((id) => countActiveExplicit(id) === 0);
-  const candidates = freeEligible.length > 0 ? freeEligible : [...eligiblePetIds];
-  const petId = candidates[Math.floor(Math.random() * candidates.length)];
-  return { petId: petId! };
+  // 2. Pool exhausted — every ordered slot is occupied. Return null so the caller
+  //    falls back to the DEFAULT pet, and keeps using the default for every
+  //    subsequent session until one of the pool slots frees up. No random pick.
+  return null;
 }
 
 /**

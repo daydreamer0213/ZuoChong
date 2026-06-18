@@ -29,11 +29,10 @@ assert.equal(resolvePoolAssignment({ orderedPool: ["fox"], eligiblePetIds: [], c
   assert.equal(result?.petId, "azure", "fox occupied -> azure returned");
 }
 
-// All pool slots occupied -> random fallback (from eligible, must be non-null)
+// All pool slots occupied -> exhausted -> null (caller falls back to default)
 {
   const result = resolvePoolAssignment({ orderedPool: ["fox", "azure"], eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount({ fox: 1, azure: 1 }) });
-  assert.ok(result !== null, "random fallback is non-null when all slots occupied");
-  assert.ok(["fox", "azure"].includes(result.petId), "random fallback picks from eligible set");
+  assert.equal(result, null, "all pool slots occupied -> null (default fallback)");
 }
 
 // Pool entry not in eligible (e.g. not installed) -> skipped
@@ -48,22 +47,17 @@ assert.equal(resolvePoolAssignment({ orderedPool: ["fox"], eligiblePetIds: [], c
   assert.equal(result?.petId, "fox", "single slot pool returns fox");
 }
 
-// Single slot pool, slot occupied -> random fallback picks eligible (fox or azure)
+// Single slot pool, slot occupied -> exhausted -> null (default fallback)
 {
   const result = resolvePoolAssignment({ orderedPool: ["fox"], eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount({ fox: 2 }) });
-  assert.ok(result !== null, "single slot occupied -> random fallback non-null");
-  assert.ok(["fox", "azure"].includes(result.petId), "random fallback from eligible");
+  assert.equal(result, null, "single occupied slot -> null (default fallback)");
 }
 
-// Random fallback prefers pets with 0 active leases when available
+// A free eligible pet that is NOT in the ordered pool is never assigned;
+// exhausted ordered pool -> null (default) even when other eligible pets are free.
 {
-  // fox is occupied, azure is free -> should prefer azure
-  let azureCount = 0;
-  for (let i = 0; i < 50; i++) {
-    const r = resolvePoolAssignment({ orderedPool: ["fox"], eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount({ fox: 1 }) });
-    if (r?.petId === "azure") azureCount++;
-  }
-  assert.ok(azureCount > 30, `random prefers free pets (azure picked ${azureCount}/50 times, expected >30)`);
+  const result = resolvePoolAssignment({ orderedPool: ["fox"], eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount({ fox: 1 }) });
+  assert.equal(result, null, "exhausted pool -> null even when non-pool pet (azure) is free");
 }
 
 // --- getEligiblePoolPetIds (updated: now excludes defaultPetId too) ---
@@ -178,32 +172,14 @@ assert.deepEqual(eligible2, [], "empty when only built-in");
   assert.equal(lc3.targetKind, "default", "C3: petPoolEnabled=false → targetKind default (pool bypassed)");
 }
 
-// --- C4: random-fallback branch returns a pet from the eligible set ---
-// When all ordered pool slots are occupied, resolvePoolAssignment falls back
-// to a random pick from ALL eligible pets.
+// --- C4: exhausted ordered pool returns null (caller uses default, no random) ---
 {
-  // All pool members are occupied; fox is outside the pool but in eligible → can be picked.
   const r = resolvePoolAssignment({
     orderedPool: ["azure"],
     eligiblePetIds: ["fox", "azure"],
     countActiveExplicit: makeCount({ azure: 1 }),
   });
-  assert.ok(r !== null, "C4: random fallback is non-null when all pool slots occupied");
-  assert.ok(["fox", "azure"].includes(r.petId), "C4: random fallback picks from eligible set");
-}
-
-// C4b: random fallback draws from free pets first (repeated sampling)
-{
-  let foxPickedCount = 0;
-  for (let i = 0; i < 40; i++) {
-    const r = resolvePoolAssignment({
-      orderedPool: ["azure"],
-      eligiblePetIds: ["fox", "azure"],
-      countActiveExplicit: makeCount({ azure: 1 }), // fox is free, azure occupied
-    });
-    if (r?.petId === "fox") foxPickedCount++;
-  }
-  assert.ok(foxPickedCount > 20, `C4b: random fallback prefers free pets (fox picked ${foxPickedCount}/40, expected >20)`);
+  assert.equal(r, null, "C4: all pool slots occupied -> null (default fallback, no random)");
 }
 
 // --- C5: successful pool assignment maps to targetKind "explicit" ---
