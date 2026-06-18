@@ -5,7 +5,7 @@ import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBoun
 import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, mergePetTransientDisplay, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
 
 const agentPetWindows = new Map<string, BrowserWindow>();
@@ -112,6 +112,23 @@ export function refreshAgentPetContent(): void {
       const display = transientDisplays.get(petId) ?? null;
       const badge = statusBadges.get(petId) ?? null;
       void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge), scale);
+    }
+  }
+}
+
+/**
+ * Re-clamp all live agent pet windows to a valid display position.
+ * Called on display topology changes to ensure agent pets are not stranded
+ * on a display that has been removed or whose geometry has changed.
+ */
+export function reclampAgentPetWindows(): void {
+  for (const [petId, window] of agentPetWindows.entries()) {
+    if (!window || window.isDestroyed()) continue;
+    const safePosition = readWindowPosition(window);
+    const [currentX, currentY] = window.getPosition();
+    if (safePosition.x !== currentX || safePosition.y !== currentY) {
+      info("pet.agent", "reclamp position", { petId, windowId: window.id, from: { x: currentX, y: currentY }, to: safePosition });
+      window.setPosition(safePosition.x, safePosition.y, false);
     }
   }
 }

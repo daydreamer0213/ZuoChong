@@ -8,6 +8,8 @@ import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.
 import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugin-bubble-arbiter.js";
 import { publishPluginPetEvent } from "./plugin-events-source.js";
+import { reclampAgentPetWindows } from "./agent-pet-controller.js";
+import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 let paused = false;
@@ -186,9 +188,9 @@ export function destroyDefaultPet(): void {
 }
 
 export function installDefaultPetDisplayHandlers(): void {
-  screen.on("display-added", (_event: unknown, display: Display) => reclampDefaultPetWindow("display-added", display));
-  screen.on("display-removed", () => reclampDefaultPetWindow("display-removed"));
-  screen.on("display-metrics-changed", () => reclampDefaultPetWindow("display-metrics-changed"));
+  screen.on("display-added", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-added", display));
+  screen.on("display-removed", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-removed", display));
+  screen.on("display-metrics-changed", (_event: unknown, display: Display) => reclampAllLivePetWindows("display-metrics-changed", display));
   powerMonitor.on("resume", recoverDefaultPetWindowAfterResume);
 }
 
@@ -394,7 +396,9 @@ function handlePositionChanged(position: Point): void {
   setPerMonitorPetPosition(displayKey, position);
 }
 
-function reclampDefaultPetWindow(reason: "display-added" | "display-removed" | "display-metrics-changed", changedDisplay?: Display): void {
+type DisplayChangeReason = "display-added" | "display-removed" | "display-metrics-changed";
+
+function reclampDefaultPetWindow(reason: DisplayChangeReason, changedDisplay?: Display): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
     return;
   }
@@ -419,6 +423,12 @@ function reclampDefaultPetWindow(reason: "display-added" | "display-removed" | "
   defaultPetWindow.setPosition(safePosition.x, safePosition.y, false);
   handlePositionChanged(safePosition);
   recoverDefaultPetMouseInterop("display-change");
+}
+
+function reclampAllLivePetWindows(reason: DisplayChangeReason, changedDisplay?: Display): void {
+  reclampDefaultPetWindow(reason, changedDisplay);
+  reclampAgentPetWindows();
+  reclampPluginPetWindows();
 }
 
 function recoverDefaultPetWindowAfterResume(): void {

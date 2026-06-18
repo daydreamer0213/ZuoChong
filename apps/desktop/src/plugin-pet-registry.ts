@@ -7,7 +7,7 @@ import { builtInPet } from "./built-in-pet.js";
 import { debug, info } from "./logger.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { motionMoveTo, motionSetFollowCursor, motionSetPhysics, motionStop, type WindowAccessor } from "./pet-motion-engine.js";
-import { createAgentPetWindow, isPetWindowDragging, loadExplicitPetContent, setPetReactionState, setPetSpriteOverride, setPetWindowScale, type PetPluginBubbles, type PetStatusBadgeReaction } from "./pet-window.js";
+import { createAgentPetWindow, isPetWindowDragging, loadExplicitPetContent, readWindowPosition, setPetReactionState, setPetSpriteOverride, setPetWindowScale, type PetPluginBubbles, type PetStatusBadgeReaction } from "./pet-window.js";
 import { PetBubbleArbiter, type PetBubbleSink } from "./plugin-bubble-arbiter.js";
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { resolveReactionSpriteState } from "./reaction-animation-mapping.js";
@@ -324,6 +324,16 @@ export function getPluginPetArbiter(petHandleId: string): PetBubbleArbiter {
   const pet = spawnedPets.get(petHandleId);
   if (!pet) throw new Error(`Pet is not available: ${petHandleId}`);
   return pet.arbiter;
+}
+
+export function reclampPluginPetWindows(): void {
+  for (const pet of spawnedPets.values()) {
+    const { window } = pet;
+    if (!window || window.isDestroyed()) continue;
+    const [cx, cy] = window.getPosition();
+    const safe = readWindowPosition(window);
+    if (safe.x !== cx || safe.y !== cy) window.setPosition(safe.x, safe.y, false);
+  }
 }
 
 export function closeAllPluginPets(): void {
