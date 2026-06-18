@@ -235,6 +235,28 @@ export function clampToVisibleWorkArea(position: Point, size: WindowSize = defau
   return clampIntoWorkArea(position, size, workArea);
 }
 
+// ---------------------------------------------------------------------------
+// Cross-display roaming flag — mirrors petConfinementEnabled/setConfinementEnabled
+// pattern in confinement-manager.ts.  Default true (on by default; disable as
+// a kill-switch if cross-display causes unexpected behaviour).
+// ---------------------------------------------------------------------------
+
+let _crossDisplayRoamingEnabled = true;
+
+/**
+ * Called by windows.ts when the petCrossDisplayEnabled preference changes.
+ * Same injected-setter pattern as confinement-manager.ts to avoid import cycles.
+ */
+export function setCrossDisplayRoamingEnabled(enabled: boolean): void {
+  _crossDisplayRoamingEnabled = enabled;
+}
+
+/** Returns whether cross-display roaming is currently enabled. */
+export function isCrossDisplayRoamingEnabled(): boolean {
+  return _crossDisplayRoamingEnabled;
+}
+
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }

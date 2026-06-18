@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
@@ -61,6 +61,10 @@ export interface OpenPetsStateV1 {
      * confined to their terminal window. When false, all pets free-roam regardless of
      * whether a terminal window is tracked. Platform-independent. */
     readonly petConfinementEnabled: boolean;
+    /** Global toggle for cross-display roaming. When true (default), pets may move
+     * freely across all displays. When false, pets are confined to a single display.
+     * Platform-independent kill-switch for the cross-display feature. */
+    readonly petCrossDisplayEnabled: boolean;
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -563,6 +567,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
       ? value.petPoolEnabled
       : defaultState.preferences.petPoolEnabled,
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
+    petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
   };
 }
 
@@ -639,6 +644,7 @@ function createDefaultState(): OpenPetsStateV1 {
       petPoolOrder: undefined,
       petPoolEnabled: true,
       petConfinementEnabled: true,
+      petCrossDisplayEnabled: true,
     },
     pets: {
       installed: [builtInPet],

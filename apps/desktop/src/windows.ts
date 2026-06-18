@@ -11,6 +11,7 @@ import { createAppIcon } from "./assets.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
 import { setConfinementEnabled } from "./confinement-manager.js";
+import { setCrossDisplayRoamingEnabled } from "./display.js";
 import { getActiveLocale, getActiveMessages, isSupportedLocale, LOCALE_LABELS, SUPPORTED_LOCALES, setLocaleFromPreference, t, type Locale, type LocalePreference } from "./i18n/index.js";
 import { recoverDefaultPetMouseInterop, refreshDefaultPetContent, resetDefaultPetToInitialPosition } from "./default-pet-controller.js";
 import { installPet, installPetFromFolder, installPetFromZipFile, removePet, setDefaultInstalledPet } from "./pet-installation.js";
@@ -66,7 +67,7 @@ function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: 
 }
 
 function getSettingsStateSnapshot(): {
-  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled">;
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled">;
   petScaleOptions: typeof petScaleOptions;
   analytics: ReturnType<typeof getDesktopAnalyticsConsentState>;
   /** Non-broken, non-built-in installed pets available for pool selection. */
@@ -81,6 +82,7 @@ function getSettingsStateSnapshot(): {
       petPoolOrder: state.preferences.petPoolOrder,
       petPoolEnabled: state.preferences.petPoolEnabled,
       petConfinementEnabled: state.preferences.petConfinementEnabled,
+      petCrossDisplayEnabled: state.preferences.petCrossDisplayEnabled,
     },
     petScaleOptions,
     analytics: getDesktopAnalyticsConsentState(),
@@ -164,6 +166,7 @@ export function installInternalUiHandlers(): void {
   // Apply the persisted petConfinementEnabled preference as the initial value
   // for the confinement-manager flag. This runs once after app-state is loaded.
   setConfinementEnabled(getAppStateSnapshot().preferences.petConfinementEnabled);
+  setCrossDisplayRoamingEnabled(getAppStateSnapshot().preferences.petCrossDisplayEnabled);
 
   ipcMain.handle("openpets:get-pets-state", (event) => {
     assertAllowedSender(event, ["control-center"]);
@@ -364,6 +367,8 @@ export function installInternalUiHandlers(): void {
     }
     // Propagate petConfinementEnabled into the confinement-manager flag on every pref update.
     setConfinementEnabled(state.preferences.petConfinementEnabled);
+    // Propagate petCrossDisplayEnabled into the display-module flag on every pref update.
+    setCrossDisplayRoamingEnabled(state.preferences.petCrossDisplayEnabled);
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getSettingsStateSnapshot() : state;
   });
 
@@ -825,12 +830,12 @@ async function getDefaultPetPreviewSpriteInfo(): Promise<{ readonly path: string
   return { path: builtInPath, version: `builtin-${Math.round(fallback.mtimeMs)}-${fallback.size}` };
 }
 
-function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>; petPoolEnabled?: boolean; petConfinementEnabled?: boolean } {
+function validatePreferencePatch(value: unknown): { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>; petPoolEnabled?: boolean; petConfinementEnabled?: boolean; petCrossDisplayEnabled?: boolean } {
   if (!isRecord(value)) {
     throw new Error("Invalid preferences patch.");
   }
 
-  const patch: { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>; petPoolEnabled?: boolean; petConfinementEnabled?: boolean } = {};
+  const patch: { openDefaultPetOnLaunch?: boolean; locale?: LocalePreference; petScale?: number; reactionAnimationOverrides?: ReturnType<typeof validateReactionAnimationOverrides>; petPoolEnabled?: boolean; petConfinementEnabled?: boolean; petCrossDisplayEnabled?: boolean } = {};
 
   if ("openDefaultPetOnLaunch" in value) {
     if (typeof value.openDefaultPetOnLaunch !== "boolean") throw new Error("Invalid open-on-launch value.");

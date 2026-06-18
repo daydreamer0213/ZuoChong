@@ -52,3 +52,12 @@ export function shouldShowDefaultPetForExternalEvent(_visible: boolean, _openOnL
 export function normalizePetConfinementEnabled(value: unknown, defaultValue = true): boolean {
   return typeof value === "boolean" ? value : defaultValue;
 }
+
+/**
+ * Normalize the petCrossDisplayEnabled preference value.
+ * Default is true (cross-display roaming on). Non-boolean values fall back to the default.
+ */
+export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = true): boolean {
+  return typeof value === "boolean" ? value : defaultValue;
+}
+
