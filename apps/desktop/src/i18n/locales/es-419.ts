@@ -36,6 +36,10 @@ export const es419: Partial<Messages> = {
   "pet.menu.hidePet": "Ocultar mascota",
   "pet.menu.closePet": "Cerrar mascota",
   "pet.menu.openControlCenter": "Abrir Centro de control",
+  "pet.menu.focusSessionWindow": "Enfocar ventana de sesión",
+  "pet.menu.focusSessionWindowNoA11y": "Enfocar ventana de sesión (requiere Accesibilidad)",
+  "pet.fallback.unavailableTitle": "Mascota \"{petId}\" no disponible",
+  "pet.fallback.unavailableBody": "{petId} no está instalada, por lo que se usará la mascota predeterminada. El confinamiento de ventana solo funciona con una mascota instalada — ejecuta: openpets mcp --pet <installed-pet-id>",
 
   // --- Common (renderer, shared across views) ---
   "common.retry": "Reintentar",
@@ -208,6 +212,8 @@ export const es419: Partial<Messages> = {
   "settings.toast.analyticsSaved": "Preferencia de analíticas guardada.",
   "settings.toast.petScaleSaved": "Escala de la mascota guardada.",
   "settings.toast.positionReset": "Posición de la mascota predeterminada restablecida.",
+  "settings.petPool.label": "Use a different pet per session",
+  "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "Guardando",
   "settings.busy.resetting": "Restableciendo",
   "settings.busy.opening": "Abriendo",

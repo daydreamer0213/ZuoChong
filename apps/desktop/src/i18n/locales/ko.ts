@@ -36,6 +36,10 @@ export const ko: Partial<Messages> = {
   "pet.menu.hidePet": "펫 숨기기",
   "pet.menu.closePet": "펫 닫기",
   "pet.menu.openControlCenter": "컨트롤 센터 열기",
+  "pet.menu.focusSessionWindow": "세션 창 포커스",
+  "pet.menu.focusSessionWindowNoA11y": "세션 창 포커스 (접근성 필요)",
+  "pet.fallback.unavailableTitle": "펫 \"{petId}\" 을(를) 사용할 수 없습니다",
+  "pet.fallback.unavailableBody": "{petId} 이(가) 설치되지 않아 기본 펫을 사용합니다. 창 제한은 설치된 펫에서만 작동합니다. 실행하세요: openpets mcp --pet <installed-pet-id>",
 
   // --- Common (renderer, shared across views) ---
   "common.retry": "다시 시도",
@@ -208,6 +212,8 @@ export const ko: Partial<Messages> = {
   "settings.toast.analyticsSaved": "분석 설정이 저장되었습니다.",
   "settings.toast.petScaleSaved": "펫 크기가 저장되었습니다.",
   "settings.toast.positionReset": "기본 펫 위치가 초기화되었습니다.",
+  "settings.petPool.label": "Use a different pet per session",
+  "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "저장 중",
   "settings.busy.resetting": "초기화 중",
   "settings.busy.opening": "여는 중",

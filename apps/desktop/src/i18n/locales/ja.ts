@@ -36,6 +36,10 @@ export const ja: Partial<Messages> = {
   "pet.menu.hidePet": "ペットを隠す",
   "pet.menu.closePet": "ペットを閉じる",
   "pet.menu.openControlCenter": "コントロールセンターを開く",
+  "pet.menu.focusSessionWindow": "セッションウィンドウにフォーカス",
+  "pet.menu.focusSessionWindowNoA11y": "セッションウィンドウにフォーカス（アクセシビリティが必要）",
+  "pet.fallback.unavailableTitle": "ペット「{petId}」は利用できません",
+  "pet.fallback.unavailableBody": "{petId} はインストールされていないため、デフォルトのペットを使用します。ウィンドウの制限はインストール済みのペットにのみ有効です。実行してください: openpets mcp --pet <installed-pet-id>",
 
   // --- Common (renderer, shared across views) ---
   "common.retry": "再試行",
@@ -208,6 +212,8 @@ export const ja: Partial<Messages> = {
   "settings.toast.analyticsSaved": "分析設定を保存しました。",
   "settings.toast.petScaleSaved": "ペットのサイズを保存しました。",
   "settings.toast.positionReset": "デフォルトペットの位置をリセットしました。",
+  "settings.petPool.label": "Use a different pet per session",
+  "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "保存中",
   "settings.busy.resetting": "リセット中",
   "settings.busy.opening": "開いています",

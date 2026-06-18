@@ -36,6 +36,10 @@ export const zhHant: Partial<Messages> = {
   "pet.menu.hidePet": "隱藏寵物",
   "pet.menu.closePet": "關閉寵物",
   "pet.menu.openControlCenter": "開啟控制中心",
+  "pet.menu.focusSessionWindow": "聚焦工作階段視窗",
+  "pet.menu.focusSessionWindowNoA11y": "聚焦工作階段視窗（需要輔助使用權限）",
+  "pet.fallback.unavailableTitle": "寵物「{petId}」不可用",
+  "pet.fallback.unavailableBody": "{petId} 未安裝，將使用預設寵物。視窗限制僅對已安裝的寵物有效，請執行：openpets mcp --pet <installed-pet-id>",
 
   // --- Common (renderer, shared across views) ---
   "common.retry": "重試",
@@ -208,6 +212,8 @@ export const zhHant: Partial<Messages> = {
   "settings.toast.analyticsSaved": "已儲存分析偏好。",
   "settings.toast.petScaleSaved": "已儲存寵物大小。",
   "settings.toast.positionReset": "已重設預設寵物位置。",
+  "settings.petPool.label": "Use a different pet per session",
+  "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "儲存中",
   "settings.busy.resetting": "重設中",
   "settings.busy.opening": "開啟中",
