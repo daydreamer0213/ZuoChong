@@ -52,7 +52,9 @@ Key files: `main.ts` (entry/bootstrap), `lifecycle.ts` (app events + cleanup),
   `BrowserWindow`, loads the Vite renderer (dev) or packaged `dist/renderer`
   (prod), targets a route, registers all renderer-facing IPC handlers, builds
   the Dashboard snapshot, and defines the internal asset protocols.
-- `display.ts` provides screen-geometry helpers for positioning pet windows.
+- `display.ts` provides screen-geometry helpers for positioning pet windows,
+  including the permissive `clampToNearestDisplayIfOffscreen` helper that allows
+  pets to roam across display seams while only snapping when fully off-screen.
 
 ### Control Center (renderer)
 
@@ -89,8 +91,9 @@ installed.
 `app-state.ts` persists a versioned JSON document under
 `userData/openpets-state.json` using atomic temp-write + rename. It holds
 installed pets, the default-pet config, reaction→animation overrides, onboarding
-state, locale preference, and the pet pool preference (ordered pet list +
-`petPoolEnabled` toggle). `app-state-core.ts` holds pure helpers (scale
+state, locale preference, the pet pool preference (ordered pet list +
+`petPoolEnabled` toggle), and display-roaming preferences (`petConfinementEnabled`,
+`petCrossDisplayEnabled`). `app-state-core.ts` holds pure helpers (scale
 options, onboarding normalization) that are testable without Electron.
 
 #### Pet pool preference

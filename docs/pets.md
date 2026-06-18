@@ -77,6 +77,38 @@ vectors to the engine, which ticks interpolated positions for spawned and
 default pets (target-following behavior). See [plugins.md](plugins.md) and
 [sdk.md](sdk.md) for the plugin side.
 
+### Display containment and cross-display roaming
+
+`display.ts` owns all screen-geometry decisions. Per-tick clamping in
+`clampPosition()` follows a strict priority order:
+
+1. **Confinement** — if a pet has a terminal-bounds assignment (see below), it
+   is always snapped into those bounds regardless of any other flag.
+2. **Cross-display roaming** (default **on**) — if the
+   `petCrossDisplayEnabled` preference is on, `clampToNearestDisplayIfOffscreen`
+   is used: the pet is left alone while its bottom-center anchor overlaps any
+   display's work area, and is only snapped to the nearest display edge when
+   fully off-screen. This lets pets cross seams between adjacent displays
+   freely.
+3. **Legacy single-display mode** — if `petCrossDisplayEnabled` is off, the
+   original `clampToVisibleWorkArea` behavior is used (pet is clamped to the
+   display nearest its geometric center).
+
+**Wide gaps between non-adjacent displays:** a pet moving toward an empty
+region will stick at the edge of its current display and cannot teleport across
+a gap wider than the pet. This is expected behavior and is by design.
+
+**Topology changes** (monitor plugged/unplugged, resolution changed): the
+display-event handlers in `default-pet-controller.ts` call
+`reclampAllLivePetWindows()`, which re-runs the permissive clamp for the
+default pet, all agent pets, and all plugin-spawned pets. Pets on a removed
+display are snapped to the nearest remaining display; pets on surviving displays
+are left untouched.
+
+The `petCrossDisplayEnabled` toggle is in Control Center → Settings and is a
+global flag (not per-pet). Confinement remains strictly per-pet and always takes
+priority regardless of the cross-display flag.
+
 ## Installation
 
 Two install paths exist; they share the same safety rules.
@@ -142,4 +174,6 @@ images silently fall back to the default pet. This is the single most common
 | Standalone install | `packages/install-pet/` |
 | Local pet authoring | `codex-pets.ts` |
 | Movement | `pet-motion-engine.ts` |
+| Display containment / cross-screen | `display.ts`, `confinement-manager.ts` |
+| Topology-change reclamp | `default-pet-controller.ts` → `reclampAllLivePetWindows` |
 </content>
