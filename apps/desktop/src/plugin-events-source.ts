@@ -147,6 +147,11 @@ export function stopPluginEventSources(): void {
 }
 
 /** Agent reaction/speech activity mirror (`agent:activity`). */
-export function publishPluginAgentActivity(activity: { readonly kind: string; readonly reaction?: string }): void {
-  emitPluginEvent("agent:activity", { kind: activity.kind, reaction: activity.reaction });
+export function publishPluginAgentActivity(activity: { readonly kind: string; readonly reaction?: string; readonly petId?: string }): void {
+  emitPluginEvent("agent:activity", {
+    kind: activity.kind,
+    reaction: activity.reaction,
+    active: activity.kind !== "idle",
+    petId: activity.petId ?? "default",
+  });
 }

@@ -405,7 +405,7 @@ export interface OpenPetsEventPayloads {
   "pet:drop": OpenPetsDropEvent;
   "idle:enter": { idleSeconds: number };
   "idle:exit": { idleSeconds: number };
-  "agent:activity": { kind: string; reaction?: string };
+  "agent:activity": { kind: string; reaction?: string; active: boolean; petId: string };
   "config:changed": Record<string, unknown>;
   "screen:locked": Record<string, never>;
   "screen:unlocked": Record<string, never>;

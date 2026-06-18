@@ -319,7 +319,7 @@ export function getPerMonitorPetPosition(displayKey: string): Point | undefined 
 }
 
 export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: number = Date.now()): OpenPetsStateV1 {
-  publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction });
+  publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction, petId: activity.petId });
   const state = getInitializedState();
   const analytics = state.analytics;
   const reaction = activity.kind === "react" ? activity.reaction : activity.reaction;
@@ -637,7 +637,7 @@ function createDefaultState(): OpenPetsStateV1 {
       nodeCommandPath: undefined,
       opencodeCommandPath: undefined,
       petPoolOrder: undefined,
-      petPoolEnabled: false,
+      petPoolEnabled: true,
       petConfinementEnabled: true,
     },
     pets: {

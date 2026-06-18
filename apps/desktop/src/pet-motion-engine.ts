@@ -106,7 +106,8 @@ function syncLoop(petHandleId: string, accessor: WindowAccessor, state: MotionSt
     }
     if (state.physics?.gravity) {
       const display = screen.getDisplayNearestPoint({ x: x + Math.round(defaultPetWindowSize.width / 2), y: y + Math.round(defaultPetWindowSize.height / 2) });
-      const floor = display.workArea.y + display.workArea.height - defaultPetWindowSize.height;
+      const confinementBounds = getEffectiveConfinementBounds(petHandleId);
+      const floor = computeGravityFloor(confinementBounds, display.workArea.y, display.workArea.height, defaultPetWindowSize.height);
       state.physics.vy = Math.min(state.physics.vy + 2.2, 48);
       nextY = y + Math.round(state.physics.vy);
       if (nextY >= floor) {
@@ -116,9 +117,8 @@ function syncLoop(petHandleId: string, accessor: WindowAccessor, state: MotionSt
       }
     }
     if (nextX !== x || nextY !== y) {
-      // Under gravity the y motion is bounded by the floor above; only clamp x.
       const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
-      window.setPosition(clamped.x, state.physics?.gravity ? nextY : clamped.y, false);
+      window.setPosition(clamped.x, clamped.y, false);
     }
   }, loopIntervalMs);
   state.loop.unref?.();
@@ -137,4 +137,26 @@ function clampPosition(petHandleId: string, pos: Point): Point {
   const terminalBounds = getEffectiveConfinementBounds(petHandleId);
   if (terminalBounds) return clampToTerminalBounds(pos, defaultPetWindowSize, terminalBounds);
   return clampToVisibleWorkArea(pos, defaultPetWindowSize);
+}
+
+/**
+ * Compute the gravity floor y-coordinate for a pet.
+ *
+ * When the pet is confined to a terminal window (confinementBounds != null), the
+ * floor is the bottom interior edge of that terminal (terminal.y + terminal.height
+ * - petHeight).  When unconfined the floor falls back to the display work-area
+ * bottom (workAreaY + workAreaHeight - petHeight).
+ *
+ * Exported for unit testing.
+ */
+export function computeGravityFloor(
+  confinementBounds: { y: number; height: number } | null,
+  workAreaY: number,
+  workAreaHeight: number,
+  petHeight: number,
+): number {
+  if (confinementBounds) {
+    return confinementBounds.y + confinementBounds.height - petHeight;
+  }
+  return workAreaY + workAreaHeight - petHeight;
 }

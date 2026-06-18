@@ -1,5 +1,5 @@
 // Walkabout (openpets.walkabout) — makes your pet roam the screen with style.
-// Supports four modes: wander, follow-cursor, physics, patrol.
+// Supports three modes: wander, follow-cursor, patrol.
 /// <reference types="@open-pets/plugin-sdk" />
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -25,10 +25,10 @@ export const PATROL_STEP_X = 300;
 
 /**
  * @param {string|undefined} value
- * @returns {"wander"|"follow-cursor"|"physics"|"patrol"}
+ * @returns {"wander"|"follow-cursor"|"patrol"}
  */
 export function normalizeMode(value) {
-  const valid = ["wander", "follow-cursor", "physics", "patrol"];
+  const valid = ["wander", "follow-cursor", "patrol"];
   return valid.includes(value) ? value : "wander";
 }
 
@@ -53,7 +53,7 @@ export function normalizeInterval(value) {
 
 /**
  * @param {unknown} raw
- * @returns {{ mode: string, speed: string, intervalMs: number, pauseWhenBusy: boolean }}
+ * @returns {{ mode: string, speed: string, intervalMs: number, pauseWhenBusy: boolean, gravity: boolean }}
  */
 export function cleanConfig(raw) {
   const c = raw && typeof raw === "object" ? raw : {};
@@ -62,6 +62,7 @@ export function cleanConfig(raw) {
     speed: normalizeSpeed(c.speed),
     intervalMs: normalizeInterval(c.interval ?? 5),
     pauseWhenBusy: c.pauseWhenBusy !== false,
+    gravity: c.gravity === true,
   };
 }
 
@@ -144,29 +145,6 @@ export function startFollowCursor(ctx, cfg) {
 }
 
 /**
- * Starts physics mode. Returns a stop function.
- * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
- * @param {ReturnType<typeof cleanConfig>} cfg
- * @returns {() => void}
- */
-export function startPhysics(ctx, cfg) {
-  // Bounciness scales with speed.
-  const bounceBySpeed = { slow: 0.35, normal: 0.55, brisk: 0.75 };
-  const bounce = bounceBySpeed[cfg.speed];
-
-  let stopped = false;
-  ctx.pet.physics({ gravity: true, bounce, climbEdges: false }).catch((err) => {
-    if (!stopped) ctx.log.warn("physics failed", err?.message);
-  });
-
-  return function stop() {
-    stopped = true;
-    // Disable physics by calling with no-gravity, no-bounce.
-    ctx.pet.physics({ gravity: false, bounce: 0 }).catch(() => {});
-  };
-}
-
-/**
  * Starts patrol mode. Returns a stop function.
  * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
  * @param {ReturnType<typeof cleanConfig>} cfg
@@ -202,6 +180,30 @@ export function startPatrol(ctx, cfg) {
   };
 }
 
+/**
+ * Applies a gravity overlay on top of any mode. When gravity is enabled,
+ * the pet is pulled toward the floor while it roams. Returns a stop function
+ * that lifts the overlay; when the overlay is inactive the stop function is a no-op.
+ * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
+ * @param {ReturnType<typeof cleanConfig>} cfg
+ * @returns {() => void}
+ */
+export function applyGravityOverlay(ctx, cfg) {
+  if (!cfg.gravity) {
+    return function stop() {};
+  }
+
+  let stopped = false;
+  ctx.pet.physics({ gravity: true, bounce: 0, climbEdges: false }).catch((err) => {
+    if (!stopped) ctx.log.warn("gravity overlay failed", err?.message);
+  });
+
+  return function stop() {
+    stopped = true;
+    ctx.pet.physics({ gravity: false, bounce: 0 }).catch(() => {});
+  };
+}
+
 // ── Mode factory ───────────────────────────────────────────────────────────────
 
 /**
@@ -210,13 +212,21 @@ export function startPatrol(ctx, cfg) {
  * @param {ReturnType<typeof cleanConfig>} cfg
  * @returns {() => void}
  */
-export function startMode(ctx, cfg) {
+function startModeRunner(ctx, cfg) {
   switch (cfg.mode) {
     case "follow-cursor": return startFollowCursor(ctx, cfg);
-    case "physics":       return startPhysics(ctx, cfg);
     case "patrol":        return startPatrol(ctx, cfg);
     default:              return startWander(ctx, cfg);
   }
+}
+
+export function startMode(ctx, cfg) {
+  const stopMode = startModeRunner(ctx, cfg);
+  const stopGravity = applyGravityOverlay(ctx, cfg);
+  return function stop() {
+    stopMode();
+    stopGravity();
+  };
 }
 
 // ── Plugin entry ───────────────────────────────────────────────────────────────
@@ -244,21 +254,33 @@ export function register(OpenPetsPlugin) {
       });
 
       // Pause on agent:activity if pauseWhenBusy is enabled.
-      let pausedByBusy = false;
-      let resumeStop = null;
+      // Per-pet busy tracking: a Set of petIds that are currently busy.
+      // This ensures one busy pet doesn't pause movement for unaffected pets.
+      // NOTE (Task 3 deferred): walkabout currently drives only ctx.pet (the
+      // default pet). Multi-pet driving via ctx.pets.list() is a separate
+      // workstream — pool/lease pets are not motion-addressable by the plugin SDK.
+      /** @type {Set<string>} */
+      const busyPets = new Set();
 
       const unsubActivity = ctx.events.on("agent:activity", async (event) => {
         if (!cfg.pauseWhenBusy) return;
         const isBusy = event?.active === true;
+        const petId = event?.petId ?? "default";
 
-        if (isBusy && !pausedByBusy) {
-          pausedByBusy = true;
-          stopCurrentMode();
-          await ctx.status.set({ text: ctx.t("status.paused"), tone: "warning" });
-        } else if (!isBusy && pausedByBusy) {
-          pausedByBusy = false;
-          stopCurrentMode = startMode(ctx, cfg);
-          await ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" });
+        if (isBusy && !busyPets.has(petId)) {
+          busyPets.add(petId);
+          // Only pause movement if this is the first busy pet affecting our pet.
+          if (busyPets.size === 1) {
+            stopCurrentMode();
+            await ctx.status.set({ text: ctx.t("status.paused"), tone: "warning" });
+          }
+        } else if (!isBusy && busyPets.has(petId)) {
+          busyPets.delete(petId);
+          // Resume movement only when no pets are busy anymore.
+          if (busyPets.size === 0) {
+            stopCurrentMode = startMode(ctx, cfg);
+            await ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" });
+          }
         }
       });
 

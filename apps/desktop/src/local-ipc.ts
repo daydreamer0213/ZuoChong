@@ -348,7 +348,6 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
     debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
-      if (getDefaultPetPaused()) return { ok: true, reaction, shown: false, reason: "paused", leaseId: lease.leaseId };
       const applied = applyAgentPetReaction(lease.actualTargetPetId, reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId });
       trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
@@ -367,7 +366,6 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
   debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
-    if (getDefaultPetPaused()) return { ok: true, shown: false, reason: "paused", reaction, leaseId: lease.leaseId };
     const applied = applyAgentPetSay(lease.actualTargetPetId, message, reaction);
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId });
     if (reaction) trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
@@ -442,7 +440,7 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
       }
       return termInfo;
     },
-    subscribe: (id, pid, cb) => subscribeWindowTracking(id, pid, cb),
+    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull),
     setIdentity: (termInfo) => leaseManager.setTerminalIdentity(leaseId, {
       terminalOwnerPid: termInfo.terminalPid,
       terminalAppName: termInfo.appName,

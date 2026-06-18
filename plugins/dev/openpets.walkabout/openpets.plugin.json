@@ -18,7 +18,6 @@
       "options": [
         { "value": "wander", "label": "$t:config.mode.wander" },
         { "value": "follow-cursor", "label": "$t:config.mode.followCursor" },
-        { "value": "physics", "label": "$t:config.mode.physics" },
         { "value": "patrol", "label": "$t:config.mode.patrol" }
       ]
     },
@@ -50,6 +49,12 @@
       "default": true,
       "label": "$t:config.pauseWhenBusy.label",
       "description": "$t:config.pauseWhenBusy.description"
+    },
+    "gravity": {
+      "type": "boolean",
+      "default": false,
+      "label": "$t:config.gravity.label",
+      "description": "$t:config.gravity.description"
     }
   }
 }
