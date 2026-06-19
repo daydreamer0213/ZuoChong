@@ -68,6 +68,12 @@ export function _resetMotionStatesForTesting(): void {
   stopSharedTicker();
 }
 
+/** ONLY call from unit tests. Returns the pet's current physics state, or null if the pet is
+ *  unknown or has no physics active (gravity false / motionSetPhysics({gravity:false})). */
+export function _getPhysicsForTesting(petHandleId: string): { gravity: boolean; bounce: number; vy: number } | null {
+  return motionStates.get(petHandleId)?.state.physics ?? null;
+}
+
 /**
  * Liveness motion primitives (§13.6): animated absolute moves, continuous
  * cursor following with lag, and lightweight gravity/bounce physics. Operates
@@ -235,7 +241,20 @@ function syncLoop(petHandleId: string, _accessor: WindowAccessor, state: MotionS
 function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionState): void {
   const window = accessor();
   if (!window || window.isDestroyed()) { unregisterPet(petHandleId); return; }
-  if (!window.isVisible() || getIsPetWindowDragging()(window)) return;
+  // Settle the move-to clock even while hidden/dragging so an awaited
+  // motionMoveTo() always completes (its promise resolves on moveGeneration
+  // bump / moveTarget clear). We intentionally do NOT write position or apply
+  // gravity here, preserving the single-writer model and the gravity clamp.
+  if (!window.isVisible() || getIsPetWindowDragging()(window)) {
+    if (state.moveTarget) {
+      state.moveTarget.elapsed += loopIntervalMs;
+      if (state.moveTarget.elapsed >= state.moveTarget.durationMs) {
+        state.moveTarget = null;
+        state.moveGeneration += 1;
+      }
+    }
+    return;
+  }
   const [x, y] = window.getPosition();
   let rawX = x + state.fracX;
   let rawY = y + state.fracY;

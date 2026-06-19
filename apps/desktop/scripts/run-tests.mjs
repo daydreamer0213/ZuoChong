@@ -48,6 +48,7 @@ const behaviorTests = [
   ".test-dist/tests/pet-motion-engine-shared-ticker.test.js",
   ".test-dist/tests/pet-motion-engine-single-writer.test.js",
   ".test-dist/tests/pet-motion-engine-gravity-seam.test.js",
+  ".test-dist/tests/pet-motion-engine-hidden-move.test.js",
   ".test-dist/tests/pet-roaming-controller.test.js",
   ".test-dist/tests/display.test.js",
   ".test-dist/tests/renderer-toggles.test.js",
