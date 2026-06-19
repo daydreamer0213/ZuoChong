@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -233,6 +233,7 @@ assert.match(enCatalogSource, /Pi/, "Control Center integrations must include Pi
 assert.doesNotMatch(agentSetupSource, /JSON\.parse\(prepared\.configWrite\.content\)/, "OpenCode desktop preview must parse JSONC planned config safely, not JSON.parse.");
 assert.match(windowsSource, /refreshDefaultPetContent\(\);\s*refreshAgentPetContent\(\);/, "pet scale preference changes must refresh default and agent pet windows.");
 assert.ok(existsSync(join(appDir, "scripts", "clean-package-output.cjs")), "package output cleanup helper must exist.");
+assert.ok(existsSync(join(appDir, "scripts", "check-windows-symlink-privilege.cjs")), "Windows package symlink preflight helper must exist.");
 assert.ok(existsSync(join(distDir, "main.js")), "desktop main build output must exist before packaging checks run.");
 assert.ok(existsSync(join(repoRoot, "packages", "claude", "dist", "index.js")), "@open-pets/claude must be built before packaging.");
 assert.ok(existsSync(join(repoRoot, "packages", "client", "dist", "index.js")), "@open-pets/client must be built before packaging.");
@@ -281,9 +282,7 @@ function checkPackageOutput(): void {
   assert.ok(existsSync(join(appContents, "node_modules", "buffer-crc32", "index.js")), "packaged yauzl transitive dependency buffer-crc32 is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "pend", "index.js")), "packaged yauzl transitive dependency pend is missing.");
   assert.ok(existsSync(join(appContents, "node_modules", "sharp", "lib", "index.js")), "packaged sharp runtime is missing.");
-  assert.ok(existsSync(join(appContents, "node_modules", "@img", "sharp-win32-x64", "lib", "sharp-win32-x64.node")), "packaged Windows x64 sharp native binary is missing.");
-  assert.ok(existsSync(join(appContents, "node_modules", "@img", "sharp-linux-x64", "lib", "sharp-linux-x64.node")), "packaged Linux x64 sharp native binary is missing.");
-  assert.ok(existsSync(join(appContents, "node_modules", "@img", "sharp-darwin-x64", "lib", "sharp-darwin-x64.node")), "packaged macOS x64 sharp native binary is missing.");
+  assertPackagedHostSharpNative(appContents);
   assertRegularNonSymlink(join(appContents, "node_modules", "@open-pets", "mcp", "dist", "index.js"));
   assertRegularNonSymlink(join(appContents, "node_modules", "@open-pets", "cli", "dist", "index.js"));
   assertRegularNonSymlink(join(appContents, "node_modules", "@open-pets", "opencode", "dist", "plugin.js"));
@@ -389,6 +388,21 @@ function assertSafeBundledSvg(path: string, message: string): void {
   assert.doesNotMatch(source, /\son[a-z]+\s*=/i, `${message}: event attributes are not allowed.`);
   assert.doesNotMatch(source, /(?:href|xlink:href)\s*=\s*["'](?:https?:|file:|javascript:)/i, `${message}: external or script hrefs are not allowed.`);
   assert.doesNotMatch(source.replace(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/gi, ""), /https?:\/\//i, `${message}: remote references are not allowed.`);
+}
+
+function assertPackagedHostSharpNative(appContents: string): void {
+  const sharpPackage = getHostSharpPackageName();
+  assert.ok(existsSync(join(appContents, "node_modules", "@img", sharpPackage, "lib", `${sharpPackage}.node`)), `packaged host sharp native binary is missing: ${sharpPackage}`);
+}
+
+function getHostSharpPackageName(): string {
+  if (process.platform === "win32" && process.arch === "x64") return "sharp-win32-x64";
+  if (process.platform === "win32" && process.arch === "arm64") return "sharp-win32-arm64";
+  if (process.platform === "darwin" && process.arch === "x64") return "sharp-darwin-x64";
+  if (process.platform === "darwin" && process.arch === "arm64") return "sharp-darwin-arm64";
+  if (process.platform === "linux" && process.arch === "x64") return "sharp-linux-x64";
+  if (process.platform === "linux" && process.arch === "arm64") return "sharp-linux-arm64";
+  throw new Error(`Unsupported packaging platform for sharp native check: ${process.platform}/${process.arch}`);
 }
 
 function assertCommandSmoke(appContents: string): void {
