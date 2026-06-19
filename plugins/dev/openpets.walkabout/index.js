@@ -53,7 +53,7 @@ export function normalizeInterval(value) {
 
 /**
  * @param {unknown} raw
- * @returns {{ mode: string, speed: string, intervalMs: number, pauseWhenBusy: boolean, gravity: boolean }}
+ * @returns {{ mode: string, speed: string, intervalMs: number, pauseWhenBusy: boolean }}
  */
 export function cleanConfig(raw) {
   const c = raw && typeof raw === "object" ? raw : {};
@@ -62,7 +62,6 @@ export function cleanConfig(raw) {
     speed: normalizeSpeed(c.speed),
     intervalMs: normalizeInterval(c.interval ?? 5),
     pauseWhenBusy: c.pauseWhenBusy !== false,
-    gravity: c.gravity === true,
   };
 }
 
@@ -180,30 +179,6 @@ export function startPatrol(ctx, cfg) {
   };
 }
 
-/**
- * Applies a gravity overlay on top of any mode. When gravity is enabled,
- * the pet is pulled toward the floor while it roams. Returns a stop function
- * that lifts the overlay; when the overlay is inactive the stop function is a no-op.
- * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
- * @param {ReturnType<typeof cleanConfig>} cfg
- * @returns {() => void}
- */
-export function applyGravityOverlay(ctx, cfg) {
-  if (!cfg.gravity) {
-    return function stop() {};
-  }
-
-  let stopped = false;
-  ctx.pet.physics({ gravity: true, bounce: 0, climbEdges: false }).catch((err) => {
-    if (!stopped) ctx.log.warn("gravity overlay failed", err?.message);
-  });
-
-  return function stop() {
-    stopped = true;
-    ctx.pet.physics({ gravity: false, bounce: 0 }).catch(() => {});
-  };
-}
-
 // ── Mode factory ───────────────────────────────────────────────────────────────
 
 /**
@@ -221,12 +196,7 @@ function startModeRunner(ctx, cfg) {
 }
 
 export function startMode(ctx, cfg) {
-  const stopMode = startModeRunner(ctx, cfg);
-  const stopGravity = applyGravityOverlay(ctx, cfg);
-  return function stop() {
-    stopMode();
-    stopGravity();
-  };
+  return startModeRunner(ctx, cfg);
 }
 
 // ── Plugin entry ───────────────────────────────────────────────────────────────

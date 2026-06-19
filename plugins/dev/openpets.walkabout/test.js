@@ -13,7 +13,6 @@ import {
   startWander,
   startFollowCursor,
   startPatrol,
-  applyGravityOverlay,
   register,
 } from "./index.js";
 
@@ -58,15 +57,13 @@ assert.deepEqual(cleanConfig({}), {
   speed: "normal",
   intervalMs: 5000,
   pauseWhenBusy: true,
-  gravity: false,
 });
 
-assert.deepEqual(cleanConfig({ mode: "patrol", speed: "brisk", interval: "2", pauseWhenBusy: false, gravity: true }), {
+assert.deepEqual(cleanConfig({ mode: "patrol", speed: "brisk", interval: "2", pauseWhenBusy: false }), {
   mode: "patrol",
   speed: "brisk",
   intervalMs: 2000,
   pauseWhenBusy: false,
-  gravity: true,
 });
 
 assert.deepEqual(cleanConfig(null), {
@@ -74,19 +71,12 @@ assert.deepEqual(cleanConfig(null), {
   speed: "normal",
   intervalMs: 5000,
   pauseWhenBusy: true,
-  gravity: false,
 }, "null input is treated as empty config");
 
 // pauseWhenBusy: only explicit false disables it
 assert.equal(cleanConfig({ pauseWhenBusy: true }).pauseWhenBusy, true);
 assert.equal(cleanConfig({ pauseWhenBusy: false }).pauseWhenBusy, false);
 assert.equal(cleanConfig({}).pauseWhenBusy, true, "omitted defaults to true");
-
-// gravity: only explicit true enables it
-assert.equal(cleanConfig({}).gravity, false, "gravity omitted defaults to false");
-assert.equal(cleanConfig({ gravity: true }).gravity, true, "gravity true is respected");
-assert.equal(cleanConfig({ gravity: false }).gravity, false, "gravity false stays false");
-assert.equal(cleanConfig({ gravity: "yes" }).gravity, false, "non-boolean gravity is false");
 
 // ── nextPatrolTarget ───────────────────────────────────────────────────────────
 {
@@ -157,26 +147,6 @@ for (const mode of ["wander", "follow-cursor", "patrol"]) {
   const ctx = makeMockCtx();
   const stop = startPatrol(ctx, cleanConfig({ mode: "patrol", speed: "normal" }));
   assert.equal(typeof stop, "function");
-  stop();
-}
-
-// ── applyGravityOverlay ──
-{
-  const ctx = makeMockCtx();
-  const stop = applyGravityOverlay(ctx, cleanConfig({ mode: "wander" }));
-  assert.equal(typeof stop, "function", "overlay disabled returns a stop fn");
-  stop();
-}
-{
-  const ctx = makeMockCtx();
-  const stop = applyGravityOverlay(ctx, cleanConfig({ mode: "wander", gravity: true }));
-  assert.equal(typeof stop, "function", "overlay enabled returns a stop fn");
-  stop();
-}
-{
-  const ctx = makeMockCtx();
-  const stop = startMode(ctx, cleanConfig({ mode: "wander", gravity: true }));
-  assert.equal(typeof stop, "function", "startMode+gravity returns a stop fn");
   stop();
 }
 
@@ -262,19 +232,6 @@ for (const mode of ["wander", "follow-cursor", "patrol"]) {
   const statusCountBefore = h.calls.status.length;
   await h.emit("agent:activity", { kind: "react", active: true, petId: "default" });
   assert.equal(h.calls.status.length, statusCountBefore, "no status change when pauseWhenBusy is false");
-  await h.stop();
-}
-
-// Lifecycle with gravity overlay enabled — should start and stop without errors.
-{
-  const h = createTestHarness(register, {
-    permissions: PERMISSIONS,
-    locales: LOCALES,
-    config: { mode: "wander", gravity: true },
-  });
-  await h.start();
-  assert.ok(h.calls.status.length > 0, "status set on start with gravity enabled");
-  h.expectNoErrors();
   await h.stop();
 }
 

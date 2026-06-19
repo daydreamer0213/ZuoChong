@@ -49,12 +49,6 @@
       "default": true,
       "label": "$t:config.pauseWhenBusy.label",
       "description": "$t:config.pauseWhenBusy.description"
-    },
-    "gravity": {
-      "type": "boolean",
-      "default": false,
-      "label": "$t:config.gravity.label",
-      "description": "$t:config.gravity.description"
     }
   }
 }

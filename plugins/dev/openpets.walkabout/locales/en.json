@@ -19,8 +19,6 @@
   "config.interval.20s": "Every 20 seconds",
   "config.pauseWhenBusy.label": "Pause when agent is busy",
   "config.pauseWhenBusy.description": "Stop moving while your coding agent is actively working.",
-  "config.gravity.label": "Enable gravity",
-  "config.gravity.description": "Pull your pet toward the floor while it roams.",
   "status.active": "Walking ({mode})",
   "status.paused": "Walkabout paused"
 }
