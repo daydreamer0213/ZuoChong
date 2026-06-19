@@ -83,15 +83,29 @@ one window. The model (server side in `lease-manager.ts`):
 - A lease is a short-lived claim with a **15s TTL**, kept alive by heartbeats.
 - `resolveTarget()` decides whether a command hits the **default pet** or an
   **explicit agent pet**.
+- **Re-acquiring is idempotent per client.** When a client process re-acquires
+  while it still holds a live lease, the manager refreshes that existing lease
+  (same `leaseId`, same target) instead of resolving a new target. This stops a
+  transient heartbeat lapse from silently *downgrading* an explicit agent pet to
+  the default pet on the next acquire.
 - The **first** explicit lease for a pet triggers `showAgentPet()`; the **last**
   explicit lease released triggers `closeAgentPetIfOpen()`. So agent pets appear
   on demand and disappear when their agents are done.
+- **Liveness reclaims dead sessions.** A periodic check releases a lease once its
+  owning process is gone, probing the **terminal owner PID** (when known) as well
+  as the client PID — so a lease can't outlive its session even when the client
+  process is orphaned but still alive.
 - The default pet is persistent and not lease-bound.
 
 Integrations follow a consistent pattern: acquire a lease on first activity,
 heartbeat on an interval (the MCP server uses ~5s; OpenCode renews with a ~2s
-buffer before expiry), and release on shutdown. Failures are swallowed so the
-agent is never blocked by pet IPC.
+buffer before expiry), and release on shutdown. If a heartbeat fails, an
+integration first stashes the stale `leaseId` and retries `lease.heartbeat` to
+restore it before falling back to a fresh `lease.acquire`, so a dropped heartbeat
+never re-routes an agent pet onto the default. The MCP server additionally
+releases its lease and exits when its stdio transport closes, so the pet tears
+down promptly when the session ends. Failures are swallowed so the agent is never
+blocked by pet IPC.
 
 See [pets.md](pets.md) for what happens once a command reaches a pet window, and
 [agent-integrations.md](agent-integrations.md) for how each integration drives

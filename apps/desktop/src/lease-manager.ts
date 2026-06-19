@@ -77,6 +77,35 @@ export class LeaseManager {
 
   acquire(requestedPetId?: string, clientPid?: number): LeaseSnapshot {
     const now = this.#now();
+
+    // FIX 1: Idempotent per-clientPid lease reuse.
+    // If a non-expired lease already exists for this clientPid (e.g. after a
+    // heartbeat lapse the MCP client silently re-acquires), refresh and return
+    // it — don't call #resolveTarget again (which would re-resolve the pool
+    // slot and potentially land on 'default' if the original slot appears
+    // occupied). This scan MUST be synchronous and placed before any await to
+    // preserve the no-await-between-resolve-and-set invariant.
+    //
+    // Note on OS PID reuse: a different process acquiring the same PID within
+    // the ≤TTL window is improbable; the non-expired guard mitigates it further.
+    if (clientPid !== undefined && clientPid > 0) {
+      for (const existing of this.#leases.values()) {
+        if (existing.clientPid !== clientPid) continue;
+        if (existing.expiresAt <= now) continue; // expired — fall through to fresh acquire
+        // For explicit --pet requests, only reuse when the stored requestedPetId
+        // matches the incoming requestedPetId; otherwise release old and acquire fresh.
+        if (existing.requestedPetId !== requestedPetId) {
+          this.release(existing.leaseId);
+          break; // fall through to fresh acquire below
+        }
+        // Same clientPid, same requestedPetId, lease still valid — refresh and return.
+        const refreshed: PetLease = { ...existing, lastHeartbeatAt: now, expiresAt: now + this.#ttlMs };
+        this.#leases.set(refreshed.leaseId, refreshed);
+        this.#onLog("debug", "acquire reused existing lease", { leaseId: refreshed.leaseId, clientPid, requestedPetId, targetKind: refreshed.targetKind, actualPetId: refreshed.actualPetId, expiresAt: refreshed.expiresAt });
+        return this.snapshot(refreshed);
+      }
+    }
+
     // INVARIANT: resolveTarget (which may call resolvePoolAssignment) and the
     // Map.set below MUST remain synchronous with no await between them.
     // Two concurrent acquire(undefined) calls could otherwise be assigned the
@@ -157,6 +186,12 @@ export class LeaseManager {
    * Releases leases whose client process has terminated.
    * Called from the cleanup loop (~every 5s).
    *
+   * FIX 4: Also checks terminalOwnerPid when set — an orphaned-but-alive MCP
+   * process (where clientPid is still running but the terminal that owns it has
+   * died) would otherwise escape teardown. terminalOwnerPid is only resolved on
+   * confinement-supported (macOS) platforms; Windows/Linux still rely on
+   * clientPid + TTL.
+   *
    * Uses process.kill(pid, 0) — throws ESRCH when process does not exist.
    * Only valid when clientPid is set (>0). Never throws; logs failures.
    */
@@ -164,21 +199,40 @@ export class LeaseManager {
     const released: LeaseSnapshot[] = [];
     for (const lease of [...this.#leases.values()]) {
       if (!lease.clientPid || lease.clientPid <= 0) continue;
-      try {
-        process.kill(lease.clientPid, 0);
-        // Process is alive — no action.
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ESRCH") {
-          // Process does not exist — release lease.
-          this.#onLog("info", "pid dead — releasing lease", { leaseId: lease.leaseId, clientPid: lease.clientPid, actualPetId: lease.actualPetId });
-          released.push(this.snapshot(lease));
-          this.release(lease.leaseId);
-        } else if (code === "EPERM") {
-          // Process exists but we can't signal it — treat as alive.
-          this.#onLog("debug", "pid liveness check EPERM — treating as alive", { leaseId: lease.leaseId, clientPid: lease.clientPid });
+
+      // Determine which PID to check first. If terminalOwnerPid is resolved
+      // (macOS confinement path), check the terminal process — a dead terminal
+      // means the session is orphaned even if the MCP client PID still exists.
+      const pidsToCheck: number[] = [];
+      if (lease.terminalOwnerPid && lease.terminalOwnerPid > 0) {
+        pidsToCheck.push(lease.terminalOwnerPid);
+      }
+      pidsToCheck.push(lease.clientPid);
+
+      let shouldRelease = false;
+      for (const pid of pidsToCheck) {
+        try {
+          process.kill(pid, 0);
+          // Process is alive — continue to next PID check.
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === "ESRCH") {
+            // Process does not exist — release lease.
+            const pidRole = pid === lease.terminalOwnerPid ? "terminalOwnerPid" : "clientPid";
+            this.#onLog("info", "pid dead — releasing lease", { leaseId: lease.leaseId, [pidRole]: pid, actualPetId: lease.actualPetId });
+            shouldRelease = true;
+          } else if (code === "EPERM") {
+            // Process exists but we can't signal it — treat as alive.
+            this.#onLog("debug", "pid liveness check EPERM — treating as alive", { leaseId: lease.leaseId, pid });
+          }
+          // Other errors: log and skip.
         }
-        // Other errors: log and skip.
+        if (shouldRelease) break;
+      }
+
+      if (shouldRelease) {
+        released.push(this.snapshot(lease));
+        this.release(lease.leaseId);
       }
     }
     return released;

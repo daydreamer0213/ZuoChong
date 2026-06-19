@@ -119,6 +119,13 @@ acquire new leases and their windows reopen. Sessions whose processes have alrea
 terminated are skipped. This is handled by `dispatchPoolToggle` in `local-ipc.ts`,
 wired from the `update-preferences` IPC handler in `windows.ts`.
 
+**Session teardown:** a periodic liveness sweep (the `local-ipc.ts` cleanup timer
+calling `lease-manager.ts`'s `checkPidLiveness`) releases an agent pet's lease —
+and so closes its window — once the owning session is gone. It probes the
+**terminal owner PID** (when known) as well as the client PID, so an orphaned but
+still-running client can't keep a pet alive indefinitely. Expiring the 15s TTL is
+the backstop; liveness is the prompt path.
+
 See [agent-integrations.md](agent-integrations.md) for the
 full behavioral description.
 
