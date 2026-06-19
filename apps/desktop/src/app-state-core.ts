@@ -61,3 +61,11 @@ export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = t
   return typeof value === "boolean" ? value : defaultValue;
 }
 
+/**
+ * Normalize the petGravityEnabled preference value.
+ * Default is false (gravity off). Non-boolean values fall back to the default.
+ */
+export function normalizePetGravityEnabled(value: unknown, defaultValue = false): boolean {
+  return typeof value === "boolean" ? value : defaultValue;
+}
+

@@ -25,7 +25,7 @@ type UserSelectableAnimationState = "idle" | "review" | "running" | "waiting" | 
 type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean }; petScaleOptions: PetScaleOption[]; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean }; petScaleOptions: PetScaleOption[]; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
 type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
@@ -1200,6 +1200,14 @@ function SettingsView() {
                 disabled={!settings || !!busy}
                 testId="setting-pet-cross-display-toggle"
                 onChange={(checked) => patchPreferences({ petCrossDisplayEnabled: checked }, t("settings.toast.crossDisplaySaved"))}
+              />
+              <ToggleRow
+                title={t("settings.petGravity.label")}
+                description={t("settings.petGravity.description")}
+                checked={settings?.preferences.petGravityEnabled ?? false}
+                disabled={!settings || !!busy}
+                testId="setting-pet-gravity-toggle"
+                onChange={(checked) => patchPreferences({ petGravityEnabled: checked }, t("settings.toast.gravitySaved"))}
               />
               <div className="settings-row">
                 <div className="settings-row-info">

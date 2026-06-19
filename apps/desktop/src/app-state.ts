@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
@@ -65,6 +65,10 @@ export interface OpenPetsStateV1 {
      * freely across all displays. When false, pets are confined to a single display.
      * Platform-independent kill-switch for the cross-display feature. */
     readonly petCrossDisplayEnabled: boolean;
+    /** Host-level gravity toggle. When true, pets fall with physics on every registered
+     * pet (default + agent). When false (default), no gravity is applied — the
+     * Walkabout plugin's per-session physics path governs gravity instead. */
+    readonly petGravityEnabled: boolean;
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -322,6 +326,14 @@ export function getPerMonitorPetPosition(displayKey: string): Point | undefined 
   return getInitializedState().defaultPet.perMonitorPositions?.[displayKey];
 }
 
+export function getPetGravityEnabled(): boolean {
+  return getInitializedState().preferences.petGravityEnabled;
+}
+
+export function setPetGravityEnabled(value: boolean): OpenPetsStateV1 {
+  return updatePreferences({ petGravityEnabled: value });
+}
+
 export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: number = Date.now()): OpenPetsStateV1 {
   publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction, petId: activity.petId });
   const state = getInitializedState();
@@ -568,6 +580,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
       : defaultState.preferences.petPoolEnabled,
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
     petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
+    petGravityEnabled: normalizePetGravityEnabled(value.petGravityEnabled, defaultState.preferences.petGravityEnabled),
   };
 }
 
@@ -645,6 +658,7 @@ function createDefaultState(): OpenPetsStateV1 {
       petPoolEnabled: true,
       petConfinementEnabled: true,
       petCrossDisplayEnabled: false,
+      petGravityEnabled: false,
     },
     pets: {
       installed: [builtInPet],
