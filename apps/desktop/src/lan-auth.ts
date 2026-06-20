@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+﻿import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -32,10 +32,10 @@ export function resolveLanAuthConfig(userDataPath: string, env: NodeJS.ProcessEn
   const allowInsecure = normalizeBoolean(env.OPENPETS_LAN_ALLOW_INSECURE);
   if (allowInsecure) return { token: null, source: "none", insecure: true, tokenHint: null };
 
+  if (!options.serverMode) return { token: null, source: "none", insecure: false, tokenHint: null };
+
   const persistedToken = readPersistedLanAuth(userDataPath)?.token ?? null;
   if (persistedToken) return toConfig(persistedToken, "stored", false);
-
-  if (!options.serverMode) return { token: null, source: "none", insecure: false, tokenHint: null };
 
   const generatedToken = generateLanToken();
   writePersistedLanAuth(userDataPath, generatedToken);
@@ -68,15 +68,18 @@ export function readPersistedLanAuth(userDataPath: string): PersistedLanAuth | n
 
 function writePersistedLanAuth(userDataPath: string, token: string): void {
   const path = getPersistedLanAuthPath(userDataPath);
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  try { chmodSync(dirname(path), 0o700); } catch { /* best effort on platforms without POSIX modes */ }
   const payload: PersistedLanAuth = {
     version: persistedLanAuthVersion,
     token,
     updatedAt: Date.now(),
   };
   const tempPath = `${path}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try { chmodSync(tempPath, 0o600); } catch { /* best effort on platforms without POSIX modes */ }
   renameSync(tempPath, path);
+  try { chmodSync(path, 0o600); } catch { /* best effort on platforms without POSIX modes */ }
 }
 
 function generateLanToken(): string {

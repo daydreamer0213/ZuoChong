@@ -94,6 +94,10 @@ export class LanCoordinator {
     return this.snapshot(now);
   }
 
+  currentHost(): string | null {
+    return this.#currentHost;
+  }
+
   snapshot(now: number): LanState {
     this.prune(now);
     return {

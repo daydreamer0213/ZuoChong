@@ -42,6 +42,7 @@ const edgeThresholdPx = 18;
 let coordinator = new LanCoordinator({ staleClientMs });
 let pollTimer: NodeJS.Timeout | null = null;
 let serverStarted = false;
+let serverStarting = false;
 let missedPolls = 0;
 let lastPollWarningAt = 0;
 
@@ -62,17 +63,21 @@ export function startLanController(): void {
   if (mode === "server") {
     if (auth.insecure) warn("app", "lan server started with explicit insecure auth", { risk: "local_network_hosts_can_control_pet" });
     if (auth.source === "generated") info("app", "lan token generated", { tokenHint: auth.tokenHint });
-    startLanServer(port, token);
-  } else if (!token) {
+    void startLanServer(port, token).then((started) => {
+      if (started) startLanClient(serverUrl, localHost, token);
+    });
+  } else if (!token && !auth.insecure) {
     warn("app", "lan client has no token", { hint: "set_OPENPETS_LAN_TOKEN_to_match_server" });
+  } else {
+    startLanClient(serverUrl, localHost, token);
   }
-  startLanClient(serverUrl, localHost, token);
   info("app", "lan controller started", { mode, serverUrl, localHost, port, auth: token ? "token" : "none", authSource: auth.source, topologyHosts: Object.keys(topology).length, topologyLinks: countLanTopologyLinks(topology), topologyIssues: topologyIssues.length });
 }
 
-function startLanServer(port: number, token: string | null): void {
-  if (serverStarted) return;
-  serverStarted = true;
+function startLanServer(port: number, token: string | null): Promise<boolean> {
+  if (serverStarted) return Promise.resolve(true);
+  if (serverStarting) return Promise.resolve(false);
+  serverStarting = true;
 
   const userDataPath = app.getPath("userData");
   const persistedState = readPersistedLanState(userDataPath);
@@ -91,13 +96,23 @@ function startLanServer(port: number, token: string | null): void {
       }
     },
   }));
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = requestTimeoutMs + 1_000;
 
-  server.listen(port, "0.0.0.0", () => {
-    info("app", "lan server listening", { port });
-  });
-
-  server.on("error", (serverError) => {
-    logError("app", "lan server error", serverError);
+  return new Promise((resolve) => {
+    server.once("listening", () => {
+      serverStarting = false;
+      serverStarted = true;
+      info("app", "lan server listening", { port });
+      resolve(true);
+    });
+    server.once("error", (serverError) => {
+      serverStarting = false;
+      serverStarted = false;
+      logError("app", "lan server error", serverError);
+      resolve(false);
+    });
+    server.listen(port, "0.0.0.0");
   });
 }
 
@@ -215,6 +230,10 @@ function normalizeServerUrl(value: string | undefined, port: number): string {
   if (!value) return `http://127.0.0.1:${port}`;
   try {
     const url = new URL(value.startsWith("http://") || value.startsWith("https://") ? value : `http://${value}`);
+    if (url.protocol !== "http:") {
+      warn("app", "lan server url ignored", { reason: "unsupported_protocol", protocol: url.protocol });
+      return `http://127.0.0.1:${port}`;
+    }
     if (!url.port) url.port = String(port);
     return url.toString().replace(/\/$/, "");
   } catch {

@@ -53,10 +53,38 @@ try {
   const missingHostRegister = await requestJson("POST", "/register", {}, token);
   assert.equal(missingHostRegister.status, 400, "register should reject requests without a host");
 
-  assert.deepEqual(changedHosts, ["alpha", "alpha", "alpha", "beta", "alpha"], "successful mutating requests should emit persisted owner snapshots");
+  now += 11_000;
+  const staleOwnerPrune = await requestJson<LanState>("POST", "/position", { host: "beta", position: { x: 420, y: 20 }, edge: null }, token);
+  assert.equal(staleOwnerPrune.body.currentHost, "beta", "a live client should become owner when the previous owner is pruned as stale");
+
+  const largeBody = await requestRaw("POST", "/register", "{" + `"padding":"${"x".repeat(17 * 1024)}"` + "}", token);
+  assert.equal(largeBody.status, 413, "oversized LAN request bodies should be rejected");
+
+  assert.deepEqual(changedHosts, ["alpha", "beta", "alpha", "beta"], "successful mutating requests should emit persisted owner snapshots when ownership changes, including stale-owner pruning");
 } finally {
   server.close();
   await once(server, "close");
+}
+
+function requestRaw(method: string, path: string, payload: string, requestToken?: string): Promise<JsonResponse> {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string | number> = {
+      "content-type": "application/json",
+      "content-length": Buffer.byteLength(payload),
+    };
+    if (requestToken) headers["x-openpets-lan-token"] = requestToken;
+
+    const req = request({ method, hostname: "127.0.0.1", port, path, headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : undefined });
+      });
+    });
+    req.on("error", reject);
+    req.end(payload);
+  });
 }
 
 console.log("LAN controller HTTP validation passed.");
