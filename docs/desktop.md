@@ -46,8 +46,8 @@ Key files: `main.ts` (entry/bootstrap), `lifecycle.ts` (app events + cleanup),
 ### Tray & windows
 
 - `tray.ts` builds the tray icon (`assets.ts` loads `assets/tray-icon.png`,
-  marks it as a macOS template image so it adapts to light/dark menu bars, and
-  falls back to a generated icon if the asset is missing) and the context menu,
+  keeps it as a full-color image, and falls back to a generated icon if the
+  asset is missing) and the context menu,
   including update status and route-targeted Control Center entries and a "open
   logs" action.
 - `windows.ts` is the Control Center coordinator: it creates the hardened

@@ -55,9 +55,9 @@ export function normalizePetConfinementEnabled(value: unknown, defaultValue = tr
 
 /**
  * Normalize the petCrossDisplayEnabled preference value.
- * Default is true (cross-display roaming on). Non-boolean values fall back to the default.
+ * Default is false (cross-display roaming off). Non-boolean values fall back to the default.
  */
-export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = true): boolean {
+export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = false): boolean {
   return typeof value === "boolean" ? value : defaultValue;
 }
 
@@ -68,4 +68,3 @@ export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = t
 export function normalizePetGravityEnabled(value: unknown, defaultValue = false): boolean {
   return typeof value === "boolean" ? value : defaultValue;
 }
-

@@ -101,7 +101,7 @@ See [plugins.md](plugins.md) and [sdk.md](sdk.md) for the plugin side.
 
 1. **Confinement** — if a pet has a terminal-bounds assignment (see below), it
    is always snapped into those bounds regardless of any other flag.
-2. **Cross-display roaming** (default **on**) — if the
+2. **Cross-display roaming** (default **off**) — if the
    `petCrossDisplayEnabled` preference is on, `clampToNearestDisplayIfOffscreen`
    is used: the pet is left alone while its bottom-center anchor overlaps any
    display's work area, and is only snapped to the nearest display edge when

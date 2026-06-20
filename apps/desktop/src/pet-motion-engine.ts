@@ -294,9 +294,7 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
     const confinementBounds = getEffectiveConfinementBounds(petHandleId);
     const floor = computeGravityFloor(confinementBounds, display.workArea.y, display.workArea.height, defaultPetWindowSize.height);
     state.physics.vy = Math.min(state.physics.vy + 2.2, 48);
-    // Clamp per-tick delta to ≤200px to prevent gravity seam teleport
-    const rawDeltaY = Math.min(state.physics.vy, 200);
-    rawY = y + rawDeltaY;
+    rawY = y + state.physics.vy;
     if (rawY >= floor) {
       rawY = floor;
       if (Math.abs(state.physics.vy) > 6 && state.physics.bounce > 0) state.physics.vy = -state.physics.vy * state.physics.bounce;

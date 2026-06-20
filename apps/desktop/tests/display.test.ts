@@ -34,7 +34,7 @@ interface WorkArea {
 }
 
 function makeScreen(workAreas: WorkArea[]) {
-  const displays = workAreas.map((wa) => ({ workArea: wa }));
+  const displays = workAreas.map((wa) => ({ bounds: wa, workArea: wa }));
 
   function getDisplayNearestPoint(pt: { x: number; y: number }) {
     let best = displays[0];

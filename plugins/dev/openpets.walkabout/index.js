@@ -241,7 +241,7 @@ export function register(OpenPetsPlugin) {
       // via ctx.pets.list() is deferred — pool/lease pets are not motion-addressable.
       const unsubActivity = ctx.events.on("agent:activity", async (event) => {
         if (!cfg.pauseWhenBusy) return;
-        if ((event?.petId ?? "default") !== "default") return; // ignore other sessions' pets
+        if ((event?.surface ?? "default") !== "default") return; // ignore other sessions' pets
         if (event?.active !== true) return;                    // only react to activity pulses
 
         stopCurrentMode();

@@ -34,13 +34,14 @@ const leaseManager = new LeaseManager({
   onFirstExplicitLease: showAgentPet,
   onLastExplicitLease: handleLastExplicitLease,
   onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
+  isPetEligible,
 });
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
 
 /** PIDs of sessions that had pool pets when pool was disabled. Used to respawn on re-enable. */
-const suspendedPoolPids = new Set<number>();
+const suspendedPoolSessions = new Map<number, string | undefined>();
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -73,8 +74,8 @@ export async function startLocalIpcServer(): Promise<void> {
   const listeningEndpoint = getListeningEndpoint(server, endpointConfig);
   ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
   leaseCleanupTimer = setInterval(() => {
-    leaseManager.cleanupExpired();
-    leaseManager.checkPidLiveness();
+    cleanupReleasedLeases(leaseManager.cleanupExpired());
+    cleanupReleasedLeases(leaseManager.checkPidLiveness());
   }, 5_000);
   leaseCleanupTimer.unref?.();
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
@@ -110,23 +111,25 @@ export function dispatchPoolToggle(enabled: boolean): void {
     // Despawn all active pool pets and remember their PIDs for respawn.
     const explicitLeases = leaseManager.getExplicitLeaseSnapshots();
     for (const lease of explicitLeases) {
+      const rawLease = leaseManager.getRawLease(lease.leaseId);
+      if (!rawLease || rawLease.requestedPetId !== undefined) continue;
       if (lease.clientPid && lease.clientPid > 0) {
-        suspendedPoolPids.add(lease.clientPid);
+        suspendedPoolSessions.set(lease.clientPid, rawLease.sessionNonce);
       }
-      leaseManager.release(lease.leaseId);
+      releaseExplicitLease(lease.leaseId);
     }
   } else {
     // Re-enable: spawn pets for suspended sessions whose PIDs are still alive.
-    const pidsToRespawn = [...suspendedPoolPids];
-    suspendedPoolPids.clear();
-    for (const pid of pidsToRespawn) {
+    const sessionsToRespawn = [...suspendedPoolSessions];
+    suspendedPoolSessions.clear();
+    for (const [pid, sessionNonce] of sessionsToRespawn) {
       try {
         process.kill(pid, 0);
       } catch {
         continue; // Dead process — skip.
       }
       try {
-        leaseManager.acquire(undefined, pid);
+        leaseManager.acquire(undefined, pid, sessionNonce);
         info("ipc", "respawned pool pet for suspended session", { pid });
       } catch (err) {
         debug("ipc", "pool respawn acquire failed", { pid, error: err instanceof Error ? err.message : String(err) });
@@ -378,7 +381,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     // Clean up confinement subscription for this lease if one exists.
     const rawLease = leaseManager.getRawLease(leaseId);
     if (rawLease?.targetKind === "explicit") {
-      unsubscribeConfinement(leaseId, rawLease.actualPetId);
+      return releaseExplicitLease(leaseId);
     }
     return leaseManager.release(leaseId);
   }
@@ -391,12 +394,12 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
       const applied = applyAgentPetReaction(lease.actualTargetPetId, reaction);
-      safeRecordOpenPetsActivity({ kind: "react", reaction, petId });
+      safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "agent" });
       trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason, leaseId: lease.leaseId };
     }
     const applied = applyExternalPetReaction(reaction);
-    safeRecordOpenPetsActivity({ kind: "react", reaction, petId });
+    safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "default" });
     trackDesktopAgentReaction(reaction, { target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
     return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
   }
@@ -409,12 +412,12 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
     const applied = applyAgentPetSay(lease.actualTargetPetId, message, reaction);
-    safeRecordOpenPetsActivity({ kind: "say", reaction, petId });
+    safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "agent" });
     if (reaction) trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction, leaseId: lease.leaseId };
   }
   const applied = applyExternalPetSay(message, reaction);
-  safeRecordOpenPetsActivity({ kind: "say", reaction, petId });
+  safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "default" });
   if (reaction) trackDesktopAgentReaction(reaction, { target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
   return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
 }
@@ -451,6 +454,17 @@ function handleLastExplicitLease(petId: string): void {
   info("ipc", "last explicit lease ended", { petId });
   clearAgentPetLeaseState(petId);
   clearConfinementState(petId);
+}
+
+function cleanupReleasedLeases(leases: readonly { readonly leaseId: string; readonly targetKind: string }[]): void {
+  for (const lease of leases) {
+    if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
+  }
+}
+
+function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
+  unsubscribeConfinement(leaseId);
+  return leaseManager.release(leaseId);
 }
 
 async function resolveTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
@@ -490,7 +504,7 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
     }),
     applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo),
     isAlive: () => !!leaseManager.getRawLease(leaseId),
-    onDead: () => unsubscribeConfinement(leaseId, petId),
+    onDead: () => unsubscribeConfinement(leaseId),
     // Phase 2: Screen Recording permission — macOS only.
     // On Windows and Linux there is no SR permission concept; window enumeration
     // is available without it, so we treat the status as always "granted".
@@ -540,10 +554,9 @@ function applyConfinementUpdate(petId: string, info: TerminalWindowInfo): void {
   repositionConfinedPet(petId);
 }
 
-function unsubscribeConfinement(leaseId: string, petId: string): void {
+function unsubscribeConfinement(leaseId: string): void {
   const unsub = confinementUnsubscribers.get(leaseId);
   if (unsub) { unsub(); confinementUnsubscribers.delete(leaseId); }
-  clearConfinementState(petId);
 }
 
 function writeResponse(socket: net.Socket, response: unknown): void {
@@ -615,4 +628,8 @@ function getCurrentDefaultPetWithFallback(): { readonly id: string; readonly dis
 
 function getPetDisplayName(petId: string): string {
   return getAppStateSnapshot().pets.installed.find((pet) => pet.id === petId)?.displayName ?? petId;
+}
+
+function isPetEligible(petId: string): boolean {
+  return getAppStateSnapshot().pets.installed.some((pet) => pet.id === petId && !pet.broken);
 }
