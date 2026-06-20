@@ -5,7 +5,6 @@
   "config.mode.description": "ペットが画面上をどう動くかを選びます。",
   "config.mode.wander": "散歩（ランダムに歩く）",
   "config.mode.followCursor": "カーソルを追いかける",
-  "config.mode.physics": "物理（重力 + バウンド）",
   "config.mode.patrol": "パトロール（行ったり来たり）",
   "config.speed.label": "速度",
   "config.speed.description": "ペットが動く速さ。",

@@ -45,14 +45,18 @@ Key files: `main.ts` (entry/bootstrap), `lifecycle.ts` (app events + cleanup),
 
 ### Tray & windows
 
-- `tray.ts` builds the tray icon (`assets.ts` loads it with a generated
-  fallback) and the context menu, including update status and route-targeted
-  Control Center entries and a "open logs" action.
+- `tray.ts` builds the tray icon (`assets.ts` loads `assets/tray-icon.png`,
+  keeps it as a full-color image, and falls back to a generated icon if the
+  asset is missing) and the context menu,
+  including update status and route-targeted Control Center entries and a "open
+  logs" action.
 - `windows.ts` is the Control Center coordinator: it creates the hardened
   `BrowserWindow`, loads the Vite renderer (dev) or packaged `dist/renderer`
   (prod), targets a route, registers all renderer-facing IPC handlers, builds
   the Dashboard snapshot, and defines the internal asset protocols.
-- `display.ts` provides screen-geometry helpers for positioning pet windows.
+- `display.ts` provides screen-geometry helpers for positioning pet windows,
+  including the permissive `clampToNearestDisplayIfOffscreen` helper that allows
+  pets to roam across display seams while only snapping when fully off-screen.
 
 ### Control Center (renderer)
 
@@ -89,14 +93,15 @@ installed.
 `app-state.ts` persists a versioned JSON document under
 `userData/openpets-state.json` using atomic temp-write + rename. It holds
 installed pets, the default-pet config, reaction→animation overrides, onboarding
-state, locale preference, and the pet pool preference (ordered pet list +
-`petPoolEnabled` toggle). `app-state-core.ts` holds pure helpers (scale
+state, locale preference, the pet pool preference (ordered pet list +
+`petPoolEnabled` toggle), and display-roaming preferences (`petConfinementEnabled`,
+`petCrossDisplayEnabled`). `app-state-core.ts` holds pure helpers (scale
 options, onboarding normalization) that are testable without Electron.
 
 #### Pet pool preference
 
 The **pet pool** is an ordered list of installed pets plus a master enable/disable
-toggle (`petPoolEnabled`, default `false`), both configurable in Control Center →
+toggle (`petPoolEnabled`, default `true`), both configurable in Control Center →
 Settings → General. When enabled, the lease manager uses the ordered list to
 assign a distinct pet to each concurrent agent session that does not explicitly
 request one via `--pet <id>`. Slot 1 is the primary/default pet; slot 2 onwards
@@ -105,7 +110,23 @@ further sessions receive a random eligible pet (installed, non-broken, not the
 built-in default). Slots free up when their session ends. `--pet <id>` bypasses
 the pool entirely. When disabled, all sessions without `--pet` share the single
 default pet (legacy behavior). Pool assignment is pure lease logic and works on
-all platforms. See [agent-integrations.md](agent-integrations.md) for the
+all platforms.
+
+**Toggle side-effects:** disabling the pool immediately despawns all active pool
+pets (releases their leases, which closes their windows). Re-enabling respawns a
+pool pet for every session whose client PID is still alive — those sessions
+acquire new leases and their windows reopen. Sessions whose processes have already
+terminated are skipped. This is handled by `dispatchPoolToggle` in `local-ipc.ts`,
+wired from the `update-preferences` IPC handler in `windows.ts`.
+
+**Session teardown:** a periodic liveness sweep (the `local-ipc.ts` cleanup timer
+calling `lease-manager.ts`'s `checkPidLiveness`) releases an agent pet's lease —
+and so closes its window — once the owning session is gone. It probes the
+**terminal owner PID** (when known) as well as the client PID, so an orphaned but
+still-running client can't keep a pet alive indefinitely. Expiring the 15s TTL is
+the backstop; liveness is the prompt path.
+
+See [agent-integrations.md](agent-integrations.md) for the
 full behavioral description.
 
 ### Plugin subsystem

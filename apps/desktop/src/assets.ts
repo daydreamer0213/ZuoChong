@@ -27,6 +27,10 @@ export function createTrayIcon(): NativeImage {
   const assetImage = nativeImage.createFromPath(assetPath);
 
   if (!assetImage.isEmpty()) {
+    // Render the tray icon as a full-colour image. We intentionally do NOT
+    // mark it as a macOS template image: template images are drawn as a
+    // monochrome (black) silhouette derived from the alpha channel, which
+    // discarded the colour artwork and made the tray icon appear fully black.
     return assetImage.resize({ width: 22, height: 22 });
   }
 
@@ -66,10 +70,8 @@ function createFallbackTrayIcon(): NativeImage {
     console.error("OpenPets tray icon creation produced an empty image.");
   }
 
-  if (process.platform === "darwin") {
-    image.setTemplateImage(true);
-  }
-
+  // Keep the generated fallback in full colour as well (no template image),
+  // so it matches the colour tray artwork instead of rendering black on macOS.
   return image;
 }
 

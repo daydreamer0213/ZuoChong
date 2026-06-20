@@ -8,17 +8,18 @@ An OpenPets plugin that makes your pet roam the screen.
 |------|-------------|
 | **Wander** (default) | Pet takes random strolls, pausing between steps |
 | **Follow cursor** | Pet trails your mouse with configurable lag |
-| **Physics** | Gravity + bounce — the pet falls and bounces around |
 | **Patrol** | Pet paces back and forth across the screen |
 
 ## Config options
 
 | Option | Values | Default |
 |--------|--------|---------|
-| Movement mode | wander / follow-cursor / physics / patrol | wander |
+| Movement mode | wander / follow-cursor / patrol | wander |
 | Speed | slow / normal / brisk | normal |
 | Move interval | 2s / 5s / 10s / 20s | 5s |
 | Pause when agent is busy | on / off | on |
+
+> **Gravity** is now a global OpenPets Settings preference and applies to all pets — it is no longer a per-plugin toggle.
 
 ## Dev setup
 
@@ -54,7 +55,7 @@ monorepo build if the package isn't installed).
 ```
 openpets.walkabout/
 ├── openpets.plugin.json   Manifest (v3)
-├── index.js               Plugin entry — all four mode implementations
+├── index.js               Plugin entry — three mode implementations
 ├── test.js                Unit + lifecycle tests
 ├── package.json           Dev dependency declaration
 ├── locales/

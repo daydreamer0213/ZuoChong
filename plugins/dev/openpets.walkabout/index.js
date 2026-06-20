@@ -1,5 +1,5 @@
 // Walkabout (openpets.walkabout) — makes your pet roam the screen with style.
-// Supports four modes: wander, follow-cursor, physics, patrol.
+// Supports three modes: wander, follow-cursor, patrol.
 /// <reference types="@open-pets/plugin-sdk" />
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -25,10 +25,10 @@ export const PATROL_STEP_X = 300;
 
 /**
  * @param {string|undefined} value
- * @returns {"wander"|"follow-cursor"|"physics"|"patrol"}
+ * @returns {"wander"|"follow-cursor"|"patrol"}
  */
 export function normalizeMode(value) {
-  const valid = ["wander", "follow-cursor", "physics", "patrol"];
+  const valid = ["wander", "follow-cursor", "patrol"];
   return valid.includes(value) ? value : "wander";
 }
 
@@ -144,29 +144,6 @@ export function startFollowCursor(ctx, cfg) {
 }
 
 /**
- * Starts physics mode. Returns a stop function.
- * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
- * @param {ReturnType<typeof cleanConfig>} cfg
- * @returns {() => void}
- */
-export function startPhysics(ctx, cfg) {
-  // Bounciness scales with speed.
-  const bounceBySpeed = { slow: 0.35, normal: 0.55, brisk: 0.75 };
-  const bounce = bounceBySpeed[cfg.speed];
-
-  let stopped = false;
-  ctx.pet.physics({ gravity: true, bounce, climbEdges: false }).catch((err) => {
-    if (!stopped) ctx.log.warn("physics failed", err?.message);
-  });
-
-  return function stop() {
-    stopped = true;
-    // Disable physics by calling with no-gravity, no-bounce.
-    ctx.pet.physics({ gravity: false, bounce: 0 }).catch(() => {});
-  };
-}
-
-/**
  * Starts patrol mode. Returns a stop function.
  * @param {import("@open-pets/plugin-sdk").OpenPetsContext} ctx
  * @param {ReturnType<typeof cleanConfig>} cfg
@@ -210,13 +187,16 @@ export function startPatrol(ctx, cfg) {
  * @param {ReturnType<typeof cleanConfig>} cfg
  * @returns {() => void}
  */
-export function startMode(ctx, cfg) {
+function startModeRunner(ctx, cfg) {
   switch (cfg.mode) {
     case "follow-cursor": return startFollowCursor(ctx, cfg);
-    case "physics":       return startPhysics(ctx, cfg);
     case "patrol":        return startPatrol(ctx, cfg);
     default:              return startWander(ctx, cfg);
   }
+}
+
+export function startMode(ctx, cfg) {
+  return startModeRunner(ctx, cfg);
 }
 
 // ── Plugin entry ───────────────────────────────────────────────────────────────
@@ -234,36 +214,51 @@ export function register(OpenPetsPlugin) {
       // Set a visible status so the user can see the plugin is active.
       await ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" });
 
+      // Transient-pulse busy gate — resumes automatically via timer.
+      // Production never emits kind:"idle"/active:false, so the old enter/exit
+      // model would pause forever. Instead: each activity pulse restarts a
+      // self-cancelling timer; when it fires the pet walks again.
+      /** @type {ReturnType<typeof setTimeout>|null} */
+      let resumeTimer = null;
+
       // React to config changes — tear down old mode, spin up new one.
+      // Also cancels any pending resume so a stale timer cannot restart a
+      // mode that belongs to the old config.
       const unsubConfig = ctx.config.onChange(async (newRaw) => {
         const newCfg = cleanConfig(newRaw);
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
         stopCurrentMode();
         cfg = newCfg;
         stopCurrentMode = startMode(ctx, cfg);
         await ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" });
       });
 
-      // Pause on agent:activity if pauseWhenBusy is enabled.
-      let pausedByBusy = false;
-      let resumeStop = null;
-
+      // Pause on agent:activity — transient pulse model scoped to default pet.
+      // - Ignores events from other session pets (cross-session leak fix).
+      // - Only reacts to active:true pulses; no active:false branch needed.
+      // NOTE: walkabout drives only ctx.pet (the default pet). Multi-pet driving
+      // via ctx.pets.list() is deferred — pool/lease pets are not motion-addressable.
       const unsubActivity = ctx.events.on("agent:activity", async (event) => {
         if (!cfg.pauseWhenBusy) return;
-        const isBusy = event?.active === true;
+        if ((event?.surface ?? "default") !== "default") return; // ignore other sessions' pets
+        if (event?.active !== true) return;                    // only react to activity pulses
 
-        if (isBusy && !pausedByBusy) {
-          pausedByBusy = true;
-          stopCurrentMode();
-          await ctx.status.set({ text: ctx.t("status.paused"), tone: "warning" });
-        } else if (!isBusy && pausedByBusy) {
-          pausedByBusy = false;
+        stopCurrentMode();
+        clearTimeout(resumeTimer);
+        await ctx.status.set({ text: ctx.t("status.paused"), tone: "warning" });
+
+        resumeTimer = setTimeout(() => {
+          resumeTimer = null;
           stopCurrentMode = startMode(ctx, cfg);
-          await ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" });
-        }
+          ctx.status.set({ text: ctx.t("status.active", { mode: cfg.mode }), tone: "info" }).catch(() => {});
+        }, cfg.intervalMs * 2);
       });
 
       // Return cleanup.
       return function stop() {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
         stopCurrentMode();
         unsubConfig();
         unsubActivity();

@@ -18,7 +18,6 @@
       "options": [
         { "value": "wander", "label": "$t:config.mode.wander" },
         { "value": "follow-cursor", "label": "$t:config.mode.followCursor" },
-        { "value": "physics", "label": "$t:config.mode.physics" },
         { "value": "patrol", "label": "$t:config.mode.patrol" }
       ]
     },

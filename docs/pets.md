@@ -41,7 +41,11 @@ Two distinct window roles, two controllers:
 - **Agent pets** (`agent-pet-controller.ts`) — shown on explicit agent request,
   routed by a **lease**. The first lease opens the window; the last lease
   released closes it. This lets several agents each get their own pet without
-  colliding with the default pet. See the lease model in [ipc.md](ipc.md).
+  colliding with the default pet. Agent pets roam with the same physics as
+  the default pet (gravity + bounce, driven by `pet-roaming-controller.ts`).
+  Session lifetime is tracked via PID liveness: when a client process
+  terminates, the lease is released within ~5 s and the pet window closes.
+  See the lease model in [ipc.md](ipc.md).
 
 Both are created by `pet-window.ts` as transparent, frameless, always-on-top
 windows, driven through `pet-preload.cjs` for drag and click-through behavior.
@@ -70,12 +74,57 @@ plugins speak in *reactions*, and the host owns *how* those look and sound.
 
 ## Motion
 
-Plugin-driven pet movement uses a small physics/interpolation engine
-(`pet-motion-engine.ts`) rather than embedding movement math in window code. The
-SDK routes (`plugin-sdk-routes.ts` → `plugin-pet-registry.ts`) feed target
-vectors to the engine, which ticks interpolated positions for spawned and
-default pets (target-following behavior). See [plugins.md](plugins.md) and
-[sdk.md](sdk.md) for the plugin side.
+The motion engine (`pet-motion-engine.ts`) drives all pet windows through a
+single shared ticker (≈60 fps). Each registered pet gets its own `MotionState`
+entry in a `Map<petHandleId, MotionState>`, but all pets share one `setInterval`
+so positions advance in lock-step with one `getAllDisplaysCached()` read per
+tick.
+
+`pet-roaming-controller.ts` is the host-side orchestrator: it registers every
+live pet (default and agent) with the engine and applies the active roaming
+configuration (gravity + bounce). When a pet is despawned the controller
+unregisters it before the window is destroyed, so the shared ticker never
+touches a closed window.
+
+Plugin-driven movement (`plugin-sdk-routes.ts` → `plugin-pet-registry.ts`) feeds
+target vectors and physics overrides through the engine's public API
+(`motionMoveTo`, `motionSetPhysics`, `motionSetFollowCursor`). The engine is the
+**sole continuous position writer**; all per-pet step loops were eliminated to
+prevent jitter from competing writers. Sub-pixel fractional accumulators
+(`fracX` / `fracY` in `MotionState`) ensure smooth movement at any tick rate.
+See [plugins.md](plugins.md) and [sdk.md](sdk.md) for the plugin side.
+
+### Display containment and cross-display roaming
+
+`display.ts` owns all screen-geometry decisions. Per-tick clamping in
+`clampPosition()` follows a strict priority order:
+
+1. **Confinement** — if a pet has a terminal-bounds assignment (see below), it
+   is always snapped into those bounds regardless of any other flag.
+2. **Cross-display roaming** (default **off**) — if the
+   `petCrossDisplayEnabled` preference is on, `clampToNearestDisplayIfOffscreen`
+   is used: the pet is left alone while its bottom-center anchor overlaps any
+   display's work area, and is only snapped to the nearest display edge when
+   fully off-screen. This lets pets cross seams between adjacent displays
+   freely.
+3. **Legacy single-display mode** — if `petCrossDisplayEnabled` is off, the
+   original `clampToVisibleWorkArea` behavior is used (pet is clamped to the
+   display nearest its geometric center).
+
+**Wide gaps between non-adjacent displays:** a pet moving toward an empty
+region will stick at the edge of its current display and cannot teleport across
+a gap wider than the pet. This is expected behavior and is by design.
+
+**Topology changes** (monitor plugged/unplugged, resolution changed): the
+display-event handlers in `default-pet-controller.ts` call
+`reclampAllLivePetWindows()`, which re-runs the permissive clamp for the
+default pet, all agent pets, and all plugin-spawned pets. Pets on a removed
+display are snapped to the nearest remaining display; pets on surviving displays
+are left untouched.
+
+The `petCrossDisplayEnabled` toggle is in Control Center → Settings and is a
+global flag (not per-pet). Confinement remains strictly per-pet and always takes
+priority regardless of the cross-display flag.
 
 ## Installation
 
@@ -142,4 +191,6 @@ images silently fall back to the default pet. This is the single most common
 | Standalone install | `packages/install-pet/` |
 | Local pet authoring | `codex-pets.ts` |
 | Movement | `pet-motion-engine.ts` |
+| Display containment / cross-screen | `display.ts`, `confinement-manager.ts` |
+| Topology-change reclamp | `default-pet-controller.ts` → `reclampAllLivePetWindows` |
 </content>

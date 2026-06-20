@@ -31,6 +31,8 @@ export interface OpenPetsMcpStatus {
 export interface LeaseContext {
   lease?: OpenPetsLeaseResult;
   staleLeaseId?: string;
+  /** Full lease object saved when the lease became stale; used for heartbeat-first recovery. */
+  staleLease?: OpenPetsLeaseResult;
   degradedReason?: string;
 }
 
@@ -75,10 +77,29 @@ async function ensureLease(context: ToolContext): Promise<boolean> {
   if (context.lease?.lease) return true;
   try {
     const client = context.client ?? createOpenPetsClient();
+    // Fix 2: attempt heartbeat-first recovery when a stale lease is saved
+    const staleLeaseId = context.lease?.staleLeaseId;
+    const staleLease = context.lease?.staleLease;
+    if (staleLeaseId && staleLease) {
+      try {
+        const hb = await client.heartbeatLease(staleLeaseId);
+        // Heartbeat succeeded — desktop still holds the original lease
+        if (context.lease) {
+          context.lease.lease = { ...staleLease, leaseId: hb.leaseId, expiresAt: hb.expiresAt, leaseActive: true };
+          context.lease.staleLeaseId = undefined;
+          context.lease.staleLease = undefined;
+          context.lease.degradedReason = undefined;
+        }
+        return true;
+      } catch {
+        // Heartbeat failed — fall through to acquireLease
+      }
+    }
     const newLease = await client.acquireLease({ requestedPetId: context.configuredPetId });
     if (context.lease) {
       context.lease.lease = newLease;
       context.lease.staleLeaseId = undefined;
+      context.lease.staleLease = undefined;
       context.lease.degradedReason = undefined;
     }
     return !!newLease;

@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
@@ -53,14 +53,24 @@ export interface OpenPetsStateV1 {
      * When set (non-empty), no-pet sessions claim the next available slot before falling back to random.
      * Undefined / empty = legacy shared-default behaviour unchanged. */
     readonly petPoolOrder?: readonly string[];
-    /** Master toggle for the ordered pet-pool assignment feature. When false (default),
+    /** Master toggle for the ordered pet-pool assignment feature. When false,
      * the pool is ignored entirely and no-pet sessions use the legacy shared default pet,
-     * even if petPoolOrder is configured. Platform-independent (works on macOS/Windows/Linux). */
+     * even if petPoolOrder is configured. Defaults to true. Platform-independent
+     * (works on macOS/Windows/Linux). */
     readonly petPoolEnabled: boolean;
     /** Global toggle for window-confinement. When true (default), session-bound pets are
      * confined to their terminal window. When false, all pets free-roam regardless of
      * whether a terminal window is tracked. Platform-independent. */
     readonly petConfinementEnabled: boolean;
+    /** Global toggle for cross-display roaming. When true, pets may move
+     * freely across all displays. When false, pets are confined to a single display.
+     * Defaults to false.
+     * Platform-independent kill-switch for the cross-display feature. */
+    readonly petCrossDisplayEnabled: boolean;
+    /** Host-level gravity toggle. When true, pets fall with physics on every registered
+     * pet (default + agent). When false (default), no gravity is applied — the
+     * Walkabout plugin's per-session physics path governs gravity instead. */
+    readonly petGravityEnabled: boolean;
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -96,8 +106,8 @@ export interface DesktopAnalyticsConsentState {
 }
 
 export type OpenPetsActivityRecord =
-  | { readonly kind: "say"; readonly reaction?: OpenPetsReaction; readonly petId?: string }
-  | { readonly kind: "react"; readonly reaction: OpenPetsReaction; readonly petId?: string };
+  | { readonly kind: "say"; readonly reaction?: OpenPetsReaction; readonly petId?: string; readonly surface?: "default" | "agent" }
+  | { readonly kind: "react"; readonly reaction: OpenPetsReaction; readonly petId?: string; readonly surface?: "default" | "agent" };
 
 export { defaultPetScale, normalizePetScale, petScaleOptions, type PetScaleValue };
 
@@ -318,8 +328,16 @@ export function getPerMonitorPetPosition(displayKey: string): Point | undefined 
   return getInitializedState().defaultPet.perMonitorPositions?.[displayKey];
 }
 
+export function getPetGravityEnabled(): boolean {
+  return getInitializedState().preferences.petGravityEnabled;
+}
+
+export function setPetGravityEnabled(value: boolean): OpenPetsStateV1 {
+  return updatePreferences({ petGravityEnabled: value });
+}
+
 export function recordOpenPetsActivity(activity: OpenPetsActivityRecord, now: number = Date.now()): OpenPetsStateV1 {
-  publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction });
+  publishPluginAgentActivity({ kind: activity.kind, reaction: activity.reaction, petId: activity.petId, surface: activity.surface });
   const state = getInitializedState();
   const analytics = state.analytics;
   const reaction = activity.kind === "react" ? activity.reaction : activity.reaction;
@@ -563,6 +581,8 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
       ? value.petPoolEnabled
       : defaultState.preferences.petPoolEnabled,
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
+    petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
+    petGravityEnabled: normalizePetGravityEnabled(value.petGravityEnabled, defaultState.preferences.petGravityEnabled),
   };
 }
 
@@ -637,8 +657,10 @@ function createDefaultState(): OpenPetsStateV1 {
       nodeCommandPath: undefined,
       opencodeCommandPath: undefined,
       petPoolOrder: undefined,
-      petPoolEnabled: false,
+      petPoolEnabled: true,
       petConfinementEnabled: true,
+      petCrossDisplayEnabled: false,
+      petGravityEnabled: false,
     },
     pets: {
       installed: [builtInPet],

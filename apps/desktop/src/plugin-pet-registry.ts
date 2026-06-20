@@ -2,12 +2,12 @@ import { BrowserWindow } from "electron";
 
 import { getAppStateSnapshot, type PetScaleValue } from "./app-state.js";
 import { applyExternalPetReaction, applyExternalPetStatusReaction, getDefaultPetPaused, getDefaultPetWindowForPlugins, defaultPetBubbleArbiter } from "./default-pet-controller.js";
-import { clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, type Point } from "./display.js";
+import { clampToNearestDisplayIfOffscreen, clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, isCrossDisplayRoamingEnabled, type Point } from "./display.js";
 import { builtInPet } from "./built-in-pet.js";
 import { debug, info } from "./logger.js";
 import type { OpenPetsReaction } from "./local-ipc-protocol.js";
 import { motionMoveTo, motionSetFollowCursor, motionSetPhysics, motionStop, type WindowAccessor } from "./pet-motion-engine.js";
-import { createAgentPetWindow, isPetWindowDragging, loadExplicitPetContent, setPetReactionState, setPetSpriteOverride, setPetWindowScale, type PetPluginBubbles, type PetStatusBadgeReaction } from "./pet-window.js";
+import { createAgentPetWindow, isPetWindowDragging, loadExplicitPetContent, readWindowPosition, setPetReactionState, setPetSpriteOverride, setPetWindowScale, type PetPluginBubbles, type PetStatusBadgeReaction } from "./pet-window.js";
 import { PetBubbleArbiter, type PetBubbleSink } from "./plugin-bubble-arbiter.js";
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { resolveReactionSpriteState } from "./reaction-animation-mapping.js";
@@ -90,7 +90,10 @@ export async function spawnPluginPet(opts: { pluginId: string; petId: string; na
   const handleId = `plugin-pet-${++nextSpawnId}`;
   const base = getDefaultPetInitialPosition(defaultPetWindowSize);
   const offset = (spawnedPets.size + 1) * 60;
-  const position = clampToVisibleWorkArea(opts.position ?? { x: base.x - offset, y: base.y }, defaultPetWindowSize);
+  const rawPos = opts.position ?? { x: base.x - offset, y: base.y };
+  const position = isCrossDisplayRoamingEnabled()
+    ? clampToNearestDisplayIfOffscreen(rawPos, defaultPetWindowSize)
+    : clampToVisibleWorkArea(rawPos, defaultPetWindowSize);
 
   const pet: SpawnedPet = {
     handleId,
@@ -321,6 +324,16 @@ export function getPluginPetArbiter(petHandleId: string): PetBubbleArbiter {
   const pet = spawnedPets.get(petHandleId);
   if (!pet) throw new Error(`Pet is not available: ${petHandleId}`);
   return pet.arbiter;
+}
+
+export function reclampPluginPetWindows(): void {
+  for (const pet of spawnedPets.values()) {
+    const { window } = pet;
+    if (!window || window.isDestroyed()) continue;
+    const [cx, cy] = window.getPosition();
+    const safe = readWindowPosition(window);
+    if (safe.x !== cx || safe.y !== cy) window.setPosition(safe.x, safe.y, false);
+  }
 }
 
 export function closeAllPluginPets(): void {

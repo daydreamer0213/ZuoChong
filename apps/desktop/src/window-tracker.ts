@@ -1,23 +1,38 @@
 /**
- * Window Tracker — macOS on-screen window enumeration and occlusion detection.
+ * Window Tracker — cross-platform on-screen window enumeration and occlusion
+ * detection for pet window confinement.
  *
- * Uses `get-windows` (wraps CGWindowListCopyWindowInfo) to enumerate visible
- * windows, walk PPID chains to locate the terminal emulator hosting an MCP
- * client, and determine whether that terminal is visible and unoccluded.
+ * Supported platforms:
+ *   - macOS  : get-windows wraps CGWindowListCopyWindowInfo; Screen Recording
+ *              permission required. PPID chain via `ps`.
+ *   - Windows: get-windows wraps EnumWindows; no special permission needed.
+ *              Minimized-window filter applied in software (IsIconic not exposed
+ *              by get-windows). PPID chain via one PowerShell call.
+ *   - Linux  : best-effort; get-windows enumerates X11 windows; PPID via
+ *              /proc/<pid>/status.
+ *   - Other  : safe defaults — listWindows → [], findTerminalWindowForPid → null,
+ *              isTerminalOnScreen → true (assume visible).
  *
- * Screen Recording permission is required for `get-windows` to return data;
- * when denied, get-windows throws (exit 1) and listWindows() returns [].
- * Raising/focusing a window requires Accessibility permission (Phase 4).
+ * Screen Recording permission is macOS-specific; on other platforms window
+ * enumeration works without it.
  */
-
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
 import { debug, info, warn } from "./logger.js";
 import { isWindowOccluded as _isWindowOccluded } from "./window-occlusion.js";
 import { findTerminalPidInChain as _findTerminalPidInChain } from "./window-chain.js";
+import {
+  getParentPid,
+  isWin32MinimizedBounds,
+} from "./window-tracker-ppid.js";
+import { createLatchedTick } from "./window-tracker-latch.js";
 
-const execFileAsync = promisify(execFile);
+// Re-export for consumers that already import these through window-tracker.
+export {
+  getParentPid,
+  isWin32MinimizedBounds,
+} from "./window-tracker-ppid.js";
+
+export { createLatchedTick } from "./window-tracker-latch.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +81,13 @@ async function openWindows(): Promise<TrackedWindow[]> {
   const raw = await getWindowsModule.openWindows();
   return raw.flatMap((w): TrackedWindow[] => {
     if (!isGetWindowsEntry(w)) return [];
+    // On Windows, get-windows does not filter IsIconic (minimized) windows.
+    // Minimized windows are parked off-screen at ~(-32000, -32000).
+    // Filter them out here so the confinement logic sees the same invariant
+    // as on macOS (where get-windows already excludes minimized windows).
+    if (process.platform === "win32" && isWin32MinimizedBounds(w.bounds.x, w.bounds.y)) {
+      return [];
+    }
     return [{
       id: w.id,
       ownerPid: w.owner.processId,
@@ -103,49 +125,25 @@ function isGetWindowsEntry(w: unknown): w is {
 }
 
 // ---------------------------------------------------------------------------
-// PPID walking
+// PPID walking — implementation in window-tracker-ppid.ts (pure, no Electron)
 // ---------------------------------------------------------------------------
-
-const ppidCache = new Map<number, number>();
-const ppidCacheExpiry = new Map<number, number>();
-const ppidCacheTtlMs = 10_000;
-
-async function getParentPid(pid: number): Promise<number | null> {
-  const now = Date.now();
-  const expiry = ppidCacheExpiry.get(pid);
-  if (expiry !== undefined && now < expiry) {
-    return ppidCache.get(pid) ?? null;
-  }
-
-  try {
-    const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "ppid="]);
-    const ppid = parseInt(stdout.trim(), 10);
-    if (Number.isFinite(ppid) && ppid > 0) {
-      ppidCache.set(pid, ppid);
-      ppidCacheExpiry.set(pid, now + ppidCacheTtlMs);
-      return ppid;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Walk up the PPID chain from `clientPid` until we find a PID that owns a
  * window in `windows`. Returns { pid, appName } or null.
  * Implementation lives in window-chain.ts (pure, unit-testable).
  *
- * @param getParent  Injectable parent-PID lookup — defaults to the real
- *                   `getParentPid` so production callers are unaffected.
+ * @param getParentFn  Injectable parent-PID lookup — defaults to the real
+ *                     platform-dispatched `getParentPid` so production callers
+ *                     are unaffected.
  */
 export async function findTerminalPidInChain(
   clientPid: number,
   windows: TrackedWindow[],
   maxDepth = 10,
-  getParent: (pid: number) => Promise<number | null> = getParentPid,
+  getParentFn: (pid: number) => Promise<number | null> = getParentPid,
 ): Promise<{ pid: number; appName: string } | null> {
-  return _findTerminalPidInChain(clientPid, windows, maxDepth, getParent);
+  return _findTerminalPidInChain(clientPid, windows, maxDepth, getParentFn);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,15 +152,13 @@ export async function findTerminalPidInChain(
 
 /**
  * Returns true if `target` is substantially covered by a SINGLE foreground
- * window that appears in front of it (lower CGWindowList index = front).
+ * window that appears in front of it (lower z-order index = front).
  *
  * Rules:
  * - Only considers windows in front of `target` in z-order.
  * - Excludes windows owned by `ownProcessId` (e.g. OpenPets' own always-on-top
  *   pet window) so the pet overlay never falsely occludes its own terminal.
  * - A single occluder must cover ≥ 90% of the target area to trigger.
- *   Additive accumulation across separate windows is intentionally NOT used:
- *   two ~60% windows are NOT occluding; only one window ≥ 90% is.
  */
 export function isWindowOccluded(
   target: TrackedWindow,
@@ -173,13 +169,15 @@ export function isWindowOccluded(
 }
 
 // ---------------------------------------------------------------------------
-// Previous window state for minimized detection
+// Platform support check
 // ---------------------------------------------------------------------------
 
-const lastKnownWindows = new Map<number, TrackedWindow>();
-
-function updateKnownWindows(windows: TrackedWindow[]): void {
-  for (const w of windows) lastKnownWindows.set(w.id, w);
+function isPlatformSupported(): boolean {
+  return (
+    process.platform === "darwin" ||
+    process.platform === "win32" ||
+    process.platform === "linux"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -188,18 +186,21 @@ function updateKnownWindows(windows: TrackedWindow[]): void {
 
 /**
  * List all on-screen (non-minimized) windows.
- * Returns an empty array if `get-windows` is unavailable or fails.
+ * Returns an empty array if `get-windows` is unavailable, fails, or the
+ * platform is not supported.
+ *
+ * On macOS, get-windows throws (exit 1) when Screen Recording permission is
+ * denied. On Windows and Linux no special permission is required.
  */
 export async function listWindows(): Promise<TrackedWindow[]> {
-  if (process.platform !== "darwin") return [];
+  if (!isPlatformSupported()) return [];
   try {
     const windows = await openWindows();
-    updateKnownWindows(windows);
     return windows;
   } catch (error) {
-    // get-windows can THROW (exit 1) when Screen Recording permission is denied.
-    // Treat as empty enumeration — the confinement poller will check permission
-    // status and surface a notification via its DI deps.
+    // get-windows can THROW (exit 1) when Screen Recording permission is denied
+    // (macOS). Treat as empty enumeration — the confinement poller will check
+    // permission status and surface a notification via its DI deps.
     info("window-tracker", "listWindows failed — likely Screen Recording permission denied", {
       error: String(error),
       windowCount: 0,
@@ -213,21 +214,20 @@ export async function listWindows(): Promise<TrackedWindow[]> {
  * chain to find the terminal emulator window hosting that client.
  *
  * @returns TerminalWindowInfo describing confinement state, or null if the
- *          terminal cannot be identified (Windows/Linux, or ps unavailable).
+ *          terminal cannot be identified.
  */
 export async function findTerminalWindowForPid(clientPid: number): Promise<TerminalWindowInfo | null> {
-  if (process.platform !== "darwin" || clientPid <= 0) return null;
+  if (!isPlatformSupported() || clientPid <= 0) return null;
 
   try {
     const windows = await listWindows();
     const found = await findTerminalPidInChain(clientPid, windows);
     if (!found) {
-      // Case (A): zero windows → likely a Screen Recording permission gap.
+      // Case (A): zero windows → likely a Screen Recording permission gap (macOS).
       // Case (B): windows present but no terminal ancestor in PPID chain.
       info("window-tracker", "no terminal found in ppid chain", {
         clientPid,
         windowCount: windows.length,
-        // Phase 2 hook: permission-status check can inspect windowCount===0
       });
       return null;
     }
@@ -238,7 +238,8 @@ export async function findTerminalWindowForPid(clientPid: number): Promise<Termi
 
     if (termWindows.length === 0) {
       // PID exists (we found it in PPID chain) but it has no on-screen window →
-      // treat as minimized.
+      // treat as minimized. On Windows this path is reached for truly hidden
+      // windows (not just minimized — those are filtered in openWindows()).
       return { window: null, terminalPid, appName, isMinimized: true, isOccluded: false };
     }
 
@@ -258,9 +259,10 @@ export async function findTerminalWindowForPid(clientPid: number): Promise<Termi
 /**
  * Check whether the window with the given ownerPid is currently on-screen
  * (not minimized). Useful for quick re-checks without a full PPID walk.
+ * Returns true (assume visible) on unsupported platforms.
  */
 export async function isTerminalOnScreen(terminalPid: number): Promise<boolean> {
-  if (process.platform !== "darwin" || terminalPid <= 0) return true; // assume visible on non-mac
+  if (!isPlatformSupported() || terminalPid <= 0) return true;
   const windows = await listWindows();
   return windows.some((w) => w.ownerPid === terminalPid);
 }
@@ -341,7 +343,8 @@ async function findTerminalPidInChainCached(
 
 function startPollerIfNeeded(): void {
   if (pollerTimer) return;
-  pollerTimer = setInterval(() => { void pollAll(); }, pollerIntervalMs);
+  const tick = createLatchedTick(() => pollAll());
+  pollerTimer = setInterval(tick, pollerIntervalMs);
   pollerTimer.unref?.();
 }
 

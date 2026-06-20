@@ -7,8 +7,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { parseMcpArgs } from "./args.js";
+import { wireTransportLifecycle } from "./index.js";
 import { createOpenPetsMcpServer } from "./server.js";
-import { createMcpStatus, sanitizeUnavailableReason, type OpenPetsMcpStatus } from "./tools.js";
+import { createMcpStatus, sanitizeUnavailableReason, type LeaseContext, type OpenPetsMcpStatus } from "./tools.js";
 
 parseMcpArgs(["--pet", "snoopy"]);
 parseMcpArgs(["--pet=snoopy"]);
@@ -30,6 +31,9 @@ if (sanitizeUnavailableReason("/tmp/openpets-501/openpets-1.sock ENOENT")?.inclu
 
 await checkMcpServerContract();
 await checkStdioServerContract();
+await checkT6TransportOnclose();
+await checkT7EnsureLeaseHeartbeatFirst();
+await checkT8ExitOnce();
 const builtEntrypoint = readFileSync(join("dist", "index.js"), "utf8");
 if (!builtEntrypoint.startsWith("#!/usr/bin/env node")) {
   throw new Error("Built MCP entrypoint is missing a Node shebang.");
@@ -120,6 +124,178 @@ async function checkStdioServerContract(): Promise<void> {
   }
 }
 
+/**
+ * T6 — Fix 3: transport.onclose must (a) release the active lease,
+ * (b) invoke the injected exit seam exactly once, and
+ * (c) NOT call acquireLease afterward.
+ */
+async function checkT6TransportOnclose(): Promise<void> {
+  const calls: string[] = [];
+  const activeLeaseId = "t6-lease-99";
+
+  const fakeClient = {
+    status: async () => ({ ok: true, appRunning: true }),
+    listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+    installPet: async () => { throw new Error("unused"); },
+    acquireLease: async () => {
+      calls.push("acquireLease");
+      return { leaseId: "new-lease", requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true };
+    },
+    heartbeatLease: async (leaseId: string) => { calls.push(`heartbeat:${leaseId}`); return { leaseId, expiresAt: Date.now() + 15_000 }; },
+    releaseLease: async (leaseId: string) => { calls.push(`releaseLease:${leaseId}`); return { released: true }; },
+    react: async () => ({ ok: true }),
+    say: async () => ({ ok: true }),
+    hello: async () => ({ ok: true }),
+  };
+
+  const lease: LeaseContext = {
+    lease: { leaseId: activeLeaseId, requestedPetId: undefined, targetKind: "default", actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true },
+  };
+
+  // Minimal stubs — we only need onclose to be wirable
+  const fakeTransport: { onclose?: (() => void) | undefined } = {};
+  const fakeServer = { close: async () => {} };
+
+  let exitCalls = 0;
+  const fakeExit = () => { exitCalls++; };
+
+  wireTransportLifecycle({
+    transport: fakeTransport,
+    server: fakeServer,
+    client: fakeClient,
+    lease,
+    leaseReady: Promise.resolve(),
+    exit: fakeExit,
+  });
+
+  if (typeof fakeTransport.onclose !== "function") {
+    throw new Error("T6: wireTransportLifecycle did not set transport.onclose.");
+  }
+
+  // Trigger the onclose callback (simulates stdin EOF)
+  fakeTransport.onclose();
+
+  // Allow the async close() to settle
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  if (!calls.includes(`releaseLease:${activeLeaseId}`)) {
+    throw new Error(`T6: releaseLease(${activeLeaseId}) was not called. Calls: ${calls.join(",")}`);
+  }
+  if (exitCalls !== 1) {
+    throw new Error(`T6: exit seam was called ${exitCalls} times (expected 1).`);
+  }
+  if (calls.includes("acquireLease")) {
+    throw new Error(`T6: acquireLease was called after transport.onclose — orphan re-acquire detected. Calls: ${calls.join(",")}`);
+  }
+}
+
+/**
+ * T7 — Fix 2: when staleLeaseId + staleLease are present and heartbeatLease SUCCEEDS,
+ * ensureLease must restore context.lease.lease from the stale lease and NOT call acquireLease.
+ * Converse: when heartbeatLease REJECTS, acquireLease MUST be called.
+ */
+async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
+  const staleLeaseId = "t7-stale-lease";
+  const staleLease = {
+    leaseId: staleLeaseId,
+    requestedPetId: "snoopy",
+    targetKind: "explicit" as const,
+    actualTargetPetId: "snoopy",
+    actualTargetPetName: "Snoopy",
+    usingDefaultPet: false,
+    expiresAt: Date.now() - 1_000, // expired on client side
+    leaseActive: true,
+  };
+
+  // --- T7a: heartbeat succeeds → restore lease, no acquireLease ---
+  {
+    const calls: string[] = [];
+    const [, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    const fakeClient = {
+      status: async () => ({ ok: true, appRunning: true }),
+      listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+      installPet: async () => { throw new Error("unused"); },
+      acquireLease: async () => { calls.push("acquireLease"); return { leaseId: "new-lease", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }; },
+      heartbeatLease: async (leaseId: string) => { calls.push(`heartbeat:${leaseId}`); return { leaseId, expiresAt: Date.now() + 15_000 }; },
+      releaseLease: async () => { calls.push("releaseLease"); return { released: true }; },
+      react: async (reaction: string, options?: { readonly leaseId?: string }) => ({ ok: true, reaction, leaseId: options?.leaseId }),
+      say: async (message: string, options?: { readonly leaseId?: string }) => ({ ok: true, message, leaseId: options?.leaseId }),
+      hello: async () => ({ ok: true }),
+    };
+
+    const lease: LeaseContext = { lease: undefined, staleLeaseId, staleLease };
+    const server = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
+    const mcpClient = new Client({ name: "t7a", version: "0.0.0" });
+    const [clientTransport] = InMemoryTransport.createLinkedPair();
+    // We need the leaseReady-resolved server; connect it just to allow tool calls
+    // Instead call handleReact directly via the server tool interface by invoking
+    // the MCP tool through a fresh in-memory pair.
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const server2 = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
+    const mc = new Client({ name: "t7a-client", version: "0.0.0" });
+    await Promise.all([server2.connect(st), mc.connect(ct)]);
+    try {
+      // Calling openpets_react triggers ensureLease (lease is undefined, staleLeaseId is set)
+      const result = await mc.callTool({ name: "openpets_react", arguments: { reaction: "waving" } }, CallToolResultSchema);
+      if (result.isError) throw new Error(`T7a: openpets_react returned error: ${JSON.stringify(result.content)}`);
+
+      if (calls.includes("acquireLease")) {
+        throw new Error(`T7a: acquireLease was called despite heartbeat succeeding. Calls: ${calls.join(",")}`);
+      }
+      if (!calls.some((c) => c.startsWith("heartbeat:"))) {
+        throw new Error(`T7a: heartbeatLease was not attempted. Calls: ${calls.join(",")}`);
+      }
+      if (!lease.lease || lease.lease.leaseId !== staleLeaseId) {
+        throw new Error(`T7a: lease was not restored from staleLeaseId. lease.leaseId=${lease.lease?.leaseId}`);
+      }
+      if (lease.staleLeaseId !== undefined || lease.staleLease !== undefined) {
+        throw new Error(`T7a: staleLeaseId / staleLease were not cleared after recovery.`);
+      }
+    } finally {
+      await mc.close();
+      await server2.close();
+    }
+    void clientTransport; void serverTransport; void server; void mcpClient; // unused stubs
+  }
+
+  // --- T7b: heartbeat fails → acquireLease IS called ---
+  {
+    const calls: string[] = [];
+    const fakeClient = {
+      status: async () => ({ ok: true, appRunning: true }),
+      listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+      installPet: async () => { throw new Error("unused"); },
+      acquireLease: async () => { calls.push("acquireLease"); return { leaseId: "new-lease-2", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }; },
+      heartbeatLease: async (leaseId: string) => { calls.push(`heartbeat:${leaseId}`); throw new Error("lease not found"); },
+      releaseLease: async () => { calls.push("releaseLease"); return { released: true }; },
+      react: async (reaction: string, options?: { readonly leaseId?: string }) => ({ ok: true, reaction, leaseId: options?.leaseId }),
+      say: async (message: string, options?: { readonly leaseId?: string }) => ({ ok: true, message, leaseId: options?.leaseId }),
+      hello: async () => ({ ok: true }),
+    };
+
+    const lease: LeaseContext = { lease: undefined, staleLeaseId, staleLease };
+    const [ct2, st2] = InMemoryTransport.createLinkedPair();
+    const server3 = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
+    const mc2 = new Client({ name: "t7b-client", version: "0.0.0" });
+    await Promise.all([server3.connect(st2), mc2.connect(ct2)]);
+    try {
+      const result = await mc2.callTool({ name: "openpets_react", arguments: { reaction: "waving" } }, CallToolResultSchema);
+      if (result.isError) throw new Error(`T7b: openpets_react returned error: ${JSON.stringify(result.content)}`);
+
+      if (!calls.some((c) => c.startsWith("heartbeat:"))) {
+        throw new Error(`T7b: heartbeatLease was not attempted. Calls: ${calls.join(",")}`);
+      }
+      if (!calls.includes("acquireLease")) {
+        throw new Error(`T7b: acquireLease was NOT called after heartbeat failure. Calls: ${calls.join(",")}`);
+      }
+    } finally {
+      await mc2.close();
+      await server3.close();
+    }
+  }
+}
+
 function assertRejects(callback: () => unknown): void {
   try {
     callback();
@@ -127,4 +303,70 @@ function assertRejects(callback: () => unknown): void {
     return;
   }
   throw new Error("Expected validation to reject.");
+}
+
+/**
+ * T8 — Fix L2: exit seam must fire EXACTLY ONCE even when transport.onclose is triggered
+ * multiple times (re-entrant from server.close, or repeated calls from close()). Release
+ * must precede the single exit call.
+ */
+async function checkT8ExitOnce(): Promise<void> {
+  const activeLeaseId = "t8-lease-77";
+  const releaseOrder: string[] = [];
+
+  const fakeClient = {
+    status: async () => ({ ok: true, appRunning: true }),
+    listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+    installPet: async () => { throw new Error("unused"); },
+    acquireLease: async () => ({ leaseId: "new", requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true }),
+    heartbeatLease: async (leaseId: string) => ({ leaseId, expiresAt: Date.now() + 15_000 }),
+    releaseLease: async (leaseId: string) => { releaseOrder.push("release:" + leaseId); return { released: true }; },
+    react: async () => ({ ok: true }),
+    say: async () => ({ ok: true }),
+    hello: async () => ({ ok: true }),
+  };
+
+  const lease: LeaseContext = {
+    lease: { leaseId: activeLeaseId, requestedPetId: undefined, targetKind: "default", actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true },
+  };
+
+  const fakeTransport: { onclose?: (() => void) | undefined } = {};
+  // server.close re-fires onclose to simulate MCP SDK re-entrancy
+  const fakeServer = { close: async () => { fakeTransport.onclose?.(); } };
+
+  let exitCalls = 0;
+  const fakeExit = (): void => { exitCalls++; releaseOrder.push("exit"); };
+
+  wireTransportLifecycle({
+    transport: fakeTransport,
+    server: fakeServer,
+    client: fakeClient,
+    lease,
+    leaseReady: Promise.resolve(),
+    exit: fakeExit,
+  });
+
+  // Fire onclose three times (natural + re-entrant from server.close + extra call)
+  fakeTransport.onclose?.();
+  fakeTransport.onclose?.();
+  fakeTransport.onclose?.();
+
+  // Allow async teardown to settle
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  if (exitCalls !== 1) {
+    throw new Error("T8: exit seam fired " + exitCalls + " times — expected exactly 1. Order: " + releaseOrder.join(","));
+  }
+
+  const releaseIdx = releaseOrder.indexOf("release:" + activeLeaseId);
+  const exitIdx = releaseOrder.indexOf("exit");
+  if (releaseIdx === -1) {
+    throw new Error("T8: releaseLease was never called. Order: " + releaseOrder.join(","));
+  }
+  if (exitIdx === -1) {
+    throw new Error("T8: exit was never recorded. Order: " + releaseOrder.join(","));
+  }
+  if (releaseIdx >= exitIdx) {
+    throw new Error("T8: release did not precede exit. Order: " + releaseOrder.join(","));
+  }
 }
