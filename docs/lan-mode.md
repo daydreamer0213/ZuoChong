@@ -75,6 +75,7 @@ Test-NetConnection 192.168.1.37 -Port 3787
 - Set `OPENPETS_LAN_TOPOLOGY` on the server to define physical left/right/up/down neighbors. Use reciprocal links for predictable two-way office layouts.
 - The server persists the last owning host in app user data when ownership changes and lets that host reclaim ownership when it reconnects after a coordinator restart.
 - Clients poll with capped retry backoff during outages and hide the local pet only after repeated missed polls.
+- LAN request and response bodies are capped to small JSON payloads; the coordinator does not enable browser CORS access.
 - This first slice uses a simple HTTP polling coordinator. Token auth is now on by default for server mode; a future Control Center pairing flow should replace manual token sharing.
 
 ## Packaging validation

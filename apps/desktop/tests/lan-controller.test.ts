@@ -22,6 +22,10 @@ try {
   const unauthorizedStatus = await requestJson("GET", "/status");
   assert.equal(unauthorizedStatus.status, 401, "status should require the LAN token when configured");
 
+  const authorizedStatus = await requestJson<LanState>("GET", "/status", undefined, token);
+  assert.equal(authorizedStatus.status, 200);
+  assert.equal(authorizedStatus.headers["access-control-allow-origin"], undefined, "LAN responses should not expose coordinator state with wildcard CORS");
+
   const invalidTokenRegister = await requestJson("POST", "/register", { host: "alpha", position: { x: 10, y: 20 } }, "wrong-token");
   assert.equal(invalidTokenRegister.status, 401, "register should reject an invalid LAN token");
 
@@ -79,7 +83,7 @@ function requestRaw(method: string, path: string, payload: string, requestToken?
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
-        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : undefined });
+        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : undefined, headers: res.headers });
       });
     });
     req.on("error", reject);
@@ -92,6 +96,7 @@ console.log("LAN controller HTTP validation passed.");
 type JsonResponse<T = unknown> = {
   readonly status: number;
   readonly body: T;
+  readonly headers: Record<string, string | string[] | undefined>;
 };
 
 function requestJson<T = unknown>(method: string, path: string, body?: unknown, requestToken?: string): Promise<JsonResponse<T>> {
@@ -109,7 +114,7 @@ function requestJson<T = unknown>(method: string, path: string, body?: unknown, 
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => {
         const text = Buffer.concat(chunks).toString("utf8");
-        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) as T : undefined as T });
+        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) as T : undefined as T, headers: res.headers });
       });
     });
     req.on("error", reject);

@@ -115,7 +115,6 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "content-length": payload.length,
-    "access-control-allow-origin": "*",
   });
   res.end(payload);
 }

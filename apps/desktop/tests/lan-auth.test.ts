@@ -28,6 +28,11 @@ const reusedAuth = resolveLanAuthConfig(serverDir, {}, { serverMode: true });
 assert.equal(reusedAuth.source, "stored", "existing persisted token should be reused");
 assert.equal(reusedAuth.token, generatedAuth.token);
 
+const statusOnlyDir = tempDir();
+const statusOnlyAuth = resolveLanAuthConfig(statusOnlyDir, {}, { serverMode: true, generateIfMissing: false });
+assert.equal(statusOnlyAuth.token, null, "read-only status auth checks should not generate a new token");
+assert.equal(statusOnlyAuth.source, "none");
+
 const clientDir = tempDir();
 const clientAuth = resolveLanAuthConfig(clientDir, {}, { serverMode: false });
 assert.equal(clientAuth.token, null, "client-only mode should not generate a mismatched token");
@@ -49,6 +54,7 @@ assert.equal(normalizeLanToken("short"), null, "short tokens should be rejected"
 assert.equal(normalizeLanToken("  long-enough-token  "), "long-enough-token", "tokens should be trimmed");
 
 rmSync(serverDir, { recursive: true, force: true });
+rmSync(statusOnlyDir, { recursive: true, force: true });
 rmSync(clientDir, { recursive: true, force: true });
 rmSync(staleClientDir, { recursive: true, force: true });
 

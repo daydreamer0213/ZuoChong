@@ -25,7 +25,7 @@ export function getPersistedLanAuthPath(userDataPath: string): string {
   return join(userDataPath, "lan-auth.json");
 }
 
-export function resolveLanAuthConfig(userDataPath: string, env: NodeJS.ProcessEnv, options: { readonly serverMode: boolean }): LanAuthConfig {
+export function resolveLanAuthConfig(userDataPath: string, env: NodeJS.ProcessEnv, options: { readonly serverMode: boolean; readonly generateIfMissing?: boolean }): LanAuthConfig {
   const envToken = normalizeLanToken(env.OPENPETS_LAN_TOKEN);
   if (envToken) return toConfig(envToken, "env", false);
 
@@ -36,6 +36,8 @@ export function resolveLanAuthConfig(userDataPath: string, env: NodeJS.ProcessEn
 
   const persistedToken = readPersistedLanAuth(userDataPath)?.token ?? null;
   if (persistedToken) return toConfig(persistedToken, "stored", false);
+
+  if (options.generateIfMissing === false) return { token: null, source: "none", insecure: false, tokenHint: null };
 
   const generatedToken = generateLanToken();
   writePersistedLanAuth(userDataPath, generatedToken);

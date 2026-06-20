@@ -77,6 +77,8 @@ const updateCheckerSource = readFileSync(join(appDir, "src", "update-checker.ts"
 const traySource = readFileSync(join(appDir, "src", "tray.ts"), "utf8");
 const enCatalogSource = readFileSync(join(appDir, "src", "i18n", "locales", "en.ts"), "utf8");
 const windowsSource = readFileSync(join(appDir, "src", "windows.ts"), "utf8");
+const lanControllerSource = readFileSync(join(appDir, "src", "lan-controller.ts"), "utf8");
+const lanHttpControllerSource = readFileSync(join(appDir, "src", "lan-http-controller.ts"), "utf8");
 const agentSetupSource = readFileSync(join(appDir, "src", "agent-setup.ts"), "utf8");
 const loggerSource = readFileSync(join(appDir, "src", "logger.ts"), "utf8");
 const mainSource = readFileSync(join(appDir, "src", "main.ts"), "utf8");
@@ -106,6 +108,10 @@ assert.match(localIpcSourceForLogging, /request received/, "desktop IPC must log
 assert.match(localIpcPathsSource, /OPENPETS_IPC_BIND[\s\S]*?OPENPETS_IPC_ENDPOINT[\s\S]*?validateBindHost[\s\S]*?validateAdvertisedHost/, "WSL NAT IPC must separate bind and advertised endpoints with validation.");
 assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT only controls the advertised discovery endpoint[\s\S]*?OPENPETS_IPC_BIND to opt into TCP IPC listening/, "OPENPETS_IPC_ENDPOINT-only mode must not start TCP listening; OPENPETS_IPC_BIND is the explicit TCP opt-in.");
 assert.match(localIpcPathsSource, /OPENPETS_IPC_ENDPOINT must use the same port as OPENPETS_IPC_BIND unless OPENPETS_IPC_BIND uses port 0/, "WSL NAT advertised endpoint must not silently override mismatched ports.");
+assert.match(lanControllerSource, /maxLanResponseBodyBytes\s*=\s*16 \* 1024/, "LAN client responses must be capped before JSON parsing.");
+assert.match(lanControllerSource, /size > maxLanResponseBodyBytes[\s\S]*?req\.destroy\(new Error\("response_too_large"\)\)/, "LAN client must stop reading oversized coordinator responses.");
+assert.match(lanControllerSource, /generateIfMissing: false/, "LAN status snapshots must not generate or rotate auth tokens.");
+assert.doesNotMatch(lanHttpControllerSource, /access-control-allow-origin/i, "LAN coordinator must not expose status or mutation responses through wildcard CORS.");
 assert.match(leaseManagerSource, /acquired/, "lease manager must log lease acquisition details.");
 assert.match(defaultPetControllerSource, /show requested/, "default pet controller must log show lifecycle events.");
 assert.match(agentPetControllerSourceForLogging, /show requested/, "agent pet controller must log show lifecycle events.");

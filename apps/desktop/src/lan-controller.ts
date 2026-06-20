@@ -37,6 +37,7 @@ const defaultPort = 3787;
 const staleClientMs = 15_000;
 const pollMs = defaultLanRetryOptions.baseDelayMs;
 const requestTimeoutMs = 8_000;
+const maxLanResponseBodyBytes = 16 * 1024;
 const edgeThresholdPx = 18;
 
 let coordinator = new LanCoordinator({ staleClientMs });
@@ -196,7 +197,16 @@ function postJson<T>(target: string, body: Record<string, unknown>, token: strin
       timeout: requestTimeoutMs,
     }, (res) => {
       const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      let size = 0;
+      res.on("data", (chunk) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += buffer.length;
+        if (size > maxLanResponseBodyBytes) {
+          req.destroy(new Error("response_too_large"));
+          return;
+        }
+        chunks.push(buffer);
+      });
       res.on("end", () => {
         if ((res.statusCode ?? 500) >= 400) {
           reject(new Error(`HTTP ${res.statusCode}`));
@@ -257,7 +267,7 @@ export function getLanStatusSnapshot(): LanStatusSnapshot {
   const localHost = normalizeLanHost(process.env.OPENPETS_LAN_HOSTNAME) || hostname();
   const port = normalizePort(process.env.OPENPETS_LAN_PORT) ?? defaultPort;
   const serverUrl = normalizeServerUrl(process.env.OPENPETS_LAN_SERVER, port);
-  const auth = resolveLanAuthConfig(app.getPath("userData"), process.env, { serverMode: mode === "server" });
+  const auth = resolveLanAuthConfig(app.getPath("userData"), process.env, { serverMode: mode === "server", generateIfMissing: false });
   const token = auth.token;
   const topology = parseLanTopology(process.env.OPENPETS_LAN_TOPOLOGY);
   const topologyIssues = validateLanTopology(topology);
