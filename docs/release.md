@@ -21,7 +21,8 @@ Release goals:
 
 1. Ship desktop plugin platform v3: SDK bridge, manifest v3 support, capability/permission enforcement, quotas, storage/state, events, bus, routes, UI panels, audio, notifications, diagnostics, and conformance checks.
 2. Publish `@open-pets/plugin-sdk` so plugin authors can depend on the SDK v3 types and `./testing` harness.
-3. Publish the official plugin catalog with the current first-party plugin lineup:
+3. Publish the plugin catalog with the current first-party official lineup plus
+   reviewed community plugins:
    - Day Routine (`openpets.day-routine`)
    - Focus Buddy (`openpets.focus-buddy`)
    - Fortune Cookie (`openpets.fortune-cookie`)
@@ -31,6 +32,7 @@ Release goals:
    - Reminders (`openpets.reminders`)
    - Virtual Pet (`openpets.virtual-pet`)
    - Water Reminder (`openpets.water-reminder`)
+   - Community: Walkabout (`openpets.walkabout`)
 4. Ship app/plugin translations and locale validation.
 5. Remove or keep hidden the old plugin lineup from public discovery unless it has been migrated to manifest v3 and intentionally retained.
 6. Keep older catalog endpoints available only as compatibility boundaries for old app versions; do not optimize current runtime behavior for legacy catalog/plugin paths.
@@ -49,10 +51,10 @@ Recommended versioning for this release:
 Desktop release includes:
 
 - SDK v3 runtime bridge and `@open-pets/plugin-sdk` conformance alignment.
-- Manifest v3/catalog support for translated official plugins.
+- Manifest v3/catalog support for translated official and community plugins.
 - Expanded plugin host capabilities: permissions, storage/state, schedules, commands, events, bus, routes, UI panels, audio, notifications, quotas, diagnostics, and security validation.
 - Plugin SDK preload and panel preload packaging contracts.
-- Official plugin install/update/uninstall support.
+- Official/community plugin install/update/uninstall support.
 - Plugins hub/configuration UI with translated plugin metadata/config fields.
 - Local dev plugin workflow cleanup and plugin diagnostics.
 
@@ -70,13 +72,14 @@ Manual desktop QA:
 1. Run normal desktop dev startup or a packaged app (`pnpm dev:desktop` or the output from `pnpm --filter @open-pets/desktop package:dir`) so bundled seeding runs.
 2. Open tray → Plugins.
 3. Confirm the current official manifest v3 plugins appear in dev mode: Day Routine, Focus Buddy, Fortune Cookie, Launch Buddy, Magic 8 Ball, Mood Check-in, Reminders, Virtual Pet, and Water Reminder.
-4. Confirm old sample/legacy plugins do not appear unless they were intentionally migrated and listed in the release plan.
-5. Confirm plugin names, descriptions, config labels, command labels, and pet messages resolve through translations rather than raw `$t:` keys.
-6. Exercise the SDK v3 surfaces used by official plugins: schedule, storage/state, commands, status, audio, notifications, pet reactions/interactions, and any panel UI.
-7. Configure Reminders, Water Reminder, Focus Buddy, Launch Buddy, Day Routine, and other config-heavy plugins with form controls, not JSON.
-8. Run plugin commands from the Plugins UI and pet right-click menu when available.
-9. Restart desktop and confirm enabled plugins reload without broken state or duplicate timers/listeners.
-10. Inspect logs for plugin SDK, translation, permission, quota, and manifest validation errors.
+4. Confirm community plugins appear separately/labeled as community when present; currently Walkabout should be a community catalog plugin, not official or bundled.
+5. Confirm old sample/legacy plugins do not appear unless they were intentionally migrated and listed in the release plan.
+6. Confirm plugin names, descriptions, config labels, command labels, and pet messages resolve through translations rather than raw `$t:` keys.
+7. Exercise the SDK v3 surfaces used by official/community plugins: schedule, storage/state, commands, status, audio, notifications, pet reactions/interactions, movement, and any panel UI.
+8. Configure Reminders, Water Reminder, Focus Buddy, Launch Buddy, Day Routine, Walkabout, and other config-heavy plugins with form controls, not JSON.
+9. Run plugin commands from the Plugins UI and pet right-click menu when available.
+10. Restart desktop and confirm enabled plugins reload without broken state or duplicate timers/listeners.
+11. Inspect logs for plugin SDK, translation, permission, quota, and manifest validation errors.
 
 For explicit local plugin development, run `pnpm dev:desktop:plugins` separately and confirm official plugins are loaded as local dev plugins and start disabled; this mode intentionally skips bundled seeding.
 
@@ -84,8 +87,8 @@ For explicit local plugin development, run `pnpm dev:desktop:plugins` separately
 
 Web release includes:
 
-- `plugins/official/**` source plugins.
-- `web/public/plugins/catalog.v2.json`, regenerated from the current manifest v3 official plugin sources. The desktop runtime currently reads the v2 catalog endpoint even when the contained plugins use manifest v3 / SDK v3.
+- `plugins/official/**` and `plugins/community/**` source plugins.
+- `web/public/plugins/catalog.v2.json`, regenerated from the current manifest v3 official and community plugin sources. Catalog entries include `publisherType: "official" | "community"`; desktop treats missing `publisherType` as official for older catalogs. The desktop runtime currently reads the v2 catalog endpoint even when the contained plugins use manifest v3 / SDK v3.
 - `web/public/plugins/catalog.v1.json` retained as an empty compatibility catalog for old desktop versions.
 - Removal or hiding of legacy sample plugin manifests from current public discovery.
 - Updated `web/docs/plugin-publishing.md`.
@@ -109,7 +112,7 @@ Publishing sequence:
    pnpm plugins:check
    pnpm plugins:package
    ```
-2. Confirm `pnpm plugins:package` regenerated `web/public/plugins/catalog.v2.json` from the current official manifest v3 plugin lineup. Do not release if the checked-in v2 catalog still lists the old ambient/break/pet-pal/wander/quick-reminders/github lineup.
+2. Confirm `pnpm plugins:package` regenerated `web/public/plugins/catalog.v2.json` from the current official and community manifest v3 plugin lineup. Do not release if the checked-in v2 catalog still lists the old ambient/break/pet-pal/wander/quick-reminders/github lineup.
 3. Confirm `web/public/plugins/catalog.v1.json` has `plugins: []` and does not expose stale legacy plugins.
 4. Upload plugin ZIPs to R2 and regenerate catalogs:
    ```bash
@@ -119,6 +122,14 @@ Publishing sequence:
    ```bash
    pnpm plugins:deploy
    ```
+   If the local web deploy times out during the large static upload, commit and
+   push both root and nested `web/` repos, then trigger the remote deploy helper:
+   ```bash
+   ./web/deploy.sh
+   ```
+   The helper SSHes to the remote checkout, force-resets it to `origin/main`, and
+   runs `npm run deploy` inside a tmux session. Remote reset is acceptable for
+   this deployment lane because the remote checkout is disposable deploy state.
 6. Verify live endpoints:
    - `https://openpets.dev/plugins/catalog.v2.json`
    - `https://openpets.dev/plugins/catalog.v1.json`
@@ -150,10 +161,12 @@ OpenPets now includes the SDK v3 plugin platform for richer local companion beha
 - Reminders — short local reminders with optional sound and OS notifications.
 - Virtual Pet — lightweight care and interaction loops.
 - Water Reminder — hydration nudges with configurable pace and sound.
+- Walkabout — community plugin that lets the pet wander, follow the cursor, or patrol.
 
 ### Plugin management
 
 - Plugins can use SDK v3 capabilities for pet actions, schedules, storage/state, commands, status, audio, notifications, events, and UI panels.
+- The catalog distinguishes official and community plugins with `publisherType`; community plugins are public but not bundled/default-enabled.
 - Friendly translated plugin configuration UI; no JSON editing required.
 - Plugin permissions, capabilities, quotas, and manifest validation are explicit.
 - JavaScript plugins run through the desktop SDK bridge with conformance checks against `@open-pets/plugin-sdk`.
@@ -502,18 +515,21 @@ git push
 
 Use a new version, or manually inspect GitHub releases/tags before proceeding.
 
-### Partial GitHub upload failure
+### Partial GitHub upload failure or replacing an existing release's assets
 
 If the script creates the release but upload fails:
 
 1. Inspect the release on GitHub.
-2. Upload missing artifacts manually with:
+2. Upload missing or replacement artifacts manually with `--clobber`:
 
 ```bash
-gh release upload v<version> --repo alvinunreal/openpets <artifact-path>
+gh release upload v<version> --repo alvinunreal/openpets --clobber <artifact-path>
 ```
 
-3. Or delete the release/tag and rerun after fixing the issue.
+3. Regenerate and re-upload `SHA256SUMS` after the final artifact set changes.
+4. Re-check the release asset list; do not trust a wrapper's success summary if
+   `gh release view` shows missing assets.
+5. Or delete the release/tag and rerun after fixing the issue.
 
 ## Manual packaging smoke commands
 
