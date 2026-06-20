@@ -5,7 +5,6 @@
   "config.mode.description": "펫이 화면에서 움직이는 방식입니다.",
   "config.mode.wander": "배회 (무작위 산책)",
   "config.mode.followCursor": "커서 따라가기",
-  "config.mode.physics": "물리 (중력 + 튕김)",
   "config.mode.patrol": "순찰 (앞뒤로 이동)",
   "config.speed.label": "속도",
   "config.speed.description": "펫이 움직이는 빠르기입니다.",

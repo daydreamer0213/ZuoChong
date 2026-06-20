@@ -5,7 +5,6 @@
   "config.mode.description": "Como seu pet se move pela tela.",
   "config.mode.wander": "Passear (andando ao acaso)",
   "config.mode.followCursor": "Seguir o cursor",
-  "config.mode.physics": "Física (gravidade + quique)",
   "config.mode.patrol": "Patrulhar (vai e volta)",
   "config.speed.label": "Velocidade",
   "config.speed.description": "A rapidez com que seu pet se move.",

@@ -5,7 +5,6 @@
   "config.mode.description": "Cómo se mueve tu mascota por la pantalla.",
   "config.mode.wander": "Pasear (caminar al azar)",
   "config.mode.followCursor": "Seguir el cursor",
-  "config.mode.physics": "Física (gravedad + rebote)",
   "config.mode.patrol": "Patrullar (ida y vuelta)",
   "config.speed.label": "Velocidad",
   "config.speed.description": "Qué tan rápido se mueve tu mascota.",

@@ -5,7 +5,6 @@
   "config.mode.description": "寵物在螢幕上的移動方式。",
   "config.mode.wander": "閒逛（隨機散步）",
   "config.mode.followCursor": "跟隨游標",
-  "config.mode.physics": "物理（重力 + 彈跳）",
   "config.mode.patrol": "巡邏（來回移動）",
   "config.speed.label": "速度",
   "config.speed.description": "寵物移動的快慢。",
