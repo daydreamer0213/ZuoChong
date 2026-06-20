@@ -34,6 +34,7 @@ export type PluginRuntimeOptions = {
   readonly storageStore?: PluginStorageStore;
   readonly logger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
   readonly capabilities?: PluginHostCapabilities;
+  readonly onPluginRuntimeError?: (properties: { readonly plugin_source?: string; readonly plugin_runtime?: string; readonly permission_count?: number; readonly error_code: string }) => void;
 };
 
 type CompiledTimer = { readonly intervalMs: number; readonly actions: readonly CompiledAction[] };
@@ -50,6 +51,7 @@ export class PluginRuntime {
   readonly #capabilities?: PluginHostCapabilities;
   readonly #sdkBridge: PluginSdkBridge;
   readonly #logger: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
+  readonly #onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"];
   readonly #slots = new Map<string, PluginRuntimeSlot>();
   #active = false;
 
@@ -62,6 +64,7 @@ export class PluginRuntime {
     this.#jsHost = options.jsHost;
     this.#capabilities = options.capabilities;
     this.#logger = options.logger ?? (() => undefined);
+    this.#onPluginRuntimeError = options.onPluginRuntimeError;
     this.#sdkBridge = new PluginSdkBridge({ stateStore: this.#stateStore, petApi: this.#petApi, scheduler: this.#scheduler, storage: options.storageStore, onError: (id, reason) => this.#markBroken(id, reason), logger: this.#logger, capabilities: options.capabilities });
   }
 
@@ -196,6 +199,8 @@ export class PluginRuntime {
 
   #markBroken(id: string, reason: string): void {
     logPluginDiagnostic(this.#logger, "error", "plugin marked broken", { pluginId: id, reason });
+    const record = this.#stateStore.getRecord(id);
+    this.#onPluginRuntimeError?.({ plugin_source: record?.bundled ? "bundled" : record?.source, plugin_runtime: record?.runtime, permission_count: record?.approvedPermissions.length, error_code: classifyPluginError(reason) });
     this.#cancelPlugin(id);
     this.#stateStore.setBrokenReason(id, reason);
   }

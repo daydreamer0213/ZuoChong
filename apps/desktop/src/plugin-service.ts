@@ -14,7 +14,7 @@ import { ensureLoaded as ensurePluginLocales, resolvePluginText } from "./plugin
 import { downloadCatalogPluginZip, installCatalogPluginPackage, readCatalogPluginManifestFromZip, resolveSafePluginInstallDir } from "./plugin-package.js";
 import type { PluginPetApi } from "./plugin-pet-api.js";
 import { JsonPluginStorageStore, type PluginCommand, type PluginHostCapabilities, type PluginLogLevel, type PluginStatus } from "./plugin-sdk-bridge.js";
-import { PluginRuntime, type PluginRuntimeScheduler } from "./plugin-runtime.js";
+import { PluginRuntime, type PluginRuntimeOptions, type PluginRuntimeScheduler } from "./plugin-runtime.js";
 import { PluginStateStore, type PluginSource, type PluginStateRecord } from "./plugin-state.js";
 
 export type SafePluginRecord = {
@@ -43,7 +43,7 @@ export type SafePluginRecord = {
 
 export type PluginServiceSnapshot = { readonly plugins: readonly SafePluginRecord[] };
 export type SafeCatalogPluginRecord = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative" | "javascript"; readonly icon?: PluginIcon; readonly iconDataUrl?: string; readonly sdkVersion?: string; readonly permissions: readonly PluginPermission[]; readonly installed: boolean; readonly bundled?: boolean; readonly deprecated?: boolean; readonly statusReason?: string };
-export type PluginCatalogSnapshot = { readonly plugins: readonly SafeCatalogPluginRecord[] };
+export type PluginCatalogSnapshot = { readonly plugins: readonly SafeCatalogPluginRecord[]; readonly error?: string };
 export type PluginServiceResult = { readonly ok: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type PluginConfigSoundPickResult = { readonly ok: true; readonly sound: { readonly kind: "user-sound"; readonly id: string; readonly name?: string }; readonly snapshot: PluginServiceSnapshot } | { readonly ok: true; readonly canceled: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type DevPluginLoadResult = { readonly path: string; readonly id?: string; readonly ok: true } | { readonly path: string; readonly ok: false; readonly error: string };
@@ -66,6 +66,7 @@ export type PluginServiceOptions = {
   readonly fetchImpl?: typeof fetch;
   readonly currentAppVersion?: string;
   readonly runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
+  readonly onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"];
   readonly disableCatalog?: boolean;
   readonly seedBundledPlugins?: boolean;
   readonly bundledPluginSourceDirs?: readonly string[];
@@ -113,7 +114,7 @@ export class PluginService {
       this.runtime = options.runtime;
     } else {
       if (!options.petApi) throw new Error("Plugin service requires petApi when runtime is not provided.");
-      this.runtime = new PluginRuntime({ stateStore: this.stateStore, petApi: options.petApi, scheduler: options.scheduler, allowedPluginRoots: this.allowedPluginRoots, maxManifestBytes: options.maxManifestBytes, jsHost: options.jsHost, storageStore: options.userDataPath ? new JsonPluginStorageStore(join(options.userDataPath, "plugin-storage")) : undefined, logger: options.runtimeLogger, capabilities: options.capabilities });
+      this.runtime = new PluginRuntime({ stateStore: this.stateStore, petApi: options.petApi, scheduler: options.scheduler, allowedPluginRoots: this.allowedPluginRoots, maxManifestBytes: options.maxManifestBytes, jsHost: options.jsHost, storageStore: options.userDataPath ? new JsonPluginStorageStore(join(options.userDataPath, "plugin-storage")) : undefined, logger: options.runtimeLogger, capabilities: options.capabilities, onPluginRuntimeError: options.onPluginRuntimeError });
     }
     this.#maxManifestBytes = options.maxManifestBytes;
   }
@@ -243,7 +244,7 @@ export class PluginService {
       return { plugins: catalog.plugins.filter((entry) => !isEntryDisabled(entry) && isCatalogEntryCompatible(entry.minOpenPetsVersion, getMaxVersion(entry), this.#currentAppVersion)).map((entry) => { const installed = this.stateStore.getRecord(entry.id); return { id: entry.id, name: entry.name, version: entry.version, description: entry.description, runtime: entry.runtime, icon: entry.icon, iconDataUrl: "iconDataUrl" in entry ? entry.iconDataUrl : undefined, sdkVersion: getSdkVersion(entry), permissions: entry.permissions, installed: installed?.source === "catalog", bundled: installed?.bundled || undefined, deprecated: isEntryDeprecated(entry) || undefined, statusReason: getStatusReason(entry) }; }) };
     } catch (error) {
       this.#log("warn", "Plugin catalog snapshot failed.", { reason: safeDetailedError(error) });
-      return { plugins: [] };
+      return { plugins: [], error: safeError(error) };
     }
   }
 
@@ -509,8 +510,8 @@ export class PluginService {
 
 let appPluginService: PluginService | null = null;
 
-export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, disableCatalog?: boolean, bundledPluginSourceDirs: readonly string[] = [], seedBundledPlugins = true, capabilities?: PluginHostCapabilities): PluginService {
-  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, disableCatalog, bundledPluginSourceDirs, seedBundledPlugins, capabilities });
+export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, disableCatalog?: boolean, bundledPluginSourceDirs: readonly string[] = [], seedBundledPlugins = true, capabilities?: PluginHostCapabilities, onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"]): PluginService {
+  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, disableCatalog, bundledPluginSourceDirs, seedBundledPlugins, capabilities, onPluginRuntimeError });
   return appPluginService;
 }
 

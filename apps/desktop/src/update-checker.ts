@@ -1,7 +1,7 @@
 import { app, shell } from "electron";
 import https from "node:https";
 
-import { trackDesktopEvent } from "./analytics.js";
+import { classifyAnalyticsError, trackDesktopEvent } from "./analytics.js";
 import { createParsedUpdateStatus, normalizeVersion } from "./update-version.js";
 
 export type UpdateStatusState = "idle" | "checking" | "available" | "current" | "error";
@@ -47,7 +47,9 @@ export async function checkForGitHubReleaseUpdate(): Promise<UpdateStatus> {
       return updateStatus;
     })
     .finally(() => {
-      trackDesktopEvent("desktop_update_check_completed", { result: updateStatus.state, latest_version: updateStatus.latestVersion, error_code: updateStatus.state === "error" ? "update_check_failed" : undefined });
+      const errorCode = updateStatus.state === "error" ? classifyAnalyticsError(updateStatus.error, "update_check_failed") : undefined;
+      trackDesktopEvent("desktop_update_check_completed", { result: updateStatus.state, latest_version: updateStatus.latestVersion, error_code: errorCode });
+      if (updateStatus.state === "error") trackDesktopEvent("desktop_update_check_failed", { error_code: errorCode });
       checkInFlight = null;
     });
   return checkInFlight;

@@ -17,6 +17,7 @@ export interface CatalogUiState {
   readonly pets: readonly CatalogPetV2[];
   readonly generatedAt?: string;
   readonly error?: string;
+  readonly fallbackReason?: string;
   readonly version?: 2 | 3;
   readonly total?: number;
   readonly categories?: readonly { readonly id: "western" | "asian"; readonly label: string; readonly count: number }[];
@@ -135,6 +136,8 @@ async function getV2OrFixtureCatalogUiState(remoteV3Error: string): Promise<Cata
       source: "remote",
       pets: filterSurfaceablePets(remote.catalog.pets),
       generatedAt: remote.catalog.generatedAt,
+      error: `v3 unavailable: ${remoteV3Error}`,
+      fallbackReason: "v3_to_v2_remote",
       version: 2,
       total: filterSurfaceablePets(remote.catalog.pets).length,
       supportsCategories: false,

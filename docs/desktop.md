@@ -179,12 +179,13 @@ message/reaction totals, per-pet activity counts, first-run/first-reaction
 milestone timestamps, and the consent value.
 
 Analytics events are intentionally product/health level: app startup, first run,
-pet installs, default-pet changes, agent setup outcomes, IPC connection/leases,
-agent reaction categories, plugin install/enable/command usage, and update/check
-health. Do not send prompts, code, file paths, repo names, terminal commands,
-pet speech, clipboard contents, plugin config values, local usernames, hostnames,
-raw stack traces, or raw local pet/plugin/command identifiers. Add only bounded
-enum-style properties such as platform, app version, locale, source, agent type,
+Control Center opens, pet catalog/install/customization flows, bounded
+integration activity, IPC connection/lease health, plugin install/enable/command
+usage, catalog/update reliability, and renderer/plugin runtime failures. Do not
+send prompts, code, file paths, repo names, terminal commands, pet speech,
+clipboard contents, plugin config values, local usernames, hostnames, raw stack
+traces, or raw local pet/plugin/command identifiers. Add only bounded enum-style
+properties such as platform, app version, locale, source, `integration_type`,
 runtime, result, and safe error codes.
 
 ## Security model

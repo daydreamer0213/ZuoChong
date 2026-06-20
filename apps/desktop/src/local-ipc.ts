@@ -4,7 +4,7 @@ import net from "node:net";
 import { Notification, shell, systemPreferences } from "electron";
 
 import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
-import { trackDesktopAgentReaction, trackDesktopEvent } from "./analytics.js";
+import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
@@ -56,18 +56,24 @@ export async function startLocalIpcServer(): Promise<void> {
   cleanupUnixSocket(endpointConfig.advertisedEndpoint);
 
   const server = net.createServer((socket) => handleSocket(socket, token, endpointConfig));
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      listenOnEndpoint(server, endpointConfig.bindEndpoint, () => {
+        server.off("error", reject);
+        protectUnixSocket(endpointConfig.advertisedEndpoint);
+        resolve();
+      });
+    });
+  } catch (error) {
+    trackDesktopEvent("desktop_ipc_server_failed", { error_code: classifyAnalyticsError(error, "ipc_listen_failed"), endpoint_kind: endpointConfig.bindEndpoint.kind });
+    throw error;
+  }
   server.on("error", (error) => {
+    trackDesktopEvent("desktop_ipc_server_failed", { error_code: classifyAnalyticsError(error, "ipc_server_error"), endpoint_kind: endpointConfig.bindEndpoint.kind });
     logError("ipc", "server error", error);
     console.error("OpenPets local IPC server error.", error);
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    listenOnEndpoint(server, endpointConfig.bindEndpoint, () => {
-      server.off("error", reject);
-      protectUnixSocket(endpointConfig.advertisedEndpoint);
-      resolve();
-    });
   });
 
   ipcServer = server;
@@ -338,7 +344,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       state = await installPet(petId);
       trackDesktopEvent("desktop_pet_install_completed", { source: "catalog", entrypoint: "ipc" });
     } catch (error) {
-      trackDesktopEvent("desktop_pet_install_failed", { source: "catalog", entrypoint: "ipc", error_code: error instanceof Error ? error.name : "unknown" });
+      trackDesktopEvent("desktop_pet_install_failed", { source: "catalog", entrypoint: "ipc", error_code: classifyAnalyticsError(error, "pet_install_failed") });
       throw error;
     }
     const installed = state.pets.installed.find((pet) => pet.id === petId);
@@ -395,12 +401,12 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     if (lease?.targetKind === "explicit") {
       const applied = applyAgentPetReaction(lease.actualTargetPetId, reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "agent" });
-      trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
+      trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason, leaseId: lease.leaseId };
     }
     const applied = applyExternalPetReaction(reaction);
     safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "default" });
-    trackDesktopAgentReaction(reaction, { target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
+    trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
     return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
   }
 
@@ -413,12 +419,12 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   if (lease?.targetKind === "explicit") {
     const applied = applyAgentPetSay(lease.actualTargetPetId, message, reaction);
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "agent" });
-    if (reaction) trackDesktopAgentReaction(reaction, { target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
+    trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction, leaseId: lease.leaseId };
   }
   const applied = applyExternalPetSay(message, reaction);
   safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "default" });
-  if (reaction) trackDesktopAgentReaction(reaction, { target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
+  trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
   return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
 }
 

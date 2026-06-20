@@ -74,7 +74,9 @@ if (!gotSingleInstanceLock) {
     const devPluginMode = roots.length > 0 || paths.length > 0;
     initializePluginPlatformSettings(app.getPath("userData"));
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"));
-    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities);
+    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, (properties) => {
+      trackDesktopEvent("desktop_plugin_runtime_error", properties);
+    });
     // Wall-clock schedules (daily/cron/at) re-arm deterministically after sleep.
     powerMonitor.on("resume", () => pluginService.runtime.resyncSchedules());
     if (shouldOpenDefaultPetOnLaunch()) {

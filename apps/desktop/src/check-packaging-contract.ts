@@ -92,6 +92,8 @@ const loggerSource = readFileSync(join(appDir, "src", "logger.ts"), "utf8");
 const mainSource = readFileSync(join(appDir, "src", "main.ts"), "utf8");
 const appStateSource = readFileSync(join(appDir, "src", "app-state.ts"), "utf8");
 const analyticsSource = readFileSync(join(appDir, "src", "analytics.ts"), "utf8");
+const webPostHogPluginSource = readFileSync(join(repoRoot, "web", "app", "plugins", "posthog.client.js"), "utf8");
+const webAnalyticsSource = readFileSync(join(repoRoot, "web", "app", "composables", "useAnalytics.js"), "utf8");
 const localIpcSourceForLogging = readFileSync(join(appDir, "src", "local-ipc.ts"), "utf8");
 const localIpcPathsSource = readFileSync(join(appDir, "src", "local-ipc-paths.ts"), "utf8");
 const leaseManagerSource = readFileSync(join(appDir, "src", "lease-manager.ts"), "utf8");
@@ -107,7 +109,20 @@ assert.match(mainSource, /initializeLogger\(\)/, "desktop startup must initializ
 assert.match(appStateSource, /analytics:\s*{\s*\.\.\.analytics[\s\S]*messagesSent/, "activity counters must preserve analytics consent and identity fields.");
 assert.match(analyticsSource, /consent !== "granted"[\s\S]*queue = \[\]/, "desktop analytics must clear queued events when consent is not granted.");
 assert.match(analyticsSource, /AbortSignal\.timeout/, "desktop analytics flush must have a timeout.");
+assert.match(analyticsSource, /analyticsSchemaVersion\s*=\s*2/, "desktop analytics schema must be v2 after the product analytics reset.");
+for (const eventName of ["desktop_control_center_opened", "desktop_integration_activity_received", "desktop_plugin_install_started", "desktop_plugin_install_failed", "desktop_plugin_runtime_error", "desktop_pet_local_import_started", "desktop_pet_local_import_completed", "desktop_pet_local_import_failed", "desktop_update_check_failed", "desktop_ipc_server_failed"]) {
+  assert.match(analyticsSource + windowsSource + localIpcSourceForLogging + updateCheckerSource + mainSource + readFileSync(join(appDir, "src", "plugin-runtime.ts"), "utf8"), new RegExp(eventName), `desktop analytics must include canonical event: ${eventName}`);
+}
+assert.doesNotMatch(analyticsSource + localIpcSourceForLogging, /desktop_agent_reaction_received|desktop_first_agent_reaction_received/, "desktop analytics must not emit old per-reaction agent events.");
+assert.match(analyticsSource, /function classifyAnalyticsError/, "desktop analytics must classify errors into safe buckets before capture.");
+assert.match(webPostHogPluginSource, /autocapture:\s*!!cfg\.debug/, "web autocapture must be disabled unless explicit debug mode is enabled.");
+for (const eventName of ["web_app_download_clicked", "web_pet_download_clicked", "web_install_command_copied", "web_outbound_link_clicked", "web_github_stars_observed"]) {
+  assert.match(webAnalyticsSource, new RegExp(eventName), `web analytics must use canonical event: ${eventName}`);
+}
+assert.doesNotMatch(webAnalyticsSource, /pet_name|\bhref\s*:/, "web analytics must not send pet names or full outbound href properties.");
+assert.match(webAnalyticsSource, /pathname:\s*safePathOf\(href\)/, "web outbound analytics must send only a conservative safe pathname bucket.");
 assert.doesNotMatch(windowsSource, /plugin_id|pet_id|command_id/, "desktop analytics must not send raw local pet, plugin, or command identifiers.");
+assert.doesNotMatch(windowsSource + localIpcSourceForLogging + mainSource, /trackDesktopEvent\([^\n]*(filePaths|selectedPath|installPath|manifestPath|href\s*:)/, "desktop analytics must not send local paths or hrefs.");
 assert.match(mainSource, /process\.platform === "linux"[\s\S]*?appendSwitch\("ozone-platform", "x11"\)/, "Linux desktop pets must prefer X11/Xwayland because GNOME Wayland blocks always-on-top and programmatic window dragging.");
 assert.match(mainSource, /hasSwitch\("ozone-platform"\)/, "Linux X11 preference must let users override Electron's Ozone backend explicitly.");
 assert.match(traySource, /t\("tray\.openLogsFolder"\)/, "desktop tray must expose user-sendable logs for bug reports.");

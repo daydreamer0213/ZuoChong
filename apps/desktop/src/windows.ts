@@ -7,7 +7,7 @@ import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPath
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
-import { trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
+import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
 import { createAppIcon } from "./assets.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
@@ -272,15 +272,24 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:plugins-catalog-snapshot", async (event, refresh: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     trackDesktopEvent("desktop_plugin_catalog_opened", { refresh: refresh === true });
-    return getPluginService().getCatalogSnapshot(refresh === true);
+    const snapshot = await getPluginService().getCatalogSnapshot(refresh === true);
+    if (snapshot.error) trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "plugin", error_code: classifyAnalyticsError(snapshot.error, "plugin_catalog_fetch_failed") });
+    return snapshot;
   });
 
   ipcMain.handle("openpets:plugins-install-catalog", async (event, id: unknown): Promise<PluginServiceResult> => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin install request.");
-    const result = await getPluginService().installCatalog(id);
-    if (result.ok) trackDesktopEvent("desktop_plugin_installed", { ...pluginTelemetryForSnapshot(result.snapshot, id), source: "catalog" });
-    return result;
+    trackDesktopEvent("desktop_plugin_install_started", { plugin_source: "catalog" });
+    try {
+      const result = await getPluginService().installCatalog(id);
+      if (result.ok && isCatalogPluginInstalled(result.snapshot, id)) trackDesktopEvent("desktop_plugin_installed", { ...pluginTelemetryForSnapshot(result.snapshot, id), plugin_source: "catalog" });
+      else if (!result.ok) trackDesktopEvent("desktop_plugin_install_failed", { plugin_source: "catalog", error_code: classifyAnalyticsError(result.error, "plugin_install_failed") });
+      return result;
+    } catch (error) {
+      trackDesktopEvent("desktop_plugin_install_failed", { plugin_source: "catalog", error_code: classifyAnalyticsError(error, "plugin_install_failed") });
+      throw error;
+    }
   });
 
   ipcMain.handle("openpets:plugins-update-catalog", async (event, id: unknown): Promise<PluginServiceResult> => {
@@ -338,19 +347,35 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:get-catalog", async (event) => {
     assertAllowedSender(event, ["control-center"]);
     trackDesktopEvent("desktop_pet_catalog_opened", { source: "catalog" });
-    return getCatalogUiState();
+    try {
+      const state = await getCatalogUiState();
+      if (state.source !== "remote" || state.fallbackReason) trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: state.source, fallback_reason: state.fallbackReason, error_code: classifyAnalyticsError(state.error, "catalog_fetch_failed") });
+      return state;
+    } catch (error) {
+      trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: "catalog", error_code: classifyAnalyticsError(error, "catalog_fetch_failed") });
+      throw error;
+    }
   });
 
   ipcMain.handle("openpets:get-catalog-page", async (event, page: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof page !== "number" || !Number.isInteger(page) || page < 0) throw new Error("Invalid catalog page.");
     trackDesktopEvent("desktop_pet_catalog_opened", { source: "catalog_page", page });
-    return getCatalogPageUiState(page);
+    try {
+      const state = await getCatalogPageUiState(page);
+      if (state.source !== "remote" || state.fallbackReason) trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: state.source, fallback_reason: state.fallbackReason, page, error_code: classifyAnalyticsError(state.error, "catalog_page_fetch_failed") });
+      return state;
+    } catch (error) {
+      trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: "catalog_page", page, error_code: classifyAnalyticsError(error, "catalog_page_fetch_failed") });
+      throw error;
+    }
   });
 
   ipcMain.handle("openpets:get-catalog-search", async (event) => {
     assertAllowedSender(event, ["control-center"]);
-    return getCatalogSearchUiState();
+    const state = await getCatalogSearchUiState();
+    if (state.source === "error") trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: "search", error_code: classifyAnalyticsError(state.error, "catalog_search_fetch_failed") });
+    return state;
   });
 
   ipcMain.handle("openpets:get-codex-pets", async (event) => {
@@ -455,7 +480,7 @@ export function installInternalUiHandlers(): void {
       state = await installPet(petId);
       trackDesktopEvent("desktop_pet_install_completed", { source: "catalog" });
     } catch (error) {
-      trackDesktopEvent("desktop_pet_install_failed", { source: "catalog", error_code: error instanceof Error ? error.name : "unknown" });
+      trackDesktopEvent("desktop_pet_install_failed", { source: "catalog", error_code: classifyAnalyticsError(error, "pet_install_failed") });
       throw error;
     }
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
@@ -479,16 +504,18 @@ export function installInternalUiHandlers(): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
     if (result.canceled || !result.filePaths[0]) return getPetsStateSnapshot();
     const selectedPath = result.filePaths[0];
+    let source: "local_folder" | "local_zip" = "local_zip";
     try {
       const selectedStats = await stat(selectedPath);
-      const source = selectedStats.isDirectory() ? "local_folder" : "local_zip";
-      trackDesktopEvent("desktop_pet_install_started", { source });
+      source = selectedStats.isDirectory() ? "local_folder" : "local_zip";
+      trackDesktopEvent("desktop_pet_local_import_started", { source });
       const state = selectedStats.isDirectory() ? await installPetFromFolder(selectedPath) : await installPetFromZipFile(selectedPath);
-      trackDesktopEvent("desktop_pet_install_completed", { source });
+      trackDesktopEvent("desktop_pet_local_import_completed", { source });
       debug("ui", "local pet import succeeded", { kind: selectedStats.isDirectory() ? "folder" : "zip" });
       refreshDefaultPetContent();
       return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
     } catch (error) {
+      trackDesktopEvent("desktop_pet_local_import_failed", { source, error_code: classifyAnalyticsError(error, "local_pet_import_failed") });
       logError("ui", "local pet import failed", { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -505,9 +532,15 @@ export function installInternalUiHandlers(): void {
       throw new Error("Invalid pet id.");
     }
 
-    trackDesktopEvent("desktop_pet_install_started", { source: "codex" });
-    const state = await importCodexPet(petId);
-    trackDesktopEvent("desktop_pet_install_completed", { source: "codex" });
+    trackDesktopEvent("desktop_pet_local_import_started", { source: "codex" });
+    let state;
+    try {
+      state = await importCodexPet(petId);
+      trackDesktopEvent("desktop_pet_local_import_completed", { source: "codex" });
+    } catch (error) {
+      trackDesktopEvent("desktop_pet_local_import_failed", { source: "codex", error_code: classifyAnalyticsError(error, "codex_pet_import_failed") });
+      throw error;
+    }
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
   });
 
@@ -539,10 +572,10 @@ export function installInternalUiHandlers(): void {
       throw new Error("Invalid agent setup action.");
     }
 
-    trackDesktopEvent("desktop_agent_setup_started", { action, agent_type: agentTypeForSetupAction(action), command_mode: typeof commandMode === "string" ? commandMode : undefined });
+    trackDesktopEvent("desktop_agent_setup_started", { action, integration_type: integrationTypeForSetupAction(action), command_mode: typeof commandMode === "string" ? commandMode : undefined });
     const snapshot = await runAgentSetupAction(action, selectedPetId, commandMode);
     const eventName = snapshot.lastAction?.ok ? "desktop_agent_setup_completed" : "desktop_agent_setup_failed";
-    trackDesktopEvent(eventName, { action, agent_type: agentTypeForSetupAction(action), changed: snapshot.lastAction?.changed ?? false, command_mode: snapshot.commandMode });
+    trackDesktopEvent(eventName, { action, integration_type: integrationTypeForSetupAction(action), changed: snapshot.lastAction?.changed ?? false, command_mode: snapshot.commandMode });
     return snapshot;
   });
 
@@ -569,7 +602,7 @@ async function chooseLocalPetImportKind(owner: BrowserWindow | undefined): Promi
   return null;
 }
 
-function agentTypeForSetupAction(action: string): string {
+function integrationTypeForSetupAction(action: string): string {
   if (action.startsWith("opencode-")) return "opencode";
   if (action.startsWith("cursor-")) return "cursor";
   if (action.includes("hook") || action === "install-memory") return "claude";
@@ -579,11 +612,16 @@ function agentTypeForSetupAction(action: string): string {
 function pluginTelemetryForSnapshot(snapshot: PluginServiceResult["snapshot"], pluginId: string): Record<string, string | number | boolean | undefined> {
   const plugin = snapshot.plugins.find((candidate) => candidate.id === pluginId);
   return {
-    plugin_source: plugin?.source,
+    plugin_source: plugin?.bundled ? "bundled" : plugin?.source,
     plugin_bundled: plugin?.bundled === true,
     plugin_runtime: plugin?.runtime,
     permission_count: plugin?.approvedPermissions.length,
   };
+}
+
+function isCatalogPluginInstalled(snapshot: PluginServiceResult["snapshot"], pluginId: string): boolean {
+  const plugin = snapshot.plugins.find((candidate) => candidate.id === pluginId);
+  return plugin?.source === "catalog" || plugin?.bundled === true;
 }
 
 function petTelemetryForId(petId: string): Record<string, string | boolean | undefined> {
@@ -662,6 +700,7 @@ export function installInternalUiProtocol(): void {
 export function openControlCenterWindow(route: ControlCenterRoute = "dashboard"): void {
   const safeRoute = normalizeControlCenterRoute(route);
   if (controlCenterWindow && !controlCenterWindow.isDestroyed()) {
+    trackDesktopEvent("desktop_control_center_opened", { route: safeRoute, entrypoint: "focus_existing" });
     syncDockVisibilityForInternalUi();
     if (controlCenterWindow.isMinimized()) controlCenterWindow.restore();
     controlCenterWindow.show();
@@ -669,6 +708,8 @@ export function openControlCenterWindow(route: ControlCenterRoute = "dashboard")
     routeControlCenterWindow(controlCenterWindow, safeRoute);
     return;
   }
+
+  trackDesktopEvent("desktop_control_center_opened", { route: safeRoute, entrypoint: "create_window" });
 
   const window = new BrowserWindow({
     title: "OpenPets — Control Center",
@@ -694,6 +735,7 @@ export function openControlCenterWindow(route: ControlCenterRoute = "dashboard")
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("will-redirect", (event) => event.preventDefault());
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    trackDesktopEvent("desktop_renderer_error", { surface_kind: "control_center", error_code: classifyRendererLoadError(errorCode) });
     console.error("Failed to load Control Center renderer.", { errorCode, errorDescription });
     logError("ui", "control center load failed", { errorCode, errorDescription });
   });
@@ -704,6 +746,7 @@ export function openControlCenterWindow(route: ControlCenterRoute = "dashboard")
     else debug("ui", "control center console", fields);
   });
   window.webContents.on("render-process-gone", (_event, details) => {
+    trackDesktopEvent("desktop_renderer_error", { surface_kind: "control_center", error_code: classifyRendererGoneReason(details.reason) });
     console.error("Control Center renderer process gone.", details);
     logError("ui", "control center renderer gone", details);
   });
@@ -714,7 +757,23 @@ export function openControlCenterWindow(route: ControlCenterRoute = "dashboard")
 
   const devUrl = getSafeControlCenterDevUrl();
   const load = devUrl ? window.loadURL(withControlCenterRoute(devUrl, safeRoute)) : window.loadFile(join(app.getAppPath(), "dist", "renderer", "index.html"), { query: { route: safeRoute } });
-  load.catch((error: unknown) => console.error("Failed to load Control Center.", error));
+  load.catch((error: unknown) => {
+    trackDesktopEvent("desktop_renderer_error", { surface_kind: "control_center", error_code: classifyAnalyticsError(error, "renderer_load_failed") });
+    console.error("Failed to load Control Center.", error);
+  });
+}
+
+function classifyRendererLoadError(errorCode: number): string {
+  if (errorCode === -3) return "load_aborted";
+  if (errorCode === -6 || errorCode === -105 || errorCode === -106) return "network_error";
+  if (errorCode === -102 || errorCode === -109) return "connection_error";
+  if (errorCode === -300 || errorCode === -301 || errorCode === -302) return "file_load_error";
+  return "renderer_load_failed";
+}
+
+function classifyRendererGoneReason(reason: string): string {
+  if (reason === "crashed" || reason === "oom" || reason === "killed" || reason === "integrity-failure") return `renderer_${reason.replace(/-/g, "_")}`;
+  return "renderer_gone";
 }
 
 export function focusOpenTaskWindows(): void {
