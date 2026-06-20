@@ -1,8 +1,8 @@
-import { BrowserWindow, powerMonitor, screen } from "electron";
+import { BrowserWindow, powerMonitor, screen, type Display } from "electron";
 
-import { getAppStateSnapshot, getDefaultPetPosition, resetDefaultPetPosition, setDefaultPetPosition, updatePreferences } from "./app-state.js";
+import { getAppStateSnapshot, getDefaultPetPosition, getPerMonitorPetPosition, resetDefaultPetPosition, setDefaultPetPosition, setPerMonitorPetPosition, updatePreferences } from "./app-state.js";
 import { shouldShowDefaultPetForExternalEvent } from "./app-state-core.js";
-import { defaultPetWindowSize, getDefaultPetInitialPosition } from "./display.js";
+import { defaultPetWindowSize, getAllDisplayKeys, getDefaultPetInitialPosition, getDisplayKey, getDisplayKeyForPosition, type Point } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
@@ -74,8 +74,9 @@ export function hideDefaultPet(): void {
     return;
   }
 
-  info("pet.default", "hide requested", { windowId: defaultPetWindow.id, position: readWindowPosition(defaultPetWindow), petId: getAppStateSnapshot().preferences.defaultPetId });
-  setDefaultPetPosition(readWindowPosition(defaultPetWindow));
+  const hidePosition = readWindowPosition(defaultPetWindow);
+  info("pet.default", "hide requested", { windowId: defaultPetWindow.id, position: hidePosition, petId: getAppStateSnapshot().preferences.defaultPetId });
+  handlePositionChanged(hidePosition);
   defaultPetWindow.hide();
 }
 
@@ -175,8 +176,9 @@ export function destroyDefaultPet(): void {
     return;
   }
 
-  info("pet.default", "destroy requested", { windowId: defaultPetWindow.id, position: readWindowPosition(defaultPetWindow), petId: getAppStateSnapshot().preferences.defaultPetId });
-  setDefaultPetPosition(readWindowPosition(defaultPetWindow));
+  const destroyPosition = readWindowPosition(defaultPetWindow);
+  info("pet.default", "destroy requested", { windowId: defaultPetWindow.id, position: destroyPosition, petId: getAppStateSnapshot().preferences.defaultPetId });
+  handlePositionChanged(destroyPosition);
   const window = defaultPetWindow;
   defaultPetWindow = null;
   window.setIgnoreMouseEvents(false);
@@ -184,9 +186,9 @@ export function destroyDefaultPet(): void {
 }
 
 export function installDefaultPetDisplayHandlers(): void {
-  screen.on("display-added", reclampDefaultPetWindow);
-  screen.on("display-removed", reclampDefaultPetWindow);
-  screen.on("display-metrics-changed", reclampDefaultPetWindow);
+  screen.on("display-added", (_event: unknown, display: Display) => reclampDefaultPetWindow("display-added", display));
+  screen.on("display-removed", () => reclampDefaultPetWindow("display-removed"));
+  screen.on("display-metrics-changed", () => reclampDefaultPetWindow("display-metrics-changed"));
   powerMonitor.on("resume", recoverDefaultPetWindowAfterResume);
 }
 
@@ -211,6 +213,10 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     return defaultPetWindow;
   }
 
+  // The flat position is the most recently saved position across all monitors.
+  // Do not scan every connected per-monitor entry here: display order is usually
+  // primary-first, which can override the true last position with an older
+  // primary-display entry.
   const position = getSafeDefaultPetPosition(getDefaultPetPosition());
 
   defaultPetWindow = createDefaultPetWindow({
@@ -219,7 +225,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     display: transientDisplay,
     badge: statusBadge,
     pluginBubbles: getDefaultPetPluginBubbles(),
-    onPositionChanged: setDefaultPetPosition,
+    onPositionChanged: handlePositionChanged,
     onHideRequested: hideDefaultPet,
     onBubbleDismissed: handleBubbleDismissed,
     onBubbleAction: (token, actionId) => defaultPetBubbleArbiter.handleAction(token, actionId),
@@ -313,7 +319,7 @@ async function moveDefaultPetBy(rawX: number, rawY: number, rawDurationMs: unkno
       await delay(durationMs / steps);
     }
     window.setPosition(target.x, target.y, false);
-    setDefaultPetPosition(target);
+    handlePositionChanged(target);
     debug("pet.default", "move finished", { windowId: window.id, target });
     return { moved: true };
   } finally {
@@ -381,15 +387,37 @@ function isBusyStatusBadgeReaction(reaction: OpenPetsReaction): boolean {
   return reaction === "thinking" || reaction === "working" || reaction === "editing" || reaction === "running" || reaction === "testing" || reaction === "waiting";
 }
 
-function reclampDefaultPetWindow(): void {
+/** Save position both in the flat key (backwards compat) and per-monitor map. */
+function handlePositionChanged(position: Point): void {
+  setDefaultPetPosition(position);
+  const displayKey = getDisplayKeyForPosition(position);
+  setPerMonitorPetPosition(displayKey, position);
+}
+
+function reclampDefaultPetWindow(reason: "display-added" | "display-removed" | "display-metrics-changed", changedDisplay?: Display): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
     return;
   }
 
-  const safePosition = readWindowPosition(defaultPetWindow);
-  info("pet.default", "reclamp position", { windowId: defaultPetWindow.id, position: safePosition });
+  const currentPosition = readWindowPosition(defaultPetWindow);
+  const currentDisplayKey = getDisplayKeyForPosition(currentPosition);
+  const changedDisplayKey = changedDisplay ? getDisplayKey(changedDisplay.bounds) : undefined;
+  let restoredPosition: Point | undefined;
+
+  // Only restore to a newly-added display. Iterating every connected display can
+  // pick the primary display first and skip the secondary monitor that was just
+  // reconnected.
+  if (reason === "display-added" && changedDisplayKey && changedDisplayKey !== currentDisplayKey && getAllDisplayKeys().includes(changedDisplayKey)) {
+    restoredPosition = getPerMonitorPetPosition(changedDisplayKey);
+  }
+
+  const safePosition = restoredPosition
+    ? getSafeDefaultPetPosition(restoredPosition)
+    : getSafeDefaultPetPosition(currentPosition);
+
+  info("pet.default", "reclamp position", { windowId: defaultPetWindow.id, position: safePosition, restored: Boolean(restoredPosition), reason, changedDisplayKey });
   defaultPetWindow.setPosition(safePosition.x, safePosition.y, false);
-  setDefaultPetPosition(safePosition);
+  handlePositionChanged(safePosition);
   recoverDefaultPetMouseInterop("display-change");
 }
 
