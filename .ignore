@@ -6,6 +6,8 @@
 !.slim/deepwork/**
 !docs
 !opencode.json
+!.slim/worktrees/
+!.slim/worktrees.json
 
 # BEGIN oh-my-opencode-slim clonedeps
 !.slim/
