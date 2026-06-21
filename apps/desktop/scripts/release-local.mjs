@@ -195,43 +195,26 @@ function run(command, args, options) {
 }
 
 function defaultReleaseNotes() {
+  const previousTag = commandOutput("git", ["describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "HEAD"], { cwd: repoRoot }).trim();
+  const range = previousTag ? `${previousTag}..HEAD` : "HEAD";
+  const commits = commandOutput("git", ["log", "--pretty=format:%h %s", range], { cwd: repoRoot })
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   return [
-    `OpenPets ${tag} ships Plugin SDK v3 with polished desktop plugin management and fixes for catalog plugin installs.`,
+    `OpenPets ${tag} desktop release.`,
     "",
-    "## New: Plugin SDK v3",
+    `Changes since ${previousTag || "the initial history"}:`,
     "",
-    "OpenPets now includes the SDK v3 plugin platform for richer local companion behaviors, translated plugin experiences, and a public plugin SDK package.",
+    ...(commits.length > 0 ? commits.map((commit) => `- ${commit}`) : ["- No commits found in the release range."]),
     "",
-    "## Included plugins",
+    "## Artifacts",
     "",
-    "- Day Routine — morning and evening companion check-ins.",
-    "- Focus Buddy — focus/break sessions with pet feedback and controls.",
-    "- Fortune Cookie — daily and on-demand fortune messages.",
-    "- Launch Buddy — configurable greetings when OpenPets starts.",
-    "- Magic 8 Ball — playful answers from the pet menu.",
-    "- Mood Check-in — scheduled mood prompts.",
-    "- Reminders — short local reminders with optional sound and OS notifications.",
-    "- Virtual Pet — lightweight care and interaction loops.",
-    "- Water Reminder — hydration nudges with configurable pace and sound.",
+    "This release includes the full desktop artifact set: macOS DMG/ZIP, Windows installer/portable, Linux AppImage/DEB/RPM/tar.gz, and SHA256SUMS.",
     "",
-    "## Plugin management",
+    "## Notes",
     "",
-    "- Catalog plugin installs now tolerate stale release metadata and show direct, actionable errors.",
-    "- Newly installed plugins auto-enable after approval and start immediately.",
-    "- Friendly translated plugin configuration UI; no JSON editing required.",
-    "- Plugin permissions, capabilities, quotas, and manifest validation are explicit.",
-    "- JavaScript plugins run through the desktop SDK bridge with conformance checks against @open-pets/plugin-sdk.",
-    "",
-    "## Developer notes",
-    "",
-    "- @open-pets/plugin-sdk provides SDK v3 types and a ./testing entry point for plugin authors.",
-    "- Local plugin development is available through explicit developer mode and pnpm dev:desktop:plugins.",
-    "- Legacy sample plugins were removed or hidden from current discovery.",
-    "- This release includes the full desktop artifact set: macOS DMG/ZIP, Windows installer/portable, Linux AppImage/DEB/RPM/tar.gz.",
-    "",
-    "## Known limitations",
-    "",
-    "- Desktop artifacts are currently unsigned, so OS security warnings may appear.",
+    "Desktop artifacts are currently unsigned, so OS security warnings may appear.",
   ].join("\n");
 }
 

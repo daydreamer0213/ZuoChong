@@ -137,50 +137,14 @@ Publishing sequence:
 
 ### C. GitHub Release notes
 
-Suggested release title:
+The release script generates notes from the Git commit range between the previous
+desktop tag and the release commit. Do not keep static release-note text in the
+script or this guide; stale notes are worse than short generated notes.
 
-```txt
-OpenPets v<version> — Plugin SDK v3
-```
-
-Suggested release notes:
-
-```md
-## New: Plugin SDK v3
-
-OpenPets now includes the SDK v3 plugin platform for richer local companion behaviors, translated plugin experiences, and a public plugin SDK package.
-
-### Included plugins
-
-- Day Routine — morning and evening companion check-ins.
-- Focus Buddy — focus/break sessions with pet feedback and controls.
-- Fortune Cookie — daily and on-demand fortune messages.
-- Launch Buddy — configurable greetings when OpenPets starts.
-- Magic 8 Ball — playful answers from the pet menu.
-- Mood Check-in — scheduled mood prompts.
-- Reminders — short local reminders with optional sound and OS notifications.
-- Virtual Pet — lightweight care and interaction loops.
-- Water Reminder — hydration nudges with configurable pace and sound.
-- Walkabout — community plugin that lets the pet wander, follow the cursor, or patrol.
-
-### Plugin management
-
-- Plugins can use SDK v3 capabilities for pet actions, schedules, storage/state, commands, status, audio, notifications, events, and UI panels.
-- The catalog distinguishes official and community plugins with `publisherType`; community plugins are public but not bundled/default-enabled.
-- Friendly translated plugin configuration UI; no JSON editing required.
-- Plugin permissions, capabilities, quotas, and manifest validation are explicit.
-- JavaScript plugins run through the desktop SDK bridge with conformance checks against `@open-pets/plugin-sdk`.
-
-### Developer notes
-
-- `@open-pets/plugin-sdk` provides SDK v3 types and a `./testing` entry point for plugin authors.
-- Local plugin development is available through explicit developer mode and `pnpm dev:desktop:plugins`.
-- Legacy sample plugins were removed or hidden from current discovery.
-
-### Known limitations
-
-- Desktop artifacts are currently unsigned, so OS security warnings may appear.
-```
+Before publishing, inspect the generated notes in a dry run if the release is
+risky. After publishing, verify the GitHub Release body matches the actual commit
+range and artifact set. If it does not, edit the release body immediately with
+`gh release edit v<version> --notes-file <file>`.
 
 ### D. NPM release decision
 
