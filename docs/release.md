@@ -217,41 +217,46 @@ Published releases are visible to the app update checker.
 
 ## Default release assets
 
-Default command for this SDK v3/plugin release:
+Default command for every desktop release:
 
 ```bash
-pnpm release:desktop -- --yes --include-optional
+pnpm release:desktop -- --yes
 ```
 
-Default build matrix for the local release script:
+Default build matrix for the local release script always includes the full x64
+artifact set:
 
 - macOS DMG: x64 + arm64
+- macOS ZIP: x64 + arm64
 - Windows NSIS installer: x64
+- Windows portable: x64
 - Linux AppImage: x64
+- Linux DEB: x64
+- Linux RPM: x64
+- Linux tar.gz: x64
 
 Expected main artifacts look like:
 
 ```txt
 OpenPets-<version>-mac-x64.dmg
 OpenPets-<version>-mac-arm64.dmg
+OpenPets-<version>-mac-x64.zip
+OpenPets-<version>-mac-arm64.zip
 OpenPets-<version>-win-x64-setup.exe
+OpenPets-<version>-win-x64-portable.exe
 OpenPets-<version>-linux-x86_64.AppImage
+OpenPets-<version>-linux-amd64.deb
+OpenPets-<version>-linux-x86_64.rpm
+OpenPets-<version>-linux-x64.tar.gz
 SHA256SUMS
 ```
 
-Optional flags:
+The old per-target optional flags were removed to avoid partial releases. The
+only extra artifact flag is for experimental ARM builds:
 
 ```bash
-pnpm release:desktop -- --yes --include-mac-zip
-pnpm release:desktop -- --yes --include-win-portable
-pnpm release:desktop -- --yes --include-linux-deb
-pnpm release:desktop -- --yes --include-linux-rpm
-pnpm release:desktop -- --yes --include-linux-targz
-pnpm release:desktop -- --yes --include-optional
 pnpm release:desktop -- --yes --include-experimental-arm
 ```
-
-`--include-optional` includes mac zip, Windows portable, Linux deb, Linux rpm, and Linux tar.gz x64 targets.
 
 On Apple Silicon macOS, Linux RPM packaging can fail in `fpm`/`rpmbuild`, and
 Electron Builder can produce an invalid tiny DEB archive. If that happens, do
@@ -462,10 +467,10 @@ The release script requires a clean tree before release creation.
 
 ### 8. Create the published GitHub Release and upload assets
 
-For the recommended SDK v3/plugin release with optional artifacts:
+For the standard full-artifact desktop release:
 
 ```bash
-pnpm release:desktop -- --yes --include-optional
+pnpm release:desktop -- --yes
 ```
 
 The script creates a published release named/tagged:
@@ -492,6 +497,47 @@ Unsigned release warnings are expected until code signing/notarization is config
 
 - macOS may show Gatekeeper warnings.
 - Windows may show SmartScreen warnings.
+
+### Linux release-smoke VM
+
+Use the clean Ubuntu release-smoke VM for Linux artifact install checks that
+should behave like a normal user machine, not the development VM with a repo
+checkout and build dependencies.
+
+The VM is documented in `/Volumes/external/repos/vagrants.md`:
+
+```txt
+VM directory: /Volumes/external/vmware/ubuntu24-release-smoke
+Provider: vmware_desktop / VMware Fusion
+Guest OS: Ubuntu 24.04 ARM64
+SSH: 127.0.0.1:2200 when the main Ubuntu VM already owns 2222
+```
+
+Start and enter the VM from macOS:
+
+```bash
+cd /Volumes/external/vmware/ubuntu24-release-smoke
+vagrant up
+vagrant ssh
+```
+
+This VM intentionally does **not** mount the macOS OpenPets checkout. Use it to
+download and install released Linux artifacts from GitHub/R2 like a user would.
+
+Smoke checklist inside the VM:
+
+1. Download/install the current Linux release artifact.
+2. Launch OpenPets from the installed artifact, not from a repo checkout.
+3. Confirm the tray icon appears.
+4. Confirm a pet window appears.
+5. Open Control Center.
+6. Confirm the live plugin catalog loads from `https://openpets.dev/plugins/catalog.v2.json`.
+7. Confirm community plugins, including `openpets.spotify-buddy`, appear as installable when the live catalog includes them.
+8. Install, enable, and open configuration for at least one plugin without crashes or raw `$t:` strings.
+
+The existing `/Volumes/external/vmware/ubuntu24` VM remains the Linux development
+VM. Prefer `ubuntu24-release-smoke` for fresh-user release validation, and use
+the dev VM only for build/debug workflows.
 
 ## Common failure modes
 
