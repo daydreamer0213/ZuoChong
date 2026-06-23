@@ -259,7 +259,20 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
     return;
   }
   const [x, y] = window.getPosition();
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return;  // skip tick when native position is unavailable/NaN
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    // Native position is unavailable/NaN (mid-destroy race or monitor disconnect).
+    // We cannot write a position this tick, but we still settle the move-to clock
+    // so an awaited motionMoveTo() resolves instead of hanging until coordinates
+    // become finite again — mirroring the hidden/dragging guard above.
+    if (state.moveTarget) {
+      state.moveTarget.elapsed += loopIntervalMs;
+      if (state.moveTarget.elapsed >= state.moveTarget.durationMs) {
+        state.moveTarget = null;
+        state.moveGeneration += 1;
+      }
+    }
+    return;
+  }
   let rawX = x + state.fracX;
   let rawY = y + state.fracY;
 

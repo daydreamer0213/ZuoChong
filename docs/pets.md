@@ -140,9 +140,10 @@ Wayland.)
 
 To keep motion working, OpenPets forces the Linux Ozone backend to **x11
 (XWayland)**, where these window operations are honored. Drag selects its path
-at window creation via `isEffectiveWaylandBackend()` in `pet-window.ts`: under
-the forced x11 backend it returns `false` and the working `setBounds` drag path
-is used. The backend-forcing itself lives in `main.ts` and is documented in
+at window creation via `isEffectiveWaylandBackend()` in `pet-window.ts` (which
+delegates the pure decision to `computeEffectiveWaylandBackend()` in
+`wayland-backend.ts`): under the forced x11 backend it returns `false` and the
+working `setBounds` drag path is used. The backend-forcing itself lives in `main.ts` and is documented in
 [desktop.md](desktop.md#linux-display-backend-ozonewayland), including the
 `OPENPETS_ALLOW_WAYLAND=1` opt-out (which restores native Wayland and therefore
 disables the motion/drag/always-on-top behavior above, with a one-time startup

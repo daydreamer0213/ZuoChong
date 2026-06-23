@@ -38,15 +38,14 @@ const allowWayland = process.env.OPENPETS_ALLOW_WAYLAND === "1";
 const hasExplicitOzonePlatformArg = process.argv.some(
   (arg) => arg === "--ozone-platform" || arg.startsWith("--ozone-platform="),
 );
+// When OPENPETS_ALLOW_WAYLAND=1 we deliberately do NOT append an ozone-platform
+// switch: Electron honours the system default (typically wayland on a Wayland
+// session, or any explicit --ozone-platform the user passed) and we warn at
+// startup that positioning/gravity/walkabout/drag are unsupported there.
 if (isLinux && !allowWayland) {
   // Force x11 even if the user passed --ozone-platform=wayland or auto;
   // we overwrite any pre-existing switch so nothing silently slips through.
   app.commandLine.appendSwitch("ozone-platform", "x11");
-} else if (isLinux && !app.commandLine.hasSwitch("ozone-platform")) {
-  // OPENPETS_ALLOW_WAYLAND=1: honour whatever the system default would be
-  // (typically wayland on a Wayland session) unless the user overrode it.
-  // No appendSwitch — let Electron pick automatically.
-  // We will warn at startup that positioning features are unsupported.
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -62,7 +61,7 @@ if (!gotSingleInstanceLock) {
     if (process.platform === "win32") {
       app.setAppUserModelId("dev.openpets.app");
     }
-    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null });
+    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null, explicitOzonePlatformArg: hasExplicitOzonePlatformArg });
     if (isLinux && allowWayland) {
       const effectiveOzone = app.commandLine.getSwitchValue("ozone-platform") || "(auto/system)";
       warn("app", "native Wayland mode active — pet positioning, gravity, walkabout, and drag are unsupported under native Wayland; remove OPENPETS_ALLOW_WAYLAND=1 to restore full functionality", { effectiveOzone });

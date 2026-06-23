@@ -59,7 +59,10 @@ startup-begin log) stating that positioning, gravity, walkabout, and drag are
 unsupported under native Wayland and how to restore full functionality. The
 pet-drag path keys off this same effective backend via
 `isEffectiveWaylandBackend()` in `pet-window.ts`, which is evaluated at
-window-creation time (after the switch is applied) and cached.
+window-creation time (after the switch is applied) and cached. The pure backend
+decision (platform + `--ozone-platform` + `XDG_SESSION_TYPE`/`WAYLAND_DISPLAY`)
+is factored into `computeEffectiveWaylandBackend()` in `wayland-backend.ts`;
+`pet-window.ts` delegates to it and owns only the cache.
 
 The x11-forcing branch and the `OPENPETS_ALLOW_WAYLAND` opt-out are asserted by
 `check-packaging-contract.ts`, so this behavior cannot silently regress.

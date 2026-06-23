@@ -17,6 +17,7 @@ import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
 import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 import { isFocusActionAvailable } from "./capabilities.js";
+import { computeEffectiveWaylandBackend } from "./wayland-backend.js";
 
 export interface PetWindowInteractionHooks {
   readonly onBubbleDismissed?: (dismissToken: string) => void;
@@ -93,22 +94,14 @@ const petWindowDragging = new WeakMap<BrowserWindow, boolean>();
 let _effectiveWaylandBackendCache: boolean | undefined;
 export function isEffectiveWaylandBackend(): boolean {
   if (_effectiveWaylandBackendCache !== undefined) return _effectiveWaylandBackendCache;
-  if (process.platform !== "linux") {
-    _effectiveWaylandBackendCache = false;
-    return false;
-  }
-  const ozone = app.commandLine.getSwitchValue("ozone-platform");
-  if (ozone === "wayland") {
-    _effectiveWaylandBackendCache = true;
-    return true;
-  }
-  if (ozone === "x11") {
-    _effectiveWaylandBackendCache = false;
-    return false;
-  }
-  // ozone is "" or "auto" — fall back to session-type env vars
-  const result =
-    process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY);
+  // Delegate to the pure, Electron-free decision in wayland-backend.ts so the
+  // exact production logic is unit-testable without importing this module.
+  const result = computeEffectiveWaylandBackend(
+    process.platform,
+    app.commandLine.getSwitchValue("ozone-platform"),
+    process.env.XDG_SESSION_TYPE,
+    process.env.WAYLAND_DISPLAY,
+  );
   _effectiveWaylandBackendCache = result;
   return result;
 }

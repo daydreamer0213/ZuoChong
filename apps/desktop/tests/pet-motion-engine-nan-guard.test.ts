@@ -21,6 +21,7 @@ import {
   _resetMotionStatesForTesting,
   registerPet,
   motionSetPhysics,
+  motionMoveTo,
 } from "../src/pet-motion-engine.js";
 import { _setScreenForTesting as setDisplayScreen, invalidateDisplayCache, setCrossDisplayRoamingEnabled } from "../src/display.js";
 
@@ -122,6 +123,44 @@ describe("pet-motion-engine NaN coordinate guards", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, loopIntervalMs * 5));
 
     // Every call that did happen must have finite coordinates
+    for (const [x, y] of setPositionCalls) {
+      assert.ok(
+        Number.isFinite(x) && Number.isFinite(y),
+        `setPosition called with non-finite coords: (${x}, ${y})`,
+      );
+    }
+  });
+
+  it("in-flight motionMoveTo settles (promise resolves) even when getPosition() returns [NaN, NaN]", async () => {
+    // Regression for PR #74 review (Bug: NaN early-return stalled the motion loop,
+    // leaving moveTarget.elapsed frozen so the motionMoveTo promise never resolved).
+    _setScreenForTesting(normalScreen as any);
+    setDisplayScreen(normalScreen as any);
+    invalidateDisplayCache();
+
+    const setPositionCalls: Array<[number, number]> = [];
+    const accessor = makeWindowMock(NaN, NaN, (x, y) => setPositionCalls.push([x, y]));
+
+    registerPet("nan-move-test", accessor);
+    motionSetPhysics("nan-move-test", accessor, { gravity: true, bounce: 0.4 });
+
+    const movePromise = motionMoveTo("nan-move-test", accessor, { x: 500, y: 500 }, { durationMs: 100 });
+
+    const outcome = await Promise.race([
+      movePromise.then(() => "resolved" as const),
+      new Promise<"timeout">((resolve) => {
+        const t = setTimeout(() => resolve("timeout"), 1000);
+        t.unref?.();
+      }),
+    ]);
+
+    assert.equal(
+      outcome,
+      "resolved",
+      "motionMoveTo promise must resolve (loop must advance elapsed) even under NaN getPosition",
+    );
+
+    // And the NaN path must never have written a non-finite position
     for (const [x, y] of setPositionCalls) {
       assert.ok(
         Number.isFinite(x) && Number.isFinite(y),
