@@ -122,9 +122,12 @@ default pet, all agent pets, and all plugin-spawned pets. Pets on a removed
 display are snapped to the nearest remaining display; pets on surviving displays
 are left untouched.
 
-The `petCrossDisplayEnabled` toggle is in Control Center → Settings and is a
-global flag (not per-pet). Confinement remains strictly per-pet and always takes
-priority regardless of the cross-display flag.
+The `petCrossDisplayEnabled` toggle lives in Control Center → Settings, under
+the **Movement** section, and is a global flag (not per-pet). It is shown
+disabled with explanatory helper text until a movement plugin — one granted the
+`pet:move` permission, such as Walkabout — is enabled, since cross-display
+roaming has no effect without a mover driving motion. Confinement remains
+strictly per-pet and always takes priority regardless of the cross-display flag.
 
 ### Linux & Wayland
 

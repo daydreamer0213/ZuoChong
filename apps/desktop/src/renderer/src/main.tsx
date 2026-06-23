@@ -1041,6 +1041,7 @@ function SettingsView() {
   const [lanStatus, setLanStatus] = useState<LanStatusSnapshot | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [activeTab, setActiveTab] = useState<"general" | "reactions" | "plugins" | "lan">("general");
+  const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PluginPlatformSettings | null>(null);
   const [aiKeyStatus, setAiKeyStatus] = useState<{ hasKey: boolean }>({ hasKey: false });
   const [aiKeyDraft, setAiKeyDraft] = useState("");
@@ -1051,7 +1052,7 @@ function SettingsView() {
 
   async function loadSettings() {
     setError("");
-    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextPlatform, nextAiKey, nextLanStatus] = await Promise.all([
+    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextPlatform, nextAiKey, nextLanStatus, nextPluginsSnapshot] = await Promise.all([
       api.getSettingsState(),
       api.getReactionAnimationSettings(),
       api.getLaunchAtLogin(),
@@ -1059,6 +1060,7 @@ function SettingsView() {
       api.getPluginPlatformSettings().catch(() => null),
       api.getPluginAiApiKeyStatus().catch(() => ({ hasKey: false })),
       api.getLanStatus().catch(() => null),
+      api.getPluginsSnapshot().catch(() => null),
     ]);
     setSettings(nextSettings);
     setReactionSettings(nextReactions);
@@ -1067,12 +1069,17 @@ function SettingsView() {
     setPlatformSettings(nextPlatform);
     setAiKeyStatus(nextAiKey);
     setLanStatus(nextLanStatus);
+    setPluginsSnapshot(nextPluginsSnapshot);
     if (nextUpdate.state === "checking") {
       void api.checkForUpdates().then(setUpdateStatus).catch((err) => setError(String(err?.message ?? err)));
     }
   }
 
   useEffect(() => { void loadSettings().catch((err) => setError(String(err?.message ?? err))); }, []);
+
+  useEffect(() => api.onPluginsRefresh(() => {
+    void api.getPluginsSnapshot().then(setPluginsSnapshot).catch((err) => setError(String(err?.message ?? err)));
+  }), []);
 
   useEffect(() => {
     if (!message) return;
@@ -1144,6 +1151,10 @@ function SettingsView() {
     });
   }
 
+  const isMoverActive = (pluginsSnapshot?.plugins ?? []).some(
+    (p) => p.enabled && p.approvedPermissions.includes("pet:move")
+  );
+
   return <div className="settings-layout">
     {error && <div className="error settings-message">{error}</div>}
     {message && <div className="settings-success settings-message">{message}</div>}
@@ -1170,116 +1181,125 @@ function SettingsView() {
 
       <main className="settings-content">
         {activeTab === "general" && (
-          <div className="settings-section">
-            <p className="eyebrow">{t("settings.general.eyebrow")}</p>
-            <h2 className="settings-section-title">{t("settings.general.title")}</h2>
+          <>
+            <div className="settings-section">
+              <p className="eyebrow">{t("settings.general.eyebrow")}</p>
+              <h2 className="settings-section-title">{t("settings.general.title")}</h2>
 
-            <div className="settings-group">
-              <ToggleRow
-                title={t("settings.general.showOnLaunch.title")}
-                description={t("settings.general.showOnLaunch.description")}
-                checked={settings?.preferences.openDefaultPetOnLaunch ?? false}
-                disabled={!settings || !!busy}
-                onChange={(checked) => patchPreferences({ openDefaultPetOnLaunch: checked }, t("settings.toast.startupSaved"))}
-              />
-              <ToggleRow
-                title={t("settings.general.launchAtLogin.title")}
-                description={launchAtLogin?.supported ? t("settings.general.launchAtLogin.supported") : t("settings.general.launchAtLogin.unsupported")}
-                checked={launchAtLogin?.enabled ?? false}
-                disabled={!launchAtLogin?.supported || !!busy}
-                onChange={(checked) => void run(t("settings.busy.saving"), async () => { setLaunchAtLogin(await api.setLaunchAtLogin(checked)); setMessage(t("settings.toast.loginStartupSaved")); })}
-              />
-              <ToggleRow
-                title={t("settings.general.analytics.title")}
-                description={t("settings.general.analytics.description")}
-                checked={settings?.analytics.enabled ?? false}
-                disabled={!settings || !!busy}
-                onChange={setAnalyticsConsent}
-              />
-              <ToggleRow
-                title={t("settings.petConfinement.label")}
-                description={t("settings.petConfinement.description")}
-                checked={settings?.preferences.petConfinementEnabled ?? false}
-                disabled={!settings || !!busy}
-                testId="setting-pet-confinement-toggle"
-                onChange={(checked) => patchPreferences({ petConfinementEnabled: checked }, t("settings.toast.confinementSaved"))}
-              />
-              <ToggleRow
-                title={t("settings.petCrossDisplay.label")}
-                description={t("settings.petCrossDisplay.description")}
-                checked={settings?.preferences.petCrossDisplayEnabled ?? false}
-                disabled={!settings || !!busy}
-                testId="setting-pet-cross-display-toggle"
-                onChange={(checked) => patchPreferences({ petCrossDisplayEnabled: checked }, t("settings.toast.crossDisplaySaved"))}
-              />
-              <ToggleRow
-                title={t("settings.petGravity.label")}
-                description={t("settings.petGravity.description")}
-                checked={settings?.preferences.petGravityEnabled ?? false}
-                disabled={!settings || !!busy}
-                testId="setting-pet-gravity-toggle"
-                onChange={(checked) => patchPreferences({ petGravityEnabled: checked }, t("settings.toast.gravitySaved"))}
-              />
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <strong>{t("settings.general.petScale.title")}</strong>
-                  <small>{t("settings.general.petScale.description")}</small>
+              <div className="settings-group">
+                <ToggleRow
+                  title={t("settings.general.showOnLaunch.title")}
+                  description={t("settings.general.showOnLaunch.description")}
+                  checked={settings?.preferences.openDefaultPetOnLaunch ?? false}
+                  disabled={!settings || !!busy}
+                  onChange={(checked) => patchPreferences({ openDefaultPetOnLaunch: checked }, t("settings.toast.startupSaved"))}
+                />
+                <ToggleRow
+                  title={t("settings.general.launchAtLogin.title")}
+                  description={launchAtLogin?.supported ? t("settings.general.launchAtLogin.supported") : t("settings.general.launchAtLogin.unsupported")}
+                  checked={launchAtLogin?.enabled ?? false}
+                  disabled={!launchAtLogin?.supported || !!busy}
+                  onChange={(checked) => void run(t("settings.busy.saving"), async () => { setLaunchAtLogin(await api.setLaunchAtLogin(checked)); setMessage(t("settings.toast.loginStartupSaved")); })}
+                />
+                <ToggleRow
+                  title={t("settings.general.analytics.title")}
+                  description={t("settings.general.analytics.description")}
+                  checked={settings?.analytics.enabled ?? false}
+                  disabled={!settings || !!busy}
+                  onChange={setAnalyticsConsent}
+                />
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <strong>{t("settings.general.petScale.title")}</strong>
+                    <small>{t("settings.general.petScale.description")}</small>
+                  </div>
+                  <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, t("settings.toast.petScaleSaved"))}>
+                    {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
                 </div>
-                <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, t("settings.toast.petScaleSaved"))}>
-                  {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <strong>{t("settings.language.title")}</strong>
+                    <small>{t("settings.language.description")}</small>
+                  </div>
+                  <select className="settings-select" value={localePreference} disabled={!!busy} onChange={(event) => changeLocale(event.target.value)}>
+                    <option value="system">{t("settings.language.system")}</option>
+                    {availableLocales.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="settings-row">
-                <div className="settings-row-info">
-                  <strong>{t("settings.language.title")}</strong>
-                  <small>{t("settings.language.description")}</small>
+
+              <div className="settings-group">
+                <ToggleRow
+                  title={t("settings.petPool.label")}
+                  description={t("settings.petPool.description")}
+                  checked={settings?.preferences.petPoolEnabled ?? false}
+                  disabled={!settings || !!busy}
+                  onChange={(checked) => patchPreferences({ petPoolEnabled: checked }, t("settings.toast.petPoolSaved"))}
+                />
+                <div className={settings?.preferences.petPoolEnabled ? "" : "opacity-50 pointer-events-none"}>
+                  <PetPoolOrderList
+                    order={settings?.preferences.petPoolOrder ?? []}
+                    candidates={settings?.petPoolCandidates ?? []}
+                    disabled={!settings || !!busy || !(settings?.preferences.petPoolEnabled)}
+                    onChangeOrder={updatePetPoolOrder}
+                  />
                 </div>
-                <select className="settings-select" value={localePreference} disabled={!!busy} onChange={(event) => changeLocale(event.target.value)}>
-                  <option value="system">{t("settings.language.system")}</option>
-                  {availableLocales.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+              </div>
+
+              <div className="settings-actions">
+                <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.resetting"), async () => { setSettings(await api.resetDefaultPetPosition()); setMessage(t("settings.toast.positionReset")); })}>{t("settings.general.resetPosition")}</Button>
+              </div>
+
+              <div className="settings-system-footer">
+                <div className="settings-system-info">
+                  <RefreshIcon />
+                  <span>{t("settings.general.systemStatus")}</span>
+                  <span className="settings-system-version">{updateStatus?.currentVersion}</span>
+                  <span className="opacity-60">{formatUpdateStatus(updateStatus, t)}</span>
+                </div>
+                <div className="flex gap-2">
+                  {updateStatus?.state === "available" && (
+                    <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.opening"), async () => { await api.openUpdateReleasePage(); })}>{t("settings.general.updateAvailable")}</Button>
+                  )}
+                  <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run(t("settings.busy.checking"), async () => { setUpdateStatus(await api.checkForUpdates()); })}>
+                    {busy === t("settings.busy.checking") ? t("settings.general.checking") : t("settings.general.checkForUpdates")}
+                  </Button>
+                </div>
               </div>
             </div>
 
-            <div className="settings-group">
-              <ToggleRow
-                title={t("settings.petPool.label")}
-                description={t("settings.petPool.description")}
-                checked={settings?.preferences.petPoolEnabled ?? false}
-                disabled={!settings || !!busy}
-                onChange={(checked) => patchPreferences({ petPoolEnabled: checked }, t("settings.toast.petPoolSaved"))}
-              />
-              <div className={settings?.preferences.petPoolEnabled ? "" : "opacity-50 pointer-events-none"}>
-                <PetPoolOrderList
-                  order={settings?.preferences.petPoolOrder ?? []}
-                  candidates={settings?.petPoolCandidates ?? []}
-                  disabled={!settings || !!busy || !(settings?.preferences.petPoolEnabled)}
-                  onChangeOrder={updatePetPoolOrder}
+            <div className="settings-section">
+              <h2 className="settings-section-title">{t("settings.movement.title")}</h2>
+
+              <div className="settings-group">
+                <ToggleRow
+                  title={t("settings.petConfinement.label")}
+                  description={t("settings.petConfinement.description")}
+                  checked={settings?.preferences.petConfinementEnabled ?? false}
+                  disabled={!settings || !!busy}
+                  testId="setting-pet-confinement-toggle"
+                  onChange={(checked) => patchPreferences({ petConfinementEnabled: checked }, t("settings.toast.confinementSaved"))}
+                />
+                <ToggleRow
+                  title={t("settings.petCrossDisplay.label")}
+                  description={isMoverActive ? t("settings.petCrossDisplay.description") : t("settings.petCrossDisplay.helperNoMover")}
+                  checked={settings?.preferences.petCrossDisplayEnabled ?? false}
+                  disabled={!settings || !!busy || !isMoverActive}
+                  testId="setting-pet-cross-display-toggle"
+                  onChange={(checked) => patchPreferences({ petCrossDisplayEnabled: checked }, t("settings.toast.crossDisplaySaved"))}
+                />
+                <ToggleRow
+                  title={t("settings.petGravity.label")}
+                  description={t("settings.petGravity.description")}
+                  checked={settings?.preferences.petGravityEnabled ?? false}
+                  disabled={!settings || !!busy}
+                  testId="setting-pet-gravity-toggle"
+                  onChange={(checked) => patchPreferences({ petGravityEnabled: checked }, t("settings.toast.gravitySaved"))}
                 />
               </div>
             </div>
-
-            <div className="settings-actions">
-              <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.resetting"), async () => { setSettings(await api.resetDefaultPetPosition()); setMessage(t("settings.toast.positionReset")); })}>{t("settings.general.resetPosition")}</Button>
-            </div>
-
-            <div className="settings-system-footer">
-              <div className="settings-system-info">
-                <RefreshIcon />
-                <span>{t("settings.general.systemStatus")}</span>
-                <span className="settings-system-version">{updateStatus?.currentVersion}</span>
-                <span className="opacity-60">{formatUpdateStatus(updateStatus, t)}</span>
-              </div>
-              <div className="flex gap-2">
-                {updateStatus?.state === "available" && (
-                  <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.opening"), async () => { await api.openUpdateReleasePage(); })}>{t("settings.general.updateAvailable")}</Button>
-                )}
-                <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run(t("settings.busy.checking"), async () => { setUpdateStatus(await api.checkForUpdates()); })}>
-                  {busy === t("settings.busy.checking") ? t("settings.general.checking") : t("settings.general.checkForUpdates")}
-                </Button>
-              </div>
-            </div>
-          </div>
+          </>
         )}
 
         {activeTab === "reactions" && (
