@@ -17,6 +17,7 @@ import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
 import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 import { isFocusActionAvailable } from "./capabilities.js";
+import { computeEffectiveWaylandBackend } from "./wayland-backend.js";
 
 export interface PetWindowInteractionHooks {
   readonly onBubbleDismissed?: (dismissToken: string) => void;
@@ -82,11 +83,39 @@ const windowLoadSequences = new WeakMap<BrowserWindow, number>();
 const petMouseInteropRecovery = new WeakMap<BrowserWindow, (reason: string) => void>();
 const petWindowDragging = new WeakMap<BrowserWindow, boolean>();
 
-export function shouldUseWaylandNativePetDrag(): boolean {
-  return (
-    process.platform === "linux" &&
-    (process.env.XDG_SESSION_TYPE === "wayland" || Boolean(process.env.WAYLAND_DISPLAY))
+/**
+ * Returns true when Electron is effectively running on the native Wayland
+ * backend (ozone-platform=wayland). Under x11/XWayland this returns false
+ * even on a Wayland session, because the positioning and z-order APIs work.
+ *
+ * Must be called after app is ready (after main.ts has appended the switch).
+ * Cached on first call so window-creation cost is negligible.
+ */
+let _effectiveWaylandBackendCache: boolean | undefined;
+export function isEffectiveWaylandBackend(): boolean {
+  if (_effectiveWaylandBackendCache !== undefined) return _effectiveWaylandBackendCache;
+  // Delegate to the pure, Electron-free decision in wayland-backend.ts so the
+  // exact production logic is unit-testable without importing this module.
+  const result = computeEffectiveWaylandBackend(
+    process.platform,
+    app.commandLine.getSwitchValue("ozone-platform"),
+    process.env.XDG_SESSION_TYPE,
+    process.env.WAYLAND_DISPLAY,
   );
+  _effectiveWaylandBackendCache = result;
+  return result;
+}
+
+export function _resetEffectiveWaylandBackendCache(): void {
+  _effectiveWaylandBackendCache = undefined;
+}
+
+/**
+ * Whether to use Wayland native window-move drag instead of the manual
+ * setBounds drag path.  Under x11/XWayland the manual path works correctly.
+ */
+export function shouldUseWaylandNativePetDrag(): boolean {
+  return isEffectiveWaylandBackend();
 }
 
 export function isPetWindowDragging(window: BrowserWindow): boolean {

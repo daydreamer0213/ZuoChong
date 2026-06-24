@@ -193,7 +193,10 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
     const live = accessor();
     if (!live || live.isDestroyed() || state.moveGeneration !== generation || getIsPetWindowDragging()(live)) return;
     const t = easeProgress(step / steps, easing);
-    live.setPosition(Math.round(startX + (clamped.x - startX) * t), Math.round(startY + (clamped.y - startY) * t), false);
+    const nextX = Math.round(startX + (clamped.x - startX) * t);
+    const nextY = Math.round(startY + (clamped.y - startY) * t);
+    if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return;  // abort move if NaN (e.g. startX was NaN from mid-destroy getPosition)
+    live.setPosition(nextX, nextY, false);
     await delay(durationMs / steps);
   }
 }
@@ -256,6 +259,20 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
     return;
   }
   const [x, y] = window.getPosition();
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    // Native position is unavailable/NaN (mid-destroy race or monitor disconnect).
+    // We cannot write a position this tick, but we still settle the move-to clock
+    // so an awaited motionMoveTo() resolves instead of hanging until coordinates
+    // become finite again — mirroring the hidden/dragging guard above.
+    if (state.moveTarget) {
+      state.moveTarget.elapsed += loopIntervalMs;
+      if (state.moveTarget.elapsed >= state.moveTarget.durationMs) {
+        state.moveTarget = null;
+        state.moveGeneration += 1;
+      }
+    }
+    return;
+  }
   let rawX = x + state.fracX;
   let rawY = y + state.fracY;
 
@@ -285,12 +302,17 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
   }
 
   if (state.physics?.gravity) {
-    // Use bottom-center anchor (not geometric center) for display lookup to match
-    // the anchor used by isOnAnyDisplay() in display.ts. This prevents floor flips
-    // when the pet straddles the seam between displays of different workArea heights.
-    const bottomCenterX = x + Math.round(defaultPetWindowSize.width / 2);
-    const bottomCenterY = y + defaultPetWindowSize.height;
-    const display = getScreen().getDisplayNearestPoint({ x: bottomCenterX, y: bottomCenterY });
+    // Use the geometric center of the pet window for display lookup. This keeps the
+    // anchor well inside the work area even when the pet is resting on the floor, so
+    // getDisplayNearestPoint returns a stable display. The previous bottom-center anchor
+    // (y + petHeight) landed exactly on workArea.y + workArea.height — 1px outside the
+    // half-open work area — which triggered an unstable Euclidean nearest-display
+    // tie-break at monitor seams and caused rapid floor oscillation between
+    // mismatched-height displays. Using the geometric center also aligns with
+    // clampToVisibleWorkArea, which already uses the center for display selection.
+    const centerX = x + Math.round(defaultPetWindowSize.width / 2);
+    const centerY = y + Math.round(defaultPetWindowSize.height / 2);
+    const display = getScreen().getDisplayNearestPoint({ x: centerX, y: centerY });
     const confinementBounds = getEffectiveConfinementBounds(petHandleId);
     const floor = computeGravityFloor(confinementBounds, display.workArea.y, display.workArea.height, defaultPetWindowSize.height);
     state.physics.vy = Math.min(state.physics.vy + 2.2, 48);
@@ -312,6 +334,7 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
 
   if (nextX !== x || nextY !== y) {
     const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
+    if (!Number.isFinite(clamped.x) || !Number.isFinite(clamped.y)) return;  // skip write when clamp produces NaN (e.g. from NaN workArea on monitor disconnect)
     window.setPosition(clamped.x, clamped.y, false);
   }
 }

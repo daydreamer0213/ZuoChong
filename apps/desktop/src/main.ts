@@ -27,13 +27,24 @@ import { installInternalUiHandlers, installInternalUiProtocol } from "./windows.
 app.commandLine.appendSwitch("use-mock-keychain");
 app.commandLine.appendSwitch("password-store", "basic");
 
-// GNOME Wayland does not allow Electron apps to reliably control window
-// z-order or absolute position, which breaks the desktop-pet contract: staying
-// above normal windows and dragging to a user-chosen screen position. Prefer
-// X11/Xwayland on Linux unless the user explicitly chooses another Ozone
-// backend at launch.
-const hasExplicitOzonePlatformArg = process.argv.some((arg) => arg === "--ozone-platform" || arg.startsWith("--ozone-platform="));
-if (process.platform === "linux" && !app.commandLine.hasSwitch("ozone-platform")) {
+// OpenPets requires programmatic window positioning and z-ordering, which
+// native Wayland compositors disallow for XDG-shell toplevels. To ensure
+// gravity, drag, and always-on-top work correctly on all KDE/GNOME Linux
+// desktops, we force the x11/XWayland backend. Users who explicitly need
+// native Wayland can set OPENPETS_ALLOW_WAYLAND=1, but gravity, walkabout,
+// and manual drag will not function under native Wayland.
+const isLinux = process.platform === "linux";
+const allowWayland = process.env.OPENPETS_ALLOW_WAYLAND === "1";
+const hasExplicitOzonePlatformArg = process.argv.some(
+  (arg) => arg === "--ozone-platform" || arg.startsWith("--ozone-platform="),
+);
+// When OPENPETS_ALLOW_WAYLAND=1 we deliberately do NOT append an ozone-platform
+// switch: Electron honours the system default (typically wayland on a Wayland
+// session, or any explicit --ozone-platform the user passed) and we warn at
+// startup that positioning/gravity/walkabout/drag are unsupported there.
+if (isLinux && !allowWayland) {
+  // Force x11 even if the user passed --ozone-platform=wayland or auto;
+  // we overwrite any pre-existing switch so nothing silently slips through.
   app.commandLine.appendSwitch("ozone-platform", "x11");
 }
 
@@ -50,7 +61,11 @@ if (!gotSingleInstanceLock) {
     if (process.platform === "win32") {
       app.setAppUserModelId("dev.openpets.app");
     }
-    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null });
+    info("app", "startup begin", { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, pid: process.pid, ozonePlatform: app.commandLine.getSwitchValue("ozone-platform") || null, explicitOzonePlatformArg: hasExplicitOzonePlatformArg });
+    if (isLinux && allowWayland) {
+      const effectiveOzone = app.commandLine.getSwitchValue("ozone-platform") || "(auto/system)";
+      warn("app", "native Wayland mode active — pet positioning, gravity, walkabout, and drag are unsupported under native Wayland; remove OPENPETS_ALLOW_WAYLAND=1 to restore full functionality", { effectiveOzone });
+    }
 
     if (process.platform === "darwin") {
       app.dock?.setIcon(createAppIcon());

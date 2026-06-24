@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
+import { computeEffectiveWaylandBackend } from "../src/wayland-backend.js";
+
+// ─── real-function predicate tests ───────────────────────────────────────────
+// These exercise the REAL production predicate — the pure, Electron-free core
+// that pet-window.ts's isEffectiveWaylandBackend() delegates to — so the test
+// and production logic cannot drift. The Electron-bound runtime wiring
+// (app.commandLine.getSwitchValue / process.env) and the one-time cache live in
+// pet-window.ts; the main.ts x11-forcing decision is guarded separately by
+// check-packaging-contract.ts.
+
+describe("computeEffectiveWaylandBackend (production predicate)", () => {
+  it("returns false on non-Linux platforms", () => {
+    assert.equal(computeEffectiveWaylandBackend("darwin", "", "wayland", "/run/wayland-0"), false);
+    assert.equal(computeEffectiveWaylandBackend("win32", "", "wayland", "/run/wayland-0"), false);
+  });
+
+  it("returns true when the ozone switch is explicitly wayland", () => {
+    assert.equal(computeEffectiveWaylandBackend("linux", "wayland", undefined, undefined), true);
+    assert.equal(computeEffectiveWaylandBackend("linux", "wayland", "x11", undefined), true);
+  });
+
+  it("returns false when the ozone switch is explicitly x11 (the forced default on Linux)", () => {
+    assert.equal(computeEffectiveWaylandBackend("linux", "x11", "wayland", "/run/wayland-0"), false);
+  });
+
+  it("falls back to XDG_SESSION_TYPE when ozone is auto/empty", () => {
+    assert.equal(computeEffectiveWaylandBackend("linux", "", "wayland", undefined), true);
+    assert.equal(computeEffectiveWaylandBackend("linux", "auto", "wayland", undefined), true);
+    assert.equal(computeEffectiveWaylandBackend("linux", "", "x11", undefined), false);
+  });
+
+  it("falls back to WAYLAND_DISPLAY when ozone is auto/empty and XDG_SESSION_TYPE is absent", () => {
+    assert.equal(computeEffectiveWaylandBackend("linux", "", undefined, "/run/user/1000/wayland-0"), true);
+    assert.equal(computeEffectiveWaylandBackend("linux", "", undefined, undefined), false);
+    assert.equal(computeEffectiveWaylandBackend("linux", "", undefined, ""), false);
+  });
+});
