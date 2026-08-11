@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { getOpenPetsUserDataPath, parseArgs, validateCatalog, validateCatalogV3Index, validateCatalogV3Page, validateCatalogV3SearchPage, validatePetId, validateZipEntryName } from "./index.js";
@@ -9,7 +10,7 @@ assert.equal(validatePetId("review-owl"), "review-owl");
 assert.throws(() => validatePetId("../bad"));
 assert.throws(() => validatePetId("builtin"));
 
-assert.equal(getOpenPetsUserDataPath("darwin", {}), join(process.env.HOME || "", "Library", "Application Support", "OpenPets"));
+assert.equal(getOpenPetsUserDataPath("darwin", {}), join(homedir(), "Library", "Application Support", "OpenPets"));
 assert.equal(getOpenPetsUserDataPath("linux", { XDG_CONFIG_HOME: "/tmp/config" }), join("/tmp/config", "OpenPets"));
 assert.equal(getOpenPetsUserDataPath("win32", { APPDATA: "C:\\Users\\me\\AppData\\Roaming" }), join("C:\\Users\\me\\AppData\\Roaming", "OpenPets"));
 assert.equal(getOpenPetsUserDataPath("linux", { OPENPETS_USER_DATA: "/tmp/openpets-test" }), "/tmp/openpets-test");

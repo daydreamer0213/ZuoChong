@@ -4,8 +4,10 @@ import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import sharp from "sharp";
+
 import { getAppStateSnapshot, markPetBroken, type PetScaleValue } from "./app-state.js";
-import { clampToNearestDisplayIfOffscreen, clampToVisibleWorkArea, defaultPetWindowSize, getDefaultPetInitialPosition, isCrossDisplayRoamingEnabled, type Point } from "./display.js";
+import { clampToNearestDisplayIfOffscreen, clampToVisibleWorkArea, computeSnappedHiddenPosition, defaultPetWindowSize, detectSnapEdge, featherStripSize, fitSpriteScaleToWindow, getDefaultPetInitialPosition, isCrossDisplayRoamingEnabled, petSnapThresholdPx, type Point, type SnapEdge } from "./display.js";
 import { builtInPet } from "./built-in-pet.js";
 import { getInstalledPetDir } from "./pet-paths.js";
 import { getActiveLocale, getActiveLocaleLang, t } from "./i18n/index.js";
@@ -15,7 +17,8 @@ import { debug, error as logError, info, warn } from "./logger.js";
 import { executeDefaultPetPluginCommand, executeDefaultPetPluginMenuSelect, getDefaultPetPluginCommands, getDefaultPetPluginMenuItems } from "./plugin-service.js";
 import type { ActiveBubble } from "./plugin-bubble-arbiter.js";
 import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginBubbleHudItem } from "./plugin-sdk-bridge.js";
-import { defaultPetSprite, getConfiguredSpriteCacheKey, getConfiguredSpriteStates, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type SpriteStateDefinition, type UniversalSpriteState } from "./reaction-animation-mapping.js";
+import { maxCodexPetJsonBytes, validateCodexPetMetadata } from "./codex-pets-core.js";
+import { applySpriteLayoutOverride, defaultPetSprite, deriveCodexSpriteLayout, getConfiguredSpriteCacheKey, getConfiguredSpriteStates, getSpriteAnimationDurationMs, motionToSpriteState, resolveReactionSpriteState, spriteLayoutMatchesImage, type PetMotionState, type PetSpriteLayout, type SpriteStateDefinition, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 import { isFocusActionAvailable } from "./capabilities.js";
 import { canForwardMouseEvents as platformCanForwardMouseEvents, shouldWatchForwardedMouseEvents } from "./mouse-forwarding.js";
 import { computeEffectiveWaylandBackend, shouldPetWindowBeFocusable } from "./wayland-backend.js";
@@ -90,6 +93,13 @@ interface PetContentRender {
   readonly bodyHtml: string;
   readonly reactionState: UniversalSpriteState;
   readonly cacheKey: string;
+  readonly spriteMetrics: PetSpriteMetrics;
+}
+
+interface PetSpriteMetrics {
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly scale: number;
 }
 
 const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
@@ -99,6 +109,23 @@ const windowLoadSequences = new WeakMap<BrowserWindow, number>();
 const petWindowFocusPolicy = new WeakMap<BrowserWindow, boolean>();
 const petMouseInteropRecovery = new WeakMap<BrowserWindow, (reason: string) => void>();
 const petWindowDragging = new WeakMap<BrowserWindow, boolean>();
+const petWindowSpriteMetrics = new WeakMap<BrowserWindow, PetSpriteMetrics>();
+
+/** Windows currently edge-snapped hidden (feather strip visible). */
+export interface SnappedPetState {
+  readonly edge: SnapEdge;
+  readonly restorePosition: Point;
+}
+
+const snappedPetWindows = new WeakMap<BrowserWindow, SnappedPetState>();
+
+export function isPetWindowSnapped(window: BrowserWindow): boolean {
+  return snappedPetWindows.has(window);
+}
+
+export function getSnappedPetState(window: BrowserWindow): SnappedPetState | undefined {
+  return snappedPetWindows.get(window);
+}
 
 /**
  * Returns true when Electron is effectively running on the native Wayland
@@ -137,6 +164,48 @@ export function shouldUseWaylandNativePetDrag(): boolean {
 
 export function isPetWindowDragging(window: BrowserWindow): boolean {
   return petWindowDragging.get(window) === true;
+}
+
+/** Smoothly move a pet window to a target position (smoothstep over fixed steps). */
+function animatePetWindowTo(window: BrowserWindow, target: Point, durationMs: number, onDone?: () => void): void {
+  if (window.isDestroyed()) return;
+  const start = window.getBounds();
+  const steps = 8;
+  let step = 0;
+  const intervalMs = Math.max(8, Math.round(durationMs / steps));
+  const timer = setInterval(() => {
+    if (window.isDestroyed()) {
+      clearInterval(timer);
+      return;
+    }
+    step += 1;
+    const t = step / steps;
+    const eased = t * t * (3 - 2 * t);
+    window.setBounds({
+      x: Math.round(start.x + (target.x - start.x) * eased),
+      y: Math.round(start.y + (target.y - start.y) * eased),
+      width: start.width,
+      height: start.height,
+    }, false);
+    if (step >= steps) {
+      clearInterval(timer);
+      onDone?.();
+    }
+  }, intervalMs);
+  timer.unref?.();
+}
+
+function notifySnapState(window: BrowserWindow, snapped: boolean): void {
+  if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+  window.webContents.send("openpets:pet-snap-state", { snapped, edge: snapped ? getSnappedPetState(window)?.edge : undefined });
+}
+
+/** Feather strip dimensions scaled with the pet, so the sliver stays proportional. */
+function scaledFeatherStripSize(scale: number): { readonly width: number; readonly height: number } {
+  return {
+    width: Math.max(10, Math.round(featherStripSize.width * scale)),
+    height: Math.max(36, Math.round(featherStripSize.height * scale)),
+  };
 }
 
 export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismissToken?: string): BrowserWindow {
@@ -488,6 +557,14 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
       debug("pet.window", "manual drag start ignored on Wayland native drag", { windowId });
       return;
     }
+    const snapped = snappedPetWindows.get(window);
+    if (snapped) {
+      snappedPetWindows.delete(window);
+      notifySnapState(window, false);
+      const startBounds = window.getBounds();
+      window.setBounds({ x: snapped.restorePosition.x, y: snapped.restorePosition.y, width: startBounds.width, height: startBounds.height }, false);
+      debug("pet.window", "drag start restored from edge snap", { windowId, restorePosition: snapped.restorePosition });
+    }
     const startBounds = window.getBounds();
     dragging = { startScreenX: point.screenX, startScreenY: point.screenY, startWindowX: startBounds.x, startWindowY: startBounds.y, width: startBounds.width, height: startBounds.height };
     petWindowDragging.set(window, true);
@@ -518,7 +595,37 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
     dragging = null;
     petWindowDragging.set(window, false);
     debug("pet.window", "drag end", { windowId, position: window.isDestroyed() ? null : readWindowPosition(window) });
-    if (wasDragging) onPetEvent?.("pet:dragEnd", {});
+    if (wasDragging && !window.isDestroyed()) {
+      if (!snappedPetWindows.has(window)) {
+        // Use the raw window position, NOT readWindowPosition(): the clamping
+        // helpers pull the window back inside the work area, which would erase
+        // the "sprite flush against the edge" state the snap check depends on.
+        // The cursor is passed too: users drop flush by dragging the mouse to
+        // the edge, which leaves the sprite (grabbed near its center) sticking
+        // past the edge.
+        const [rawX, rawY] = window.getPosition();
+        const position = { x: rawX, y: rawY };
+        const metrics = petWindowSpriteMetrics.get(window) ?? {
+          frameWidth: defaultPetSprite.frameWidth,
+          frameHeight: defaultPetSprite.frameHeight,
+          scale: getAppStateSnapshot().preferences.petScale as PetScaleValue,
+        };
+        const cursor = window.isDestroyed() ? undefined : screen.getCursorScreenPoint();
+        const edge = detectSnapEdge(position, defaultPetWindowSize, metrics.scale, metrics, undefined, cursor);
+        debug("pet.window", "drag end snap check", { windowId, position, metrics, edge, cursor, threshold: petSnapThresholdPx });
+        if (edge) {
+          const restorePosition = position;
+          const hiddenPosition = computeSnappedHiddenPosition(position, edge, defaultPetWindowSize, scaledFeatherStripSize(metrics.scale));
+          debug("pet.window", "edge snap", { windowId, edge, restorePosition, hiddenPosition });
+          animatePetWindowTo(window, hiddenPosition, 170, () => {
+            if (window.isDestroyed()) return;
+            snappedPetWindows.set(window, { edge, restorePosition });
+            notifySnapState(window, true);
+          });
+        }
+      }
+      onPetEvent?.("pet:dragEnd", {});
+    }
   };
 
   const handleBubbleDismissed = (event: IpcMainEvent, dismissToken: unknown): void => {
@@ -551,6 +658,15 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
     if (typeof name !== "string" || !allowedPetEventNames.has(name)) return;
     const data = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
     if (name !== "pet:hover") debug("pet.window", "pet event", { windowId, name });
+    if (name === "pet:clicked" && snappedPetWindows.has(window)) {
+      const snapped = snappedPetWindows.get(window);
+      if (snapped) {
+        snappedPetWindows.delete(window);
+        notifySnapState(window, false);
+        debug("pet.window", "edge snap restored by click", { windowId, edge: snapped.edge });
+        animatePetWindowTo(window, snapped.restorePosition, 170, undefined);
+      }
+    }
     onPetEvent?.(name, data);
   };
 
@@ -599,6 +715,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
     clearForwardingWatch();
     petMouseInteropRecovery.delete(window);
     petWindowDragging.delete(window);
+    petWindowSpriteMetrics.delete(window);
     if (!webContents.isDestroyed()) {
       webContents.off("did-start-navigation", resetForNavigation);
       webContents.off("did-start-loading", resetForNavigation);
@@ -745,7 +862,8 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
   debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, hasPluginBubble: Boolean(pluginBubbles?.transient), hasPinned: Boolean(pluginBubbles?.pinned), defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
   applyPetWindowFocusPolicy(window, petPluginBubblesHaveInteractiveInput(pluginBubbles));
   const render = await createDefaultPetRender(paused, display, badge, dismissToken, pluginBubbles);
-  applyLinuxPetWindowShape(window, getAppStateSnapshot().preferences.petScale as PetScaleValue, Boolean(display?.message || display?.reactionMessage || display?.reaction || display?.mediaPath || badge || paused || pluginBubbles?.transient || pluginBubbles?.pinned));
+  petWindowSpriteMetrics.set(window, render.spriteMetrics);
+  applyLinuxPetWindowShape(window, render.spriteMetrics, Boolean(display?.message || display?.reactionMessage || display?.reaction || display?.mediaPath || badge || paused || pluginBubbles?.transient || pluginBubbles?.pinned));
   if (tryUpdateLoadedPetContent(window, render, "default", sequence)) return;
   await loadPetHtmlFile(window, render.html, "default", sequence).then(() => {
     petWindowRenderCache.set(window, render.cacheKey);
@@ -769,7 +887,8 @@ export async function loadExplicitPetContent(window: BrowserWindow, petId: strin
     const render = pet.id === builtInPet.id
       ? createBuiltInPetRender(false, display, badge, scale, `explicit:${pet.id}`, dismissToken, pluginBubbles)
       : await createInstalledPetRender(pet.id, pet.displayName, false, display, scale, badge, `explicit:${pet.id}`, dismissToken, pluginBubbles);
-    applyLinuxPetWindowShape(window, scale, Boolean(display?.message || display?.reactionMessage || display?.reaction || display?.mediaPath || badge || pluginBubbles?.transient || pluginBubbles?.pinned));
+    petWindowSpriteMetrics.set(window, render.spriteMetrics);
+    applyLinuxPetWindowShape(window, render.spriteMetrics, Boolean(display?.message || display?.reactionMessage || display?.reaction || display?.mediaPath || badge || pluginBubbles?.transient || pluginBubbles?.pinned));
     if (tryUpdateLoadedPetContent(window, render, `explicit-${pet.id}`, sequence)) return;
     await loadPetHtmlFile(window, render.html, `explicit-${pet.id}`, sequence);
     petWindowRenderCache.set(window, render.cacheKey);
@@ -808,12 +927,31 @@ export function mergePetTransientDisplay(current: PetTransientDisplay | null, ne
   return { ...current, reaction: next.reaction, dismissToken: next.dismissToken ?? current.dismissToken };
 }
 
-export function getTransientReactionAnimationMs(display: PetTransientDisplay): number | null {
+export function getTransientReactionAnimationMs(display: PetTransientDisplay, layout: PetSpriteLayout = defaultPetSprite): number | null {
   if (!display.reaction) return null;
   const state = getReactionSpriteState(display.reaction);
-  const row = getConfiguredSpriteStates(getAppStateSnapshot().preferences.waitingAnimationDurationMs)[state];
-  const iterations = "iterations" in row ? row.iterations : "infinite";
-  return typeof iterations === "number" ? row.durationMs * iterations : null;
+  return getSpriteAnimationDurationMs(getConfiguredSpriteLayout(layout), state);
+}
+
+export async function getTransientReactionAnimationMsForPet(display: PetTransientDisplay, petId: string): Promise<number | null> {
+  const fallback = getTransientReactionAnimationMs(display);
+  if (!display.reaction || petId === builtInPet.id) return fallback;
+  const selected = getAppStateSnapshot().pets.installed.find((pet) => pet.id === petId);
+  if (!selected || selected.broken) return fallback;
+  try {
+    const petDir = getInstalledPetDir(petId);
+    const layout = await resolveInstalledPetSpriteLayout(petId, petDir, join(petDir, "spritesheet.webp"));
+    return getTransientReactionAnimationMs(display, layout);
+  } catch {
+    return fallback;
+  }
+}
+
+function getConfiguredSpriteLayout(layout: PetSpriteLayout): PetSpriteLayout {
+  return {
+    ...layout,
+    states: getConfiguredSpriteStates(getAppStateSnapshot().preferences.waitingAnimationDurationMs, layout.states),
+  };
 }
 
 export function getTransientDisplayDurationMs(display: PetTransientDisplay): number {
@@ -889,15 +1027,16 @@ export function getSafeDefaultPetPosition(position: Point | undefined): Point {
 
 export function readWindowPosition(window: BrowserWindow): Point {
   const [x, y] = window.getPosition();
+  if (snappedPetWindows.has(window)) return { x, y };
   if (isCrossDisplayRoamingEnabled()) return clampToNearestDisplayIfOffscreen({ x, y }, defaultPetWindowSize);
   return clampToVisibleWorkArea({ x, y }, defaultPetWindowSize);
 }
 
-function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, hasBubble: boolean): void {
+function applyLinuxPetWindowShape(window: BrowserWindow, metrics: PetSpriteMetrics, hasBubble: boolean): void {
   if (process.platform !== "linux" || window.isDestroyed()) return;
 
-  const scaledWidth = Math.ceil(defaultPetSprite.frameWidth * scale);
-  const scaledHeight = Math.ceil(defaultPetSprite.frameHeight * scale);
+  const scaledWidth = Math.ceil(metrics.frameWidth * metrics.scale);
+  const scaledHeight = Math.ceil(metrics.frameHeight * metrics.scale);
   const petBottom = 22;
   const hitPadding = 18;
   const petHitboxWidth = scaledWidth + hitPadding * 2;
@@ -923,7 +1062,7 @@ function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, h
 
   try {
     window.setShape(shape);
-    debug("pet.window", "linux window shape applied", { windowId: window.id, scale, hasBubble, shape });
+    debug("pet.window", "linux window shape applied", { windowId: window.id, metrics, hasBubble, shape });
   } catch (error) {
     logError("pet.window", "linux window shape failed", error instanceof Error ? error : { error });
   }
@@ -941,6 +1080,7 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
 
 function createBuiltInPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, scale: PetScaleValue, cachePrefix: string, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): PetContentRender {
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", defaultPetSprite.fileName)).toString();
+  const spriteMetrics = { frameWidth: defaultPetSprite.frameWidth, frameHeight: defaultPetSprite.frameHeight, scale };
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const bodyHtml = createPetBodyMarkup("OpenPets default pet", createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned);
   const reactionState = getReactionSpriteState(display?.reaction);
@@ -951,6 +1091,7 @@ function createBuiltInPetRender(paused: boolean, display: PetTransientDisplay | 
     cacheKey: `${cachePrefix}:${paused}:${scale}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
+    spriteMetrics,
     html: `<!doctype html>
     <html lang="${getActiveLocaleLang()}" data-reaction-state="${reactionState}" data-motion-state="idle" data-native-pet-drag="${shouldUseWaylandNativePetDrag() ? "wayland" : "manual"}">
       <head>
@@ -959,7 +1100,7 @@ function createBuiltInPetRender(paused: boolean, display: PetTransientDisplay | 
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>OpenPets Default Pet</title>
         <style>
-          ${createPetWindowCss(paused, scale)}
+          ${createPetWindowCss(paused, spriteMetrics)}
           .sprite {
             width: ${defaultPetSprite.frameWidth}px;
             height: ${defaultPetSprite.frameHeight}px;
@@ -976,7 +1117,7 @@ function createBuiltInPetRender(paused: boolean, display: PetTransientDisplay | 
             transform: scale(${scale});
             transform-origin: top left;
           }
-          ${createSpriteStateCss(".sprite", stateRows)}
+          ${createSpriteStateCss(".sprite", defaultPetSprite, stateRows)}
           @keyframes pet-frames {
             from { background-position: 0 var(--sprite-row-y); }
             to { background-position: calc(-${defaultPetSprite.frameWidth}px * var(--sprite-frames)) var(--sprite-row-y); }
@@ -1012,23 +1153,28 @@ async function tryCreateInstalledPetRender(paused: boolean, display: PetTransien
 }
 
 async function createInstalledPetRender(petId: string, displayName: string, paused: boolean, display: PetTransientDisplay | null, scale: PetScaleValue, badge: PetStatusBadgeReaction | null, cachePrefix: string, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null): Promise<PetContentRender> {
-  const spritesheetPath = join(getInstalledPetDir(petId), "spritesheet.webp");
+  const petDir = getInstalledPetDir(petId);
+  const spritesheetPath = join(petDir, "spritesheet.webp");
   const spritesheet = await stat(spritesheetPath);
   if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) {
     throw new Error("Installed pet spritesheet is missing or too large.");
   }
 
+  const layout = await resolveInstalledPetSpriteLayout(petId, petDir, spritesheetPath);
+  const effectiveScale = fitSpriteScaleToWindow(scale, layout);
+  const spriteMetrics = { frameWidth: layout.frameWidth, frameHeight: layout.frameHeight, scale: effectiveScale };
   const imageUrl = pathToFileURL(spritesheetPath).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles), `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned);
   const reactionState = getReactionSpriteState(display?.reaction);
   const waitingAnimationDurationMs = getAppStateSnapshot().preferences.waitingAnimationDurationMs;
-  const stateRows = getConfiguredSpriteStates(waitingAnimationDurationMs);
+  const stateRows = getConfiguredSpriteStates(waitingAnimationDurationMs, layout.states);
 
   return {
-    cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}`,
+    cacheKey: `${cachePrefix}:${paused}:${effectiveScale}:${layout.frameWidth}x${layout.frameHeight}:${layout.rows}x${layout.columns}:${spritesheet.mtimeMs}:${spritesheet.size}:${getConfiguredSpriteCacheKey(waitingAnimationDurationMs)}:${getActiveLocale()}`,
     bodyHtml,
     reactionState,
+    spriteMetrics,
     html: `<!doctype html>
       <html lang="${getActiveLocaleLang()}" data-reaction-state="${reactionState}" data-motion-state="idle" data-native-pet-drag="${shouldUseWaylandNativePetDrag() ? "wayland" : "manual"}">
         <head>
@@ -1037,16 +1183,16 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>OpenPets Default Pet</title>
           <style>
-            ${createPetWindowCss(paused, scale)}
-            .installed-card { width: ${Math.ceil(defaultPetSprite.frameWidth * scale)}px; height: ${Math.ceil(defaultPetSprite.frameHeight * scale)}px; overflow: visible; position: relative; }
+            ${createPetWindowCss(paused, spriteMetrics)}
+            .installed-card { width: ${Math.ceil(layout.frameWidth * effectiveScale)}px; height: ${Math.ceil(layout.frameHeight * effectiveScale)}px; overflow: visible; position: relative; }
             .installed-sprite {
               position: absolute;
               left: 0;
               top: 0;
-              width: ${defaultPetSprite.frameWidth}px;
-              height: ${defaultPetSprite.frameHeight}px;
+              width: ${layout.frameWidth}px;
+              height: ${layout.frameHeight}px;
               background-image: url("${escapeCssUrl(imageUrl)}");
-              background-size: ${defaultPetSprite.frameWidth * defaultPetSprite.columns}px ${defaultPetSprite.frameHeight * defaultPetSprite.rows}px;
+              background-size: ${layout.frameWidth * layout.columns}px ${layout.frameHeight * layout.rows}px;
               background-repeat: no-repeat;
               --sprite-row-y: 0px;
               --sprite-frames: ${stateRows.idle.frames};
@@ -1055,13 +1201,13 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
               background-position: 0 var(--sprite-row-y);
               animation: pet-frames var(--sprite-duration) steps(var(--sprite-frames)) var(--sprite-iterations);
               animation-play-state: var(--play-state);
-              transform: scale(${scale});
+              transform: scale(${effectiveScale});
               transform-origin: top left;
             }
-            ${createSpriteStateCss(".installed-sprite", stateRows)}
+            ${createSpriteStateCss(".installed-sprite", layout, stateRows)}
             @keyframes pet-frames {
               from { background-position: 0 var(--sprite-row-y); }
-              to { background-position: calc(-${defaultPetSprite.frameWidth}px * var(--sprite-frames)) var(--sprite-row-y); }
+              to { background-position: calc(-${layout.frameWidth}px * var(--sprite-frames)) var(--sprite-row-y); }
             }
           </style>
         </head>
@@ -1072,10 +1218,41 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   };
 }
 
+async function resolveInstalledPetSpriteLayout(petId: string, petDir: string, spritesheetPath: string): Promise<PetSpriteLayout> {
+  let imageWidth: number | undefined;
+  let imageHeight: number | undefined;
+  try {
+    const dimensions = await sharp(spritesheetPath, { limitInputPixels: 100_000_000 }).metadata();
+    imageWidth = dimensions.width;
+    imageHeight = dimensions.height;
+  } catch (error) {
+    warn("pet.window", "Failed to read installed pet spritesheet dimensions.", { error: error instanceof Error ? error.message : String(error) });
+  }
+  try {
+    const petJsonPath = join(petDir, "pet.json");
+    const petJson = readFileSync(petJsonPath);
+    if (petJson.length > maxCodexPetJsonBytes) throw new Error("Installed pet.json is too large.");
+    const metadata = validateCodexPetMetadata(JSON.parse(petJson.toString("utf8")) as unknown, petId);
+    if (metadata.spriteLayout !== undefined) {
+      const layout = applySpriteLayoutOverride(defaultPetSprite, metadata.spriteLayout);
+      if (!imageWidth || !imageHeight || !spriteLayoutMatchesImage(layout, imageWidth, imageHeight)) {
+        throw new Error("Installed pet spriteLayout does not match spritesheet.webp dimensions.");
+      }
+      return layout;
+    }
+  } catch (error) {
+    warn("pet.window", "Installed pet.json is missing or invalid; falling back to derived layout.", { error: error instanceof Error ? error.message : String(error) });
+  }
+  const derived = imageWidth && imageHeight ? deriveCodexSpriteLayout(imageWidth, imageHeight) : undefined;
+  if (derived) return derived;
+  return defaultPetSprite;
+}
+
 function createPetBodyMarkup(stageLabel: string, bubble: string, spriteMarkup: string, pinnedBubble = "", hasPinned = false): string {
   return `<div class="stage${hasPinned ? " has-pinned" : ""}" aria-label="${stageLabel}">
     ${pinnedBubble}
     ${bubble}
+    <div class="feather-strip" aria-hidden="true"></div>
     <div class="pet-hitbox" aria-hidden="true">
       <div class="pet-shell">
         ${spriteMarkup}
@@ -1084,15 +1261,18 @@ function createPetBodyMarkup(stageLabel: string, bubble: string, spriteMarkup: s
   </div>`;
 }
 
-function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
+function createPetWindowCss(paused: boolean, metrics: PetSpriteMetrics): string {
   const opacity = paused ? "0.62" : "1";
   const playState = paused ? "paused" : "running";
-  const scaledWidth = Math.ceil(defaultPetSprite.frameWidth * scale);
-  const scaledHeight = Math.ceil(defaultPetSprite.frameHeight * scale);
+  const scaledWidth = Math.ceil(metrics.frameWidth * metrics.scale);
+  const scaledHeight = Math.ceil(metrics.frameHeight * metrics.scale);
   const petBottom = 22;
   const hitPadding = 18;
   const bubbleBottom = Math.ceil(petBottom + scaledHeight + 8);
   const emojiFontUrl = pathToFileURL(join(app.getAppPath(), "assets", "NotoColorEmoji.ttf")).toString();
+  const featherStripUrl = pathToFileURL(join(app.getAppPath(), "assets", "feather-strip.webp")).toString();
+  const featherW = scaledFeatherStripSize(metrics.scale).width;
+  const featherH = scaledFeatherStripSize(metrics.scale).height;
   const petShellFilter = process.platform === "win32" ? "none" : "drop-shadow(0 10px 12px rgba(15, 23, 42, 0.24)) drop-shadow(0 2px 3px rgba(15, 23, 42, 0.18))";
   const bubbleBackdropFilter = process.platform === "win32" ? "none" : "blur(10px)";
   const petDragRegion = shouldUseWaylandNativePetDrag() ? "drag" : "no-drag";
@@ -1105,6 +1285,31 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .stage { width: 100%; height: 100%; position: relative; box-sizing: border-box; overflow: visible; }
     .pet-hitbox { position: absolute; left: 50%; bottom: ${Math.max(0, petBottom - hitPadding)}px; z-index: 1; width: ${scaledWidth + hitPadding * 2}px; height: ${scaledHeight + hitPadding * 2}px; display: grid; place-items: center; transform: translateX(-50%); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
     .pet-shell { position: relative; width: ${scaledWidth}px; height: ${scaledHeight}px; display: block; opacity: var(--pet-opacity); filter: ${petShellFilter}; transition-property: opacity, filter; transition-duration: 180ms; transition-timing-function: cubic-bezier(0.2, 0, 0, 1); pointer-events: auto; -webkit-app-region: ${petDragRegion}; cursor: grab; }
+    .feather-strip {
+      position: absolute;
+      z-index: 3;
+      width: ${featherW}px;
+      height: ${featherH}px;
+      display: none;
+      background-image: url("${escapeCssUrl(featherStripUrl)}");
+      background-size: ${featherW * 6}px ${featherH}px;
+      background-repeat: no-repeat;
+      background-position: 0 0;
+      animation: pet-feather-frames 1.9s steps(6) infinite;
+      pointer-events: auto;
+      -webkit-app-region: no-drag;
+      cursor: grab;
+    }
+    html[data-snap-state="hidden"] .feather-strip { display: block; }
+    html[data-snap-state="hidden"] .sprite, html[data-snap-state="hidden"] .installed-sprite { display: none; }
+    html[data-snap-edge="right"] .feather-strip { left: 0; top: 50%; transform: translateY(-50%); }
+    html[data-snap-edge="left"] .feather-strip { right: 0; top: 50%; transform: translateY(-50%); }
+    html[data-snap-edge="bottom"] .feather-strip { top: 0; left: 50%; transform: translateX(-50%) rotate(180deg); }
+    html[data-snap-edge="top"] .feather-strip { bottom: 0; left: 50%; transform: translateX(-50%) rotate(180deg); }
+    @keyframes pet-feather-frames {
+      from { background-position: 0 0; }
+      to { background-position: -${featherW * 6}px 0; }
+    }
     .bubble { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 4; box-sizing: border-box; display: inline-flex; flex-direction: column; width: fit-content; min-width: 92px; max-width: min(220px, calc(100vw - 18px)); max-height: 128px; padding: 10px 12px; background: linear-gradient(135deg, rgba(239, 246, 255, 0.97), rgba(237, 233, 254, 0.96)); color: #172033; font: 760 11px/14px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-align: left; border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); white-space: normal; overflow-wrap: break-word; word-break: normal; overflow: visible; pointer-events: auto; -webkit-app-region: no-drag; opacity: 1; backdrop-filter: ${bubbleBackdropFilter}; transform: translateX(-50%); transform-origin: 64% 100%; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     .bubble[data-dismiss-token] { cursor: pointer; }
     .bubble::after { content: ""; position: absolute; left: 64%; bottom: -7px; width: 12px; height: 12px; background: inherit; border-right: 1px solid rgba(255, 255, 255, 0.56); border-bottom: 1px solid rgba(255, 255, 255, 0.56); border-bottom-right-radius: 3px; transform: translateX(-50%) rotate(45deg); box-shadow: 3px 3px 7px rgba(15, 23, 42, 0.08); }
@@ -1291,18 +1496,22 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
   `;
 }
 
-function createSpriteStateCss(selector: ".sprite" | ".installed-sprite", stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>): string {
-  const reactionRules = Object.keys(stateRows).map((state) => createSpriteRule(`html[data-reaction-state="${state}"] ${selector}`, state as UniversalSpriteState, stateRows));
+function createSpriteStateCss(
+  selector: ".sprite" | ".installed-sprite",
+  layout: PetSpriteLayout,
+  stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>> = layout.states,
+): string {
+  const reactionRules = Object.keys(stateRows).map((state) => createSpriteRule(`html[data-reaction-state="${state}"] ${selector}`, state as UniversalSpriteState, layout, stateRows));
   const motionRules = (Object.entries(motionToSpriteState) as Array<[PetMotionState, UniversalSpriteState]>)
     .filter(([motion]) => motion !== "idle")
-    .map(([motion, state]) => createSpriteRule(`html[data-motion-state="${motion}"] ${selector}`, state, stateRows));
+    .map(([motion, state]) => createSpriteRule(`html[data-motion-state="${motion}"] ${selector}`, state, layout, stateRows));
   return [...reactionRules, ...motionRules].join("\n");
 }
 
-function createSpriteRule(selector: string, state: UniversalSpriteState, stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>): string {
+function createSpriteRule(selector: string, state: UniversalSpriteState, layout: PetSpriteLayout, stateRows: Readonly<Record<UniversalSpriteState, SpriteStateDefinition>>): string {
   const row = stateRows[state];
   const iterations = "iterations" in row ? row.iterations : "infinite";
-  return `${selector} { --sprite-row-y: -${row.row * defaultPetSprite.frameHeight}px; --sprite-frames: ${row.frames}; --sprite-duration: ${row.durationMs}ms; --sprite-iterations: ${iterations}; }`;
+  return `${selector} { --sprite-row-y: -${row.row * layout.frameHeight}px; --sprite-frames: ${row.frames}; --sprite-duration: ${row.durationMs}ms; --sprite-iterations: ${iterations}; }`;
 }
 
 function getReactionSpriteState(reaction: OpenPetsReaction | undefined): UniversalSpriteState {

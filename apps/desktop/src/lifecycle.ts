@@ -1,6 +1,7 @@
 import { app } from "electron";
 
 import { closeAllAgentPets } from "./agent-pet-controller.js";
+import { stopCodexPresenceWatch } from "./codex-presence.js";
 import { destroyDefaultPet } from "./default-pet-controller.js";
 import { info } from "./logger.js";
 import { stopLocalIpcServer } from "./local-ipc.js";
@@ -46,6 +47,7 @@ export function installAppLifecycle(): void {
       await shutdownPluginVoice().catch(() => undefined);
       await stopPluginService().catch(() => undefined);
       await stopRemoteControlService().catch(() => undefined);
+      stopCodexPresenceWatch();
       stopLocalIpcServer();
       closeAllLanVisitingPets();
       closeAllAgentPets();

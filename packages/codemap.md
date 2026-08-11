@@ -12,6 +12,7 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - **mcp**: MCP stdio server implementation for agent integration (status, reaction, speak)
 - **opencode**: OpenCode editor integration (plugin hooks, config management)
 - **claude**: Claude Code integration (hook execution, config management)
+- **codex**: Codex lifecycle hooks and managed TOML configuration
 - **cursor**: Cursor editor integration (MCP configuration, project rules)
 - **pi**: Pi coding-agent extension integration (event handling, slash commands)
 - **install-pet**: Standalone pet installer from gallery catalog
@@ -68,6 +69,7 @@ SDK Type definitions & Test Harness (packages/sdk/)
 - `cli` depends on: `client`, `claude`, `mcp`, `opencode`, `cursor`
 - `mcp` depends on: `client`
 - `claude` depends on: `client`, `agent-events`
+- `codex` depends on: `client`, `agent-events`
 - `opencode` depends on: `client`, `agent-events`
 - `cursor` depends on: `client`
 - `pi` depends on: `client`, `agent-events`
@@ -90,6 +92,7 @@ All packages ultimately communicate with the OpenPets desktop app via the IPC pr
 |-----------|------------------------|--------------|
 | `agent-events/` | Shared agent event message pools and validators. | [View Map](agent-events/codemap.md) |
 | `claude/` | Claude Code hook/MCP/settings integration package. | [View Map](claude/codemap.md) |
+| `codex/` | Codex hook runtime and managed TOML setup package. | [View Map](codex/codemap.md) |
 | `client/` | Desktop IPC discovery and client API package. | [View Map](client/codemap.md) |
 | `cli/` | User CLI for setup, pet commands, MCP launch, plugin scaffolding, and plugin validation. | [View Map](cli/codemap.md) |
 | `cursor/` | Cursor MCP/rules integration package. | [View Map](cursor/codemap.md) |

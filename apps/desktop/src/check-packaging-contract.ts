@@ -109,7 +109,7 @@ assert.doesNotMatch(mainSource + lifecycleSource + windowsSource + localIpcSourc
 assert.match(appStateSource, /activity:\s*{[\s\S]*messagesSent/, "local dashboard activity counters must remain in app state without analytics identity fields.");
 assert.doesNotMatch(appStateSource, /distinctId|OpenPetsAnalyticsState|DesktopAnalyticsConsentState|recordDesktopAppStarted|markFirstAgentReactionTracked/, "app state must not retain PostHog identity or consent fields.");
 assert.match(mainSource, /isLinux && !allowWayland[\s\S]*?appendSwitch\("ozone-platform", "x11"\)/, "Linux desktop pets must force X11/Xwayland because native Wayland blocks always-on-top and programmatic window positioning.");
-assert.match(mainSource, /if \(process\.platform === "linux"\) \{\n\s*const isKde = \(process\.env\.XDG_CURRENT_DESKTOP \?\? ""\)\.toLowerCase\(\)\.includes\("kde"\);\n\s*app\.commandLine\.appendSwitch\("password-store", isKde \? "kwallet6" : "gnome-libsecret"\);\n\s*\} else \{\n\s*app\.commandLine\.appendSwitch\("password-store", "basic"\);\n\s*\}/, "Linux desktop must gate password-store as kwallet6 on KDE sessions, gnome-libsecret elsewhere on Linux, with basic only in the non-Linux else branch; an unconditional switch would disable Electron safeStorage and break plugin secret saves with 'Secret storage encryption is unavailable on this system'.");
+assert.match(mainSource, /if \(process\.platform === "linux"\) \{\r?\n\s*const isKde = \(process\.env\.XDG_CURRENT_DESKTOP \?\? ""\)\.toLowerCase\(\)\.includes\("kde"\);\r?\n\s*app\.commandLine\.appendSwitch\("password-store", isKde \? "kwallet6" : "gnome-libsecret"\);\r?\n\s*\} else \{\r?\n\s*app\.commandLine\.appendSwitch\("password-store", "basic"\);\r?\n\s*\}/, "Linux desktop must gate password-store as kwallet6 on KDE sessions, gnome-libsecret elsewhere on Linux, with basic only in the non-Linux else branch; an unconditional switch would disable Electron safeStorage and break plugin secret saves with 'Secret storage encryption is unavailable on this system'.");
 const passwordStoreValues = [...mainSource.matchAll(/"(kwallet6|gnome-libsecret|basic)"/g)].map((match) => match[1]);
 assert.deepStrictEqual(passwordStoreValues, ["kwallet6", "gnome-libsecret", "basic"], "desktop must set password-store to exactly these three values (kwallet6 on KDE, gnome-libsecret elsewhere on Linux, basic otherwise); any extra or unconditional switch would override the backend and re-break plugin secret saves.");
 assert.match(mainSource, /OPENPETS_ALLOW_WAYLAND/, "Linux X11 override must support the OPENPETS_ALLOW_WAYLAND opt-out escape hatch.");
@@ -186,6 +186,8 @@ assert.match(petWindowSource, /const petDragRegion = shouldUseWaylandNativePetDr
 assert.match(petPreloadSource, /openpets:pet-hit-test/, "pet preload must report visible pet and bubble hit testing for passthrough.");
 assert.match(petPreloadSource, /openpets:pet-ready/, "pet preload must report readiness after installing mouse handlers.");
 assert.match(petPreloadSource, /openpets:pet-drag-start/, "pet preload must start controlled pet dragging from the sprite.");
+assert.match(petPreloadSource, /mousemove[\s\S]*?Math\.hypot\([\s\S]*?> 4[\s\S]*?openpets:pet-drag-start[\s\S]*?openpets:pet-drag-move[\s\S]*?mousedown/, "pet preload must wait for real pointer movement before restoring and dragging an edge-snapped pet.");
+assert.match(petPreloadSource, /click[\s\S]*?closest\("\.pet-hitbox, \.pet-shell, \.feather-strip"\)[\s\S]*?pet:clicked/, "clicking the visible feather strip must emit the event that restores an edge-snapped pet.");
 assert.match(defaultPetControllerSource, /powerMonitor\.on\("resume", recoverDefaultPetWindowAfterResume\)/, "default pet must recover mouse interop after Windows sleep or resume.");
 assert.match(defaultPetControllerSource, /recoverDefaultPetMouseInterop\("display-change"\)/, "default pet must recover mouse interop after monitor topology changes.");
 assert.match(windowsSource, /recoverDefaultPetMouseInterop\("default-pet-changed"\)/, "changing default pet must recover mouse interop for dragging without app restart.");
@@ -221,8 +223,8 @@ assert.match(controlCenterRendererSource, /getPetsState/, "Control Center must i
 assert.match(controlCenterRendererSource, /function IntegrationsView\(\)/, "Control Center must include the integrations page.");
 assert.match(petWindowSource, /max-width:\s*min\(220px/, "very long message bubbles must stay capped within the tight pet window.");
 assert.match(petWindowSource, /-webkit-line-clamp:\s*8/, "very long message bubbles must allow enough visible lines.");
-assert.match(petWindowSource, /createSpriteStateCss\("\.sprite", stateRows\)/, "built-in sprite CSS must react to configured reaction state.");
-assert.match(petWindowSource, /createSpriteStateCss\("\.installed-sprite", stateRows\)/, "installed sprite CSS must react to configured reaction state.");
+assert.match(petWindowSource, /createSpriteStateCss\("\.sprite", defaultPetSprite, stateRows\)/, "built-in sprite CSS must react to configured reaction state.");
+assert.match(petWindowSource, /createSpriteStateCss\("\.installed-sprite", layout, stateRows\)/, "installed sprite CSS must combine its validated layout with configured reaction timing.");
 assert.match(petWindowSource, /html\[data-motion-state=\"\$\{motion\}\"\] \$\{selector\}/, "sprite CSS must let drag motion override reaction state.");
 assert.match(petWindowSource, /\.sprite, \.installed-sprite, \.bubble/, "reduced-motion CSS must include built-in and installed sprites.");
 assert.match(petWindowSource, /function createAgentPetWindow[\s\S]*?installMotionStatePublisher\(window\)/, "agent pet windows must publish motion state so dragged non-default pets run.");

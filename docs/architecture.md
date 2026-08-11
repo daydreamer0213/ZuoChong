@@ -63,6 +63,7 @@ encrypted overlay with its own ACLs; CGNAT addressing alone is not encryption.
 | `@open-pets/cli` | User-facing CLI: configure agents, manage pets, run MCP, scaffold/validate plugins | [Agent integrations](/agent-integrations), [Development](/development) |
 | `@open-pets/mcp` | Stdio MCP server exposing `openpets_status` / `react` / `say` to MCP agents | [Agent integrations](/agent-integrations) |
 | `@open-pets/claude` | Claude Code hooks + MCP/settings/memory management | [Agent integrations](/agent-integrations) |
+| `@open-pets/codex` | Codex lifecycle hooks + safe TOML config management | [Agent integrations](/agent-integrations) |
 | `@open-pets/opencode` | OpenCode plugin runtime + config management | [Agent integrations](/agent-integrations) |
 | `@open-pets/cursor` | Cursor MCP config + project rules management | [Agent integrations](/agent-integrations) |
 | `@open-pets/pi` | Pi coding-agent extension + `/openpets` commands | [Agent integrations](/agent-integrations) |
@@ -72,8 +73,8 @@ encrypted overlay with its own ACLs; CGNAT addressing alone is not encryption.
 | `pet-format` | Tiny marker/identity type for pet packages | - |
 
 The dependency spine: every integration depends on `@open-pets/client`; the
-`cli` composes `claude`, `opencode`, `cursor`, and `mcp`; `claude`/`opencode`/`pi`
-depend on `agent-events` for safe speech.
+`cli` composes `claude`, `opencode`, `cursor`, and `mcp`; `codex`, `claude`,
+`opencode`, and `pi` depend on `agent-events` for safe speech.
 
 ## End-to-end flows
 

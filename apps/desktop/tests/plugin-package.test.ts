@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validatePluginCatalog } from "../src/plugin-catalog-validation.js";
 import { installCatalogPluginPackage, safeDeletePluginInstallDir, validatePluginZipUrl } from "../src/plugin-package.js";
 import type { OpenPetsPluginManifest } from "../src/plugin-manifest.js";
+import { createTestSymlink } from "./test-symlink.js";
 
 const manifest: OpenPetsPluginManifest = { manifestVersion: 1, id: "zip-plug", name: "Zip Plug", version: "1.0.0", runtime: "declarative", permissions: ["timer", "pet:speak"], triggers: [{ on: "timer", everyMinutes: 5, actions: [{ type: "pet.speak", message: "hi" }] }] };
 const text = JSON.stringify(manifest);
@@ -73,7 +74,7 @@ assert.equal(readFileSync(join(userData, "plugins", manifest.id, "openpets.plugi
 
 const deleteRoot = mkdtempSync(join(tmpdir(), "openpets-plugin-delete-"));
 const outside = mkdtempSync(join(tmpdir(), "openpets-plugin-outside-"));
-symlinkSync(outside, join(deleteRoot, "plugins"), "dir");
+createTestSymlink(outside, join(deleteRoot, "plugins"), "dir");
 await assert.rejects(() => safeDeletePluginInstallDir(deleteRoot, manifest.id, join(deleteRoot, "plugins", manifest.id), "catalog"), /invalid|unexpected/);
 
 console.error("Plugin package validation passed.");

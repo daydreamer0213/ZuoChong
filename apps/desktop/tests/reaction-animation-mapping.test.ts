@@ -5,16 +5,20 @@ import {
 } from "../src/local-ipc-protocol.js";
 import { defaultWaitingAnimationDurationMs, normalizeWaitingAnimationDurationMs } from "../src/app-state-core.js";
 import {
+  applySpriteLayoutOverride,
   defaultPetSprite,
   defaultReactionToSpriteState,
+  deriveCodexSpriteLayout,
   getConfiguredSpriteCacheKey,
   getConfiguredSpriteStates,
+  getSpriteAnimationDurationMs,
   normalizeReactionAnimationOverrides,
   reactionAnimationMetadata,
   resolveReactionSpriteState,
   selectableAnimationMetadata,
-  waitingAnimationDurationOptions,
+  spriteLayoutMatchesImage,
   validateReactionAnimationOverrides,
+  waitingAnimationDurationOptions,
   type SpriteStateDefinition,
   type UniversalSpriteState,
   type UserSelectableAnimationState,
@@ -88,6 +92,36 @@ assert.strictEqual(defaultPetSprite.states, canonicalStates, "canonical state ob
 assert.strictEqual(defaultPetSprite.states.waiting, canonicalWaiting, "canonical waiting state identity must remain unchanged");
 assert.equal(getConfiguredSpriteCacheKey(1010), "waiting-animation-duration:1010");
 assert.notEqual(getConfiguredSpriteCacheKey(1010), getConfiguredSpriteCacheKey(2200), "render/cache identity must change with waiting duration");
+
+const derivedCodexLayout = deriveCodexSpriteLayout(192 * 8, 208 * 16);
+assert.ok(derivedCodexLayout, "valid Codex v2 dimensions must derive a layout");
+assert.equal(derivedCodexLayout.frameWidth, 192);
+assert.equal(derivedCodexLayout.frameHeight, 208);
+assert.equal(derivedCodexLayout.columns, 8);
+assert.equal(derivedCodexLayout.rows, 16);
+assert.equal(deriveCodexSpriteLayout(1535, 3328), undefined, "non-divisible sheet width must be rejected");
+assert.equal(deriveCodexSpriteLayout(1536, 2000), undefined, "non-divisible sheet height must be rejected");
+assert.equal(spriteLayoutMatchesImage(defaultPetSprite, 192 * 8, 208 * 9), true);
+assert.equal(spriteLayoutMatchesImage(defaultPetSprite, 192 * 8, 208 * 11), false, "declared rows must match the actual WebP");
+
+const overriddenLayout = applySpriteLayoutOverride(defaultPetSprite, {
+  columns: 10,
+  rows: 12,
+  states: {
+    idle: { frames: 10, durationMs: 900 },
+  },
+});
+assert.equal(overriddenLayout.columns, 10);
+assert.equal(overriddenLayout.rows, 12);
+assert.deepEqual(overriddenLayout.states.idle, { row: 0, frames: 10, durationMs: 900, iterations: "infinite" });
+assert.equal(defaultPetSprite.states.idle.frames, 6, "layout overrides must not mutate the base layout");
+assert.throws(() => applySpriteLayoutOverride(defaultPetSprite, { columns: 4 }), /frames/i, "all state frame counts must fit within the final column count");
+assert.throws(() => applySpriteLayoutOverride(defaultPetSprite, { rows: 4 }), /row/i, "all state rows must fit within the final row count");
+const timedLayout = applySpriteLayoutOverride(defaultPetSprite, { states: { jumping: { durationMs: 120, iterations: 3 } } });
+assert.equal(getSpriteAnimationDurationMs(timedLayout, "jumping"), 360, "custom finite animation timing must drive lifecycle cleanup");
+assert.equal(getSpriteAnimationDurationMs(timedLayout, "idle"), null);
+assert.equal(getConfiguredSpriteStates(2200, timedLayout.states).waiting.durationMs, 2200, "the user waiting-duration preference must apply on top of a custom sprite layout");
+assert.equal(getConfiguredSpriteStates(2200, timedLayout.states).jumping.durationMs, 120, "waiting-duration configuration must preserve other custom state timings");
 
 // Exact sprite state ids
 const actualStateIds = Object.keys(defaultPetSprite.states) as UniversalSpriteState[];

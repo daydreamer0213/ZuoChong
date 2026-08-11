@@ -15,7 +15,7 @@ try {
   const expectedConfigPath = join(homeDir, ".cursor", "mcp.json");
   
   // Verify the path structure matches what desktop uses
-  assert.ok(expectedConfigPath.endsWith(".cursor/mcp.json"), "Cursor global config path must end with .cursor/mcp.json");
+  assert.ok(expectedConfigPath.endsWith(join(".cursor", "mcp.json")), "Cursor global config path must end with .cursor/mcp.json");
   assert.ok(!expectedConfigPath.includes(".."), "Cursor config path must not contain traversal");
 
   // Test that desktop would handle missing config gracefully
@@ -91,7 +91,7 @@ try {
 
   // Test that desktop would format user paths correctly
   const longPath = join(homeDir, ".cursor", "mcp.json");
-  const formattedPath = longPath.replace(homeDir, "~");
+  const formattedPath = longPath.replace(homeDir, "~").replaceAll("\\", "/");
   assert.equal(formattedPath, "~/.cursor/mcp.json");
 
   // Test that desktop would handle action availability correctly

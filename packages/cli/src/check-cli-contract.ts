@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import { assertSafeProjectHookPath, cliPackageName, configureProject, createClaudeMcpAddJsonArgs, createLocalDevCliCommand, createVersionPinnedCliCommand, installProjectLocalHooks, parseConfigureArgs, parseDoctorArgs, parseInstallArgs, parsePluginNewArgs, parseReactArgs, parseSayArgs, resolveConfiguredPet, runClaudeMcpAddJson, runDoctor, scaffoldPlugin } from "./index.js";
 import { pluginTemplateNames } from "./plugin-templates.js";
 import { validatePluginFolder } from "./plugin-validate.js";
 
 const packageVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { readonly version: string }).version;
+const cliEntryPath = fileURLToPath(new URL("./index.js", import.meta.url));
 
 const parsed = parseConfigureArgs(["--agent", "claude", "--pet", "fixer", "--cwd", "/tmp/project", "--yes"]);
 assert.equal(parsed.agent, "claude");
@@ -130,7 +132,7 @@ const mcpJson = JSON.parse(mcpArgs[3] ?? "{}") as { readonly command?: string; r
 assert.equal(mcpJson.command, "npx");
 assert.deepEqual(mcpJson.args, ["-y", `${cliPackageName}@1.2.3`, "mcp", "--pet", "fixer"]);
 
-const dir = mkdtempSync(join(tmpdir(), "openpets-cli-"));
+const dir = mkdtempSync(join(process.platform === "win32" ? process.cwd() : tmpdir(), ".openpets-cli-"));
 try {
   const project = join(dir, "project");
   const settingsDir = join(project, ".claude");
@@ -165,17 +167,27 @@ try {
   const outside = join(dir, "outside-claude");
   mkdirSync(symlinkProject);
   mkdirSync(outside);
-  symlinkSync(outside, join(symlinkProject, ".claude"));
+  assert.equal(createTestSymlink(outside, join(symlinkProject, ".claude"), "dir"), true);
   assert.throws(() => assertSafeProjectHookPath(symlinkProject));
 
   const binDir = join(dir, "bin");
   const logPath = join(dir, "claude-log.json");
   mkdirSync(binDir);
-  const fakeClaude = join(binDir, "claude");
-  writeFileSync(fakeClaude, `#!/usr/bin/env node\nconst fs = require('fs'); let log = []; try { log = JSON.parse(fs.readFileSync(${JSON.stringify(logPath)}, 'utf8')); } catch {} log.push({ cwd: process.cwd(), argv: process.argv.slice(2) }); fs.writeFileSync(${JSON.stringify(logPath)}, JSON.stringify(log)); process.exit(0);\n`, "utf8");
-  chmodSync(fakeClaude, 0o700);
+  const fakeClaudeScript = `const fs = require('fs'); let log = []; try { log = JSON.parse(fs.readFileSync(${JSON.stringify(logPath)}, 'utf8')); } catch {} log.push({ cwd: process.cwd(), argv: process.argv.slice(2) }); fs.writeFileSync(${JSON.stringify(logPath)}, JSON.stringify(log)); process.exit(0);\n`;
+  if (process.platform === "win32") {
+    // CreateProcess resolves `claude` to claude.exe. A hard link avoids copying
+    // the Node binary; the first `mcp` argument becomes this temporary script.
+    linkSync(process.execPath, join(binDir, "claude.exe"));
+    writeFileSync(join(project, "mcp"), fakeClaudeScript
+      .replace("const fs = require('fs');", "import fs from 'node:fs';")
+      .replace("process.argv.slice(2)", '["mcp", ...process.argv.slice(2)]'), "utf8");
+  } else {
+    const fakeClaude = join(binDir, "claude");
+    writeFileSync(fakeClaude, `#!/usr/bin/env node\n${fakeClaudeScript}`, "utf8");
+    chmodSync(fakeClaude, 0o700);
+  }
   const oldPath = process.env.PATH;
-  process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+  process.env.PATH = `${binDir}${delimiter}${oldPath ?? ""}`;
   try {
     runClaudeMcpAddJson(project, { type: "stdio", command: "npx", args: ["-y", "@open-pets/cli@1.2.3", "mcp", "--pet", "fixer"], env: {} }, true);
   } finally {
@@ -193,10 +205,11 @@ try {
   assert.equal(claudeLog.at(-1)?.argv.at(-1), "local");
 
   const cliBinLink = join(binDir, "openpets");
-  symlinkSync(new URL("./index.js", import.meta.url).pathname, cliBinLink);
-  const symlinkedHelp = spawnSync(process.execPath, [cliBinLink, "--help"], { encoding: "utf8" });
-  assert.equal(symlinkedHelp.status, 0);
-  assert.match(symlinkedHelp.stdout, /Usage:/);
+  if (createTestSymlink(cliEntryPath, cliBinLink, "file")) {
+    const symlinkedHelp = spawnSync(process.execPath, [cliBinLink, "--help"], { encoding: "utf8" });
+    assert.equal(symlinkedHelp.status, 0);
+    assert.match(symlinkedHelp.stdout, /Usage:/);
+  }
 
   const opencodeProject = join(dir, "opencode-project");
   mkdirSync(opencodeProject);
@@ -254,7 +267,7 @@ try {
   mkdirSync(outsideOpenCode);
   writeFileSync(join(outsideOpenCode, "opencode.jsonc"), "{}\n", "utf8");
   writeFileSync(join(outsideOpenCode, "openpets.md"), "outside\n", "utf8");
-  symlinkSync(outsideOpenCode, join(symlinkOpenCodeProject, ".opencode"));
+  assert.equal(createTestSymlink(outsideOpenCode, join(symlinkOpenCodeProject, ".opencode"), "dir"), true);
   await assert.rejects(() => configureProject({ agent: "opencode", petId: "fixer", cwd: symlinkOpenCodeProject, yes: true, force: false, localDev: false }));
 
   const cursorProject = join(dir, "cursor-project");
@@ -362,19 +375,36 @@ const doctorMissingReport = await captureDoctorJson(doctorMissingProject);
 assert.equal((doctorMissingReport.cursor as { status?: string }).status, "missing");
 rmSync(doctorMissingProject, { recursive: true, force: true });
 
-const invalidHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
+const invalidHook = spawnSync(process.execPath, [cliEntryPath, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(invalidHook.status, 1);
-const missingPetHook = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
+const missingPetHook = spawnSync(process.execPath, [cliEntryPath, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification" }), encoding: "utf8" });
 assert.equal(missingPetHook.status, 1);
 
 for (const args of [["--help"], ["-h"], ["status", "--help"], ["doctor", "--help"], ["pets", "--help"], ["react", "--help"], ["say", "--help"], ["install", "--help"], ["configure", "--help"], ["configure", "-h"], ["plugin", "--help"], ["plugin", "new", "--help"], ["mcp", "--help"], ["hook", "--help"]]) {
-  const help = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, ...args], { encoding: "utf8" });
+  const help = spawnSync(process.execPath, [cliEntryPath, ...args], { encoding: "utf8" });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Usage:/);
 }
 
-const doctorHelp = spawnSync(process.execPath, [new URL("./index.js", import.meta.url).pathname, "doctor", "--help"], { encoding: "utf8" });
+const doctorHelp = spawnSync(process.execPath, [cliEntryPath, "doctor", "--help"], { encoding: "utf8" });
 assert.equal(doctorHelp.status, 0);
 assert.match(doctorHelp.stdout, /doctor/);
 
 console.error("CLI contract validation passed.");
+
+function createTestSymlink(targetPath: string, linkPath: string, type: "file" | "dir"): boolean {
+  try {
+    symlinkSync(targetPath, linkPath, process.platform === "win32" && type === "dir" ? "junction" : type);
+    return true;
+  } catch (error) {
+    if (process.platform === "win32" && isErrnoException(error) && error.code === "EPERM") {
+      console.error(`Skipping file-symlink assertion because Windows symlink privilege is unavailable: ${linkPath}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}

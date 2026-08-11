@@ -54,6 +54,99 @@ export const defaultPetWindowSize: WindowSize = {
 
 export const defaultPetWindowMargin = 24;
 
+/** Distance from a display work-area edge that triggers edge-snap hiding. */
+export const petSnapThresholdPx = 20;
+
+/** Size of the feather strip left visible while a pet is edge-snapped hidden. */
+export const featherStripSize = { width: 28, height: 100 } as const;
+
+export type SnapEdge = "left" | "right" | "top" | "bottom";
+
+export function fitSpriteScaleToWindow(
+  requestedScale: number,
+  sprite: { readonly frameWidth: number; readonly frameHeight: number },
+  size: WindowSize = defaultPetWindowSize,
+  petBottom = 22,
+  hitPadding = 18,
+): number {
+  const maxWidthScale = (size.width - hitPadding * 2) / sprite.frameWidth;
+  const maxHeightScale = (size.height - Math.max(0, petBottom - hitPadding) - hitPadding * 2) / sprite.frameHeight;
+  return Math.min(requestedScale, maxWidthScale, maxHeightScale);
+}
+
+/**
+ * Detect whether a pet's *visible sprite* (or the drag cursor, when provided)
+ * hugs a display work-area edge. The window itself is larger than the sprite
+ * (transparent margins, bottom-center anchored), so distance is measured from
+ * the sprite's visual edges — the part the user actually sees — not from the
+ * window rectangle. `scale` accounts for the sprite's visual size at the
+ * current pet scale.
+ *
+ * When `cursor` is given, the cursor's screen X is also considered: users drag
+ * by the sprite's grab point (usually its center), so "mouse at the screen
+ * edge" is how a flush drop most often actually happens. Whichever of sprite
+ * edge / cursor X is closer to the edge decides.
+ *
+ * Only left/right edges trigger snapping; top/bottom (taskbar-adjacent edges)
+ * never snap.
+ */
+export function detectSnapEdge(
+  position: Point,
+  size: WindowSize = defaultPetWindowSize,
+  scale = 1,
+  sprite: { readonly frameWidth: number; readonly frameHeight: number } = { frameWidth: 192, frameHeight: 208 },
+  petBottom = 22,
+  cursor?: Point,
+): SnapEdge | null {
+  const centre = { x: position.x + size.width / 2, y: position.y + size.height / 2 };
+  const { workArea } = getScreen().getDisplayNearestPoint(centre);
+  const spriteWidth = sprite.frameWidth * scale;
+  const spriteLeft = (size.width - spriteWidth) / 2;
+  const visualLeft = position.x + spriteLeft;
+  const visualRight = position.x + spriteLeft + spriteWidth;
+  const spriteCenterX = position.x + spriteLeft + spriteWidth / 2;
+  const threshold = petSnapThresholdPx;
+  // Sprite center already past an edge: the user dragged the pet most of the
+  // way off-screen — an unambiguous "hide me" gesture.
+  if (spriteCenterX >= workArea.x + workArea.width) return "right";
+  if (spriteCenterX <= workArea.x) return "left";
+  let leftGap = Math.abs(visualLeft - workArea.x);
+  let rightGap = Math.abs(visualRight - (workArea.x + workArea.width));
+  if (cursor) {
+    leftGap = Math.min(leftGap, Math.abs(cursor.x - workArea.x));
+    rightGap = Math.min(rightGap, Math.abs(cursor.x - (workArea.x + workArea.width)));
+  }
+  if (leftGap <= threshold || rightGap <= threshold) return leftGap <= rightGap ? "left" : "right";
+  return null;
+}
+
+/**
+ * Compute the hidden position for an edge-snapped pet window: the window slides
+ * off the work area until only the feather strip remains visible, flush against
+ * the display edge. The strip element is anchored to the corresponding window
+ * edge (left:0 / right:0 / top:0 / bottom:0), so a flush window edge means a
+ * flush feather strip.
+ */
+export function computeSnappedHiddenPosition(
+  position: Point,
+  edge: SnapEdge,
+  size: WindowSize = defaultPetWindowSize,
+  feather: { readonly width: number; readonly height: number } = featherStripSize,
+): Point {
+  const centre = { x: position.x + size.width / 2, y: position.y + size.height / 2 };
+  const { workArea } = getScreen().getDisplayNearestPoint(centre);
+  switch (edge) {
+    case "right":
+      return { x: Math.round(workArea.x + workArea.width - feather.width), y: position.y };
+    case "left":
+      return { x: Math.round(workArea.x - size.width + feather.width), y: position.y };
+    case "bottom":
+      return { x: position.x, y: Math.round(workArea.y + workArea.height - feather.height) };
+    case "top":
+      return { x: position.x, y: Math.round(workArea.y - size.height + feather.height) };
+  }
+}
+
 /**
  * Minimum overlap (in pixels) along each axis for a pet to be considered
  * "on" a display.  Rejects hair-thin slivers without requiring full coverage.

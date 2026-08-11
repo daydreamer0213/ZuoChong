@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsDeclarativePluginManifest } from "../src/plugin-manifest.js";
 import { PluginService, executeDefaultPetPluginCommand, formatPermissionDialogDetail, getDefaultPetPluginCommands, setPluginServiceForTests, stopPluginService } from "../src/plugin-service.js";
 import { PluginStateStore, type PluginStateRecord } from "../src/plugin-state.js";
+import { createTestSymlink } from "./test-symlink.js";
 
 let lastRoot = "";
 
@@ -245,7 +246,7 @@ await localScenario("loadLocal rejects invalid manifest safely", async ({ servic
 await localScenario("loadLocal rejects source symlink", async ({ service, source, root }) => {
   writeManifest(source, manifest({ id: "symlink-folder" }));
   const link = join(root, "source-link");
-  symlinkSync(source, link, "dir");
+  createTestSymlink(source, link, "dir");
   service["__source"] = link;
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
@@ -254,7 +255,7 @@ await localScenario("loadLocal rejects source symlink", async ({ service, source
 await localScenario("loadLocal rejects manifest symlink", async ({ service, source, root }) => {
   const real = join(root, "real-manifest.json");
   writeFileSync(real, JSON.stringify(manifest({ id: "symlink-manifest" })), "utf8");
-  symlinkSync(real, join(source, OPENPETS_PLUGIN_MANIFEST_FILENAME));
+  if (!createTestSymlink(real, join(source, OPENPETS_PLUGIN_MANIFEST_FILENAME), "file")) return;
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -286,7 +287,7 @@ await localScenario("loadLocal rejects destination symlink before write", async 
   writeManifest(source, manifest({ id: "dest-link" }));
   const outside = join(root, "outside-target");
   mkdirSync(outside, { recursive: true });
-  symlinkSync(outside, join(userData, "plugins-dev", "dest-link"), "dir");
+  createTestSymlink(outside, join(userData, "plugins-dev", "dest-link"), "dir");
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
   assert.equal(existsSync(join(outside, OPENPETS_PLUGIN_MANIFEST_FILENAME)), false);
@@ -453,7 +454,7 @@ await localScenario("bundled stale prune refuses unsafe path", async ({ userData
   const outside = join(root, "outside-stale");
   mkdirSync(outside, { recursive: true });
   const link = join(userData, "plugins", "openpets.pomodoro");
-  symlinkSync(outside, link, "dir");
+  createTestSymlink(outside, link, "dir");
   store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const runtime = new FakeRuntime();
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, bundledPluginSourceDirs: [] });
@@ -467,7 +468,7 @@ await localScenario("bundled seeding rejects plugins root symlink", async ({ use
   rmSync(join(userData, "plugins"), { recursive: true, force: true });
   const outsideRoot = join(root, "outside-plugins");
   mkdirSync(outsideRoot, { recursive: true });
-  symlinkSync(outsideRoot, join(userData, "plugins"), "dir");
+  createTestSymlink(outsideRoot, join(userData, "plugins"), "dir");
   const official = join(root, "official");
   const source = join(official, "openpets.reminders");
   writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
@@ -543,7 +544,7 @@ await localScenario("loadLocal rejects javascript nested entry symlink", async (
   mkdirSync(join(source, "nested"), { recursive: true });
   const real = join(root, "real-entry.mjs");
   writeFileSync(real, "export default {};\n", "utf8");
-  symlinkSync(real, join(source, "nested", "index.mjs"));
+  if (!createTestSymlink(real, join(source, "nested", "index.mjs"), "file")) return;
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -553,7 +554,7 @@ await localScenario("loadLocal rejects javascript symlinked entry parent", async
   const realNested = join(root, "real-nested");
   mkdirSync(realNested, { recursive: true });
   writeFileSync(join(realNested, "index.mjs"), "export default {};\n", "utf8");
-  symlinkSync(realNested, join(source, "nested"), "dir");
+  createTestSymlink(realNested, join(source, "nested"), "dir");
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -570,7 +571,7 @@ await localScenario("uninstall removes state reloads and rejects symlink deletio
   const outside = join(root, "outside-remove");
   mkdirSync(outside, { recursive: true });
   const link = join(userData, "plugins", "link-plug");
-  symlinkSync(outside, link, "dir");
+  createTestSymlink(outside, link, "dir");
   store.upsertRecord({ id: "link-plug", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const rejected = await service.uninstall("link-plug");
   assert.equal(rejected.ok, false);
@@ -580,7 +581,7 @@ await localScenario("uninstall removes state reloads and rejects symlink deletio
   const rootOutside = join(root, "outside-root");
   mkdirSync(rootOutside, { recursive: true });
   rmSync(join(userData, "plugins"), { recursive: true, force: true });
-  symlinkSync(rootOutside, join(userData, "plugins"), "dir");
+  createTestSymlink(rootOutside, join(userData, "plugins"), "dir");
   store.upsertRecord({ id: "root-link", version: "1.0.0", installPath: join(userData, "plugins", "root-link"), manifestPath: join(userData, "plugins", "root-link", OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const rootRejected = await service.uninstall("root-link");
   assert.equal(rootRejected.ok, false);

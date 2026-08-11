@@ -6,7 +6,7 @@ import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBoun
 import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetShowMediaOptions, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMsForPet, loadExplicitPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetShowMediaOptions, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
 
 const agentPetWindows = new Map<string, BrowserWindow>();
@@ -229,21 +229,27 @@ function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
   if (existingTimer) clearTimeout(existingTimer);
   const existingAnimationTimer = transientAnimationTimers.get(petId);
   if (existingAnimationTimer) clearTimeout(existingAnimationTimer);
+  transientAnimationTimers.delete(petId);
 
-  const animationMs = getTransientReactionAnimationMs(preparedDisplay);
+  const animationStartedAt = Date.now();
   const displayDurationMs = getTransientDisplayDurationMs(preparedDisplay);
-  if (animationMs !== null && animationMs < displayDurationMs) {
-    const animationTimer = setTimeout(() => {
+  void getTransientReactionAnimationMsForPet(preparedDisplay, petId)
+    .then((animationMs) => {
       const current = transientDisplays.get(petId);
-      if (!current) return;
-      const updated = clearTransientReaction(current);
-      transientDisplays.set(petId, updated);
-      transientAnimationTimers.delete(petId);
-      const window = agentPetWindows.get(petId);
-      if (window && !window.isDestroyed()) setPetReactionState(window, "idle");
-    }, animationMs);
-    transientAnimationTimers.set(petId, animationTimer);
-  }
+      if (displayGenerations.get(petId) !== nextGeneration || !current || current.dismissToken !== preparedDisplay.dismissToken) return;
+      if (animationMs === null || animationMs >= displayDurationMs) return;
+      const delayMs = Math.max(0, animationMs - (Date.now() - animationStartedAt));
+      const animationTimer = setTimeout(() => {
+        const active = transientDisplays.get(petId);
+        if (!active || active.dismissToken !== preparedDisplay.dismissToken) return;
+        transientDisplays.set(petId, clearTransientReaction(active));
+        transientAnimationTimers.delete(petId);
+        const window = agentPetWindows.get(petId);
+        if (window && !window.isDestroyed()) setPetReactionState(window, "idle");
+      }, delayMs);
+      transientAnimationTimers.set(petId, animationTimer);
+    })
+    .catch((error: unknown) => debug("pet.agent", "animation timing resolution failed", { petId, error: error instanceof Error ? error.message : String(error) }));
 
   const timer = setTimeout(() => {
     transientDisplays.delete(petId);

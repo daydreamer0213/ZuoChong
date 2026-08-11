@@ -140,7 +140,6 @@ hostLossState = hostLossCoordinator.register("beta", { x: 200, y: 100 }, 11_600,
 hostLossState = hostLossCoordinator.updatePosition("alpha", { x: 999, y: 100 }, "right", 11_700, "alpha");
 assert.equal(hostLossState.pets?.find((pet) => pet.ownerHost === "alpha")?.currentHost, "alpha", "host-loss recovery should require a fresh interior position before another handoff");
 
-
 const topologyDiagnostics = normalizeLanTopology({
   alpha: { right: "beta", left: "alpha" },
   beta: { up: "gamma" },
