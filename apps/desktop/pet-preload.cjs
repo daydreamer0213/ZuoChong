@@ -78,9 +78,14 @@ ipcRenderer.on("openpets:pet-content-state", (_event, state) => {
   }
 });
 
+ipcRenderer.on("openpets:pet-snap-state", (_event, state) => {
+  document.documentElement.dataset.snapState = state && state.snapped ? "hidden" : "";
+  document.documentElement.dataset.snapEdge = state && state.snapped && typeof state.edge === "string" ? state.edge : "";
+});
+
 const getInteractiveTarget = (event) => {
   const target = document.elementFromPoint(event.clientX, event.clientY);
-  return target && target.closest(".pet-hitbox, .pet-shell, .bubble");
+  return target && target.closest(".pet-hitbox, .pet-shell, .feather-strip, .bubble");
 };
 
 const reportInteractiveHit = (interactive, source, force = false) => {
@@ -103,7 +108,7 @@ ipcRenderer.on("openpets:pet-probe-hit-test", (_event, point) => {
   const clientX = point.clientX;
   const clientY = point.clientY;
   const target = document.elementFromPoint(clientX, clientY);
-  reportInteractiveHit(Boolean(target && target.closest(".pet-hitbox, .pet-shell, .bubble")) || dragging, typeof point.reason === "string" ? point.reason.slice(0, 80) : "probe", true);
+  reportInteractiveHit(Boolean(target && target.closest(".pet-hitbox, .pet-shell, .feather-strip, .bubble")) || dragging, typeof point.reason === "string" ? point.reason.slice(0, 80) : "probe", true);
 });
 
 // --- Plugin bubble interactions (actions, inline inputs) -------------------
@@ -154,13 +159,13 @@ const installPetSenses = () => {
     if (event.button !== 0) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
-    if (!target.closest(".pet-hitbox, .pet-shell")) return;
+    if (!target.closest(".pet-hitbox, .pet-shell, .feather-strip")) return;
     if (Date.now() < suppressClickUntil) return;
     sendPetEvent("pet:clicked", {});
   });
   document.addEventListener("dblclick", (event) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.closest(".pet-hitbox, .pet-shell")) return;
+    if (!(target instanceof Element) || !target.closest(".pet-hitbox, .pet-shell, .feather-strip")) return;
     sendPetEvent("pet:doubleClicked", {});
   });
   document.addEventListener("mouseover", (event) => {
@@ -354,32 +359,41 @@ const installMouseInterop = () => {
   installPetSenses();
 
   let dragStartPoint = null;
+  let dragStarted = false;
 
   document.addEventListener("mousemove", (event) => {
     updateInteractiveHit(event);
-    if (dragging && !usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-move", { screenX: event.screenX, screenY: event.screenY });
+    if (dragging && !usesNativePetDrag()) {
+      if (!dragStarted && dragStartPoint && Math.hypot(event.screenX - dragStartPoint.screenX, event.screenY - dragStartPoint.screenY) > 4) {
+        dragStarted = true;
+        ipcRenderer.send("openpets:pet-drag-start", dragStartPoint);
+      }
+      if (dragStarted) ipcRenderer.send("openpets:pet-drag-move", { screenX: event.screenX, screenY: event.screenY });
+    }
   }, { passive: true });
 
   document.addEventListener("mousedown", (event) => {
     const target = getInteractiveTarget(event);
     setInteractiveHit(Boolean(target));
-    if (event.button !== 0 || !target?.closest(".pet-hitbox, .pet-shell")) return;
+    if (event.button !== 0 || !target?.closest(".pet-hitbox, .pet-shell, .feather-strip")) return;
     if (usesNativePetDrag()) return;
     event.preventDefault();
     dragging = true;
+    dragStarted = false;
     dragStartPoint = { screenX: event.screenX, screenY: event.screenY };
     setInteractiveHit(true);
-    ipcRenderer.send("openpets:pet-drag-start", { screenX: event.screenX, screenY: event.screenY });
   });
 
-  document.addEventListener("mouseup", (event) => {
+  document.addEventListener("mouseup", () => {
     if (!dragging) return;
+    const wasDrag = dragStarted;
     dragging = false;
-    if (dragStartPoint && Math.hypot(event.screenX - dragStartPoint.screenX, event.screenY - dragStartPoint.screenY) > 4) {
-      suppressClickUntil = Date.now() + 300;
-    }
+    dragStarted = false;
     dragStartPoint = null;
-    if (!usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-end");
+    if (wasDrag) {
+      suppressClickUntil = Date.now() + 300;
+      if (!usesNativePetDrag()) ipcRenderer.send("openpets:pet-drag-end");
+    }
   });
 
   document.addEventListener("mouseleave", () => {

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import { addOpenPetsHooks, assertInstalledClaudeCliPath, claudeHookEvents, createOpenPetsHookCommand, createOpenPetsHookSettingsPreview, doctorClaudeHooks, findInstalledOpenPetsClaudeCli, getBundledClaudeCliPath, getLocalClaudeCliPath, installClaudeHooks, openPetsHookMarker, removeOpenPetsHooks, uninstallClaudeHooks } from "./hook-settings.js";
 import { hookSpeechPools } from "./hook-messages.js";
@@ -93,11 +94,11 @@ for (const event of claudeHookEvents) {
 }
 const localPreview = createOpenPetsHookSettingsPreview("local");
 const localHook = (((localPreview.hooks as Record<string, unknown>).Stop as Array<{ hooks: Array<{ command: string }> }>)[0]?.hooks[0]);
-assert.ok(localHook?.command.includes(getLocalClaudeCliPath()));
+assert.ok(localHook && normalizeHookCommand(localHook.command).includes(getLocalClaudeCliPath()));
 assert.ok(localHook?.command.includes(openPetsHookMarker));
 const bundledPreview = createOpenPetsHookSettingsPreview("bundled");
 const bundledHook = (((bundledPreview.hooks as Record<string, unknown>).Stop as Array<{ hooks: Array<{ command: string }> }>)[0]?.hooks[0]);
-assert.ok(bundledHook?.command.includes(getBundledClaudeCliPath()));
+assert.ok(bundledHook && normalizeHookCommand(bundledHook.command).includes(getBundledClaudeCliPath()));
 assert.ok(bundledHook?.command.includes(openPetsHookMarker));
 const customNodeHookCommand = createOpenPetsHookCommand("bundled", "fixer", "/Users/test/Library/Application Support/Herd/config/nvm/versions/node/v22.22.2/bin/node");
 assert.ok(customNodeHookCommand.startsWith('"/Users/test/Library/Application Support/Herd/config/nvm/versions/node/v22.22.2/bin/node"'));
@@ -140,28 +141,30 @@ assert.equal(doctorClaudeHooks(settingsPath).status, "error");
 writeFileSync(settingsPath, JSON.stringify({ hooks: { Stop: { bad: true } } }), "utf8");
 assert.equal(doctorClaudeHooks(settingsPath).status, "error");
 const symlinkPath = join(dir, "settings-link.json");
-symlinkSync(settingsPath, symlinkPath);
-assert.equal(doctorClaudeHooks(symlinkPath).status, "error");
+if (createFileTestSymlink(settingsPath, symlinkPath)) {
+  assert.equal(doctorClaudeHooks(symlinkPath).status, "error");
+}
 
 process.env.OPENPETS_DISABLE_CLAUDE_ASYNC_HOOKS = "1";
 assert.throws(() => installClaudeHooks(join(dir, "async-disabled.json")));
 delete process.env.OPENPETS_DISABLE_CLAUDE_ASYNC_HOOKS;
 
 const isolatedEnv = { ...process.env, OPENPETS_DISCOVERY_FILE: join(dir, "missing-ipc.json") };
-const normalHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const claudeCliPath = fileURLToPath(new URL("./cli.js", import.meta.url));
+const normalHook = spawnSync(process.execPath, [claudeCliPath, "hook", "--openpets-managed"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
 assert.equal(normalHook.status, 0);
 assert.equal(normalHook.stdout, "");
 
-const petHookRun = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "fixer"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const petHookRun = spawnSync(process.execPath, [claudeCliPath, "hook", "--openpets-managed", "--pet", "fixer"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
 assert.equal(petHookRun.status, 0);
 assert.equal(petHookRun.stdout, "");
 
-const invalidPetHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const invalidPetHook = spawnSync(process.execPath, [claudeCliPath, "hook", "--openpets-managed", "--pet", "bad/pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
 assert.equal(invalidPetHook.status, 1);
-const missingPetHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
+const missingPetHook = spawnSync(process.execPath, [claudeCliPath, "hook", "--openpets-managed", "--pet"], { input: JSON.stringify({ hook_event_name: "Notification", message: "safe" }), encoding: "utf8", env: isolatedEnv });
 assert.equal(missingPetHook.status, 1);
 
-const malformedHook = spawnSync(process.execPath, [new URL("./cli.js", import.meta.url).pathname, "hook", "--openpets-managed"], { input: "not json", encoding: "utf8", env: isolatedEnv });
+const malformedHook = spawnSync(process.execPath, [claudeCliPath, "hook", "--openpets-managed"], { input: "not json", encoding: "utf8", env: isolatedEnv });
 assert.equal(malformedHook.status, 0);
 assert.equal(malformedHook.stdout, "");
 
@@ -174,7 +177,10 @@ const fakeAppCliPath = join(fakeAppCliDir, "cli.js");
 writeFileSync(fakeAppCliPath, "// bundled cli", "utf8");
 assertInstalledClaudeCliPath(fakeAppCliPath);
 const installedCliCommand = createOpenPetsHookCommand("published", undefined, "node", fakeAppCliPath);
-assert.ok(installedCliCommand.startsWith(`node ${fakeAppCliPath} hook ${openPetsHookMarker}`), "explicit installed CLI path must produce a node + absolute-path hook command");
+const normalizedInstalledCliCommand = normalizeHookCommand(installedCliCommand);
+assert.ok(normalizedInstalledCliCommand.startsWith("node "), "explicit installed CLI path must run through node");
+assert.ok(normalizedInstalledCliCommand.includes(fakeAppCliPath), "explicit installed CLI path must include the absolute CLI path");
+assert.ok(normalizedInstalledCliCommand.includes(` hook ${openPetsHookMarker}`), "explicit installed CLI path must invoke the managed hook command");
 assert.ok(!installedCliCommand.includes("npx"), "explicit installed CLI path must not fall back to npx");
 const installedCliPreview = createOpenPetsHookSettingsPreview("published", undefined, "node", fakeAppCliPath);
 const installedCliHook = (((installedCliPreview.hooks as Record<string, unknown>).Stop as Array<{ hooks: Array<{ command: string }> }>)[0]?.hooks[0]);
@@ -197,8 +203,9 @@ assert.throws(() => assertInstalledClaudeCliPath(join(dir, "OpenPets.app", "Cont
 assert.throws(() => assertInstalledClaudeCliPath(join(fakeAppCliDir, "index.js")));
 const symlinkedCliPath = join(dir, "linked-cli.js-target", "@open-pets", "claude", "dist", "cli.js");
 mkdirSync(join(dir, "linked-cli.js-target", "@open-pets", "claude", "dist"), { recursive: true });
-symlinkSync(fakeAppCliPath, symlinkedCliPath);
-assert.throws(() => assertInstalledClaudeCliPath(symlinkedCliPath));
+if (createFileTestSymlink(fakeAppCliPath, symlinkedCliPath)) {
+  assert.throws(() => assertInstalledClaudeCliPath(symlinkedCliPath));
+}
 
 } finally {
   rmSync(dir, { recursive: true, force: true });
@@ -208,6 +215,27 @@ console.error("Claude hooks validation passed.");
 function doctorStatus(value: Record<string, unknown>, selectedPetId?: string) {
   const path = doctorStatusPath(value);
   return doctorClaudeHooks(path, "published", selectedPetId).status;
+}
+
+function normalizeHookCommand(command: string): string {
+  return process.platform === "win32" ? command.replaceAll("\\\\", "\\") : command;
+}
+
+function createFileTestSymlink(targetPath: string, linkPath: string): boolean {
+  try {
+    symlinkSync(targetPath, linkPath, "file");
+    return true;
+  } catch (error) {
+    if (process.platform === "win32" && isErrnoException(error) && error.code === "EPERM") {
+      console.error(`Skipping file-symlink assertion because Windows symlink privilege is unavailable: ${linkPath}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function doctorStatusPath(value: Record<string, unknown>) {

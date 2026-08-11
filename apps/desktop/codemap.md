@@ -21,6 +21,8 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
   - Built-in fallback pet (bundled spritesheet)
   - Speech bubbles with reaction messages and status badges
   - User-configurable reaction-to-animation mapping
+  - Optional per-pet sprite layouts derived from Codex-format sheets or validated against actual WebP dimensions; frame metrics drive hitboxes/snap geometry and state timing drives reaction cleanup
+  - Left/right edge snap that hides the pet behind an animated feather strip
 - **Lease Manager**: 15s TTL leases for agent pet routing with heartbeat renewal
 - **Logging**: Structured logging with scopes, log rotation (2MB max), and sensitive data redaction
 - **Plugin Subsystem**: Declarative manifest plugins and JavaScript plugin hosting with permission approval, config schemas, command/status surfaces, catalog/local installs, SDK bridge quotas, storage, schedules, restricted HTTPS fetch, and safe path/ZIP/manifest validation
@@ -66,7 +68,8 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `renderer/`: React/Tailwind Control Center for Dashboard, Pets, Integrations, Plugins, and Settings
 - `local-ipc.ts`: TCP/Unix socket server for CLI communication
 - `lease-manager.ts`: Pet routing lease lifecycle
-- `pet-window.ts`: Pet rendering (transparent frameless windows, CSS sprite animation, speech bubbles, status badges)
+- `pet-window.ts`: Pet rendering (transparent frameless windows, validated custom sprite layouts, edge snap/restore, CSS animation, speech bubbles, status badges)
+- `codex-presence.ts`/`codex-presence-core.ts`: Windows-only Codex desktop window polling plus pure task-list parsing; unsupported platforms remain disabled
 - `default-pet-controller.ts`/`agent-pet-controller.ts`: Pet visibility/state management with transient displays; `reclampAllLivePetWindows()` re-clamps all live pet windows on topology changes
 - `pet-roaming-controller.ts`: Host-side roaming orchestrator — registers every live pet (default + agent) with the motion engine and applies the active physics configuration (gravity + bounce). Unregisters before window destroy to prevent the shared ticker from touching closed windows.
 - `pet-motion-engine.ts`: Shared-ticker motion engine (~60 fps) — `Map<petHandleId, MotionState>`, single `setInterval` for all pets, sub-pixel fractional accumulators, bottom-center gravity-floor anchor, `registerPet`/`unregisterPet` seams, sole continuous position writer.
@@ -89,7 +92,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `codex-pets.ts`: Local Codex pet import
 - `catalog.ts`: Remote catalog fetching with V3 pagination and fixture fallback
 - `logger.ts`: Structured logging with scopes (app, ipc, lease, pet, state, tray, ui)
-- `reaction-animation-mapping.ts`: Reaction-to-animation state mapping with user overrides
+- `reaction-animation-mapping.ts`: Reaction-to-animation mapping plus Codex sheet layout derivation and validated per-pet overrides
 - `reaction-messages.ts`: Message pools for each reaction type
 - `control-center-preload.cjs`/`pet-preload.cjs`/`plugin-sdk-preload.cjs`: Narrow contextBridge APIs for the Control Center, pet windows, and plugin SDK host; the legacy `preload.cjs` task-window bridge and `plugins-window.ts` UI have been removed
 - `electron-builder.yml`: Packaging configuration
@@ -100,7 +103,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 
 ## Test Structure
 
-- **Behavior tests** (`tests/*.test.ts`): Unit tests for lease manager (incl. PID liveness + pool toggle), state management, version checking, ZIP safety, Codex pets, Claude memory, reaction animation mapping, display geometry helpers (`display.test.ts`), pet motion-engine clamping and shared-ticker (`pet-motion-engine-clamp.test.ts`, `pet-motion-engine-shared-ticker.test.ts`), gravity seam (`pet-motion-engine-gravity-seam.test.ts`), single-writer invariant (`pet-motion-engine-single-writer.test.ts`), roaming controller (`pet-roaming-controller.test.ts`), and pool toggle (`pool-toggle.test.ts`). Compiled to `.test-dist/tests/`.
+- **Behavior tests** (`tests/*.test.ts`): Unit tests for lease manager (incl. PID liveness + pool toggle), state management, version checking, ZIP safety, Codex pet metadata/presence, Claude memory, reaction and sprite-layout mapping, edge-snap/display geometry (`display.test.ts`), pet motion-engine clamping/shared ticker/gravity seams/single-writer behavior, roaming controller, and pool toggle. Compiled to `.test-dist/tests/`.
 - **Contract tests** (`contracts/*.contract.ts`): Public API boundary validation for catalog fixtures, IPC protocol, and plugin manifest schema. Compiled to `.test-dist/contracts/`.
 - **Runtime checks** (`src/check-*.ts`): Remaining runtime validation checks compiled to `dist/`.
 - **Test runner** (`scripts/run-tests.mjs`): Orchestrates preload syntax checks → test compilation → behavior tests → contract tests → dist checks.

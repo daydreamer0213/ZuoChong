@@ -1,13 +1,13 @@
 import { BrowserWindow, powerMonitor, screen, shell, type Display } from "electron";
 
 import { getAppStateSnapshot, getDefaultPetPosition, getPerMonitorPetPosition, resetDefaultPetPosition, setDefaultPetPosition, setPerMonitorPetPosition, updatePreferences } from "./app-state.js";
-import { shouldShowDefaultPetForExternalEvent } from "./app-state-core.js";
+import { initialCodexVisibilityGateState, reduceCodexVisibilityGate, shouldShowDefaultPetForExternalEvent, type CodexVisibilityGateState } from "./app-state-core.js";
 import { defaultPetWindowSize, getAllDisplayKeys, getDefaultPetInitialPosition, getDisplayKey, getDisplayKeyForPosition, invalidateDisplayCache, type Point } from "./display.js";
 import { motionMoveTo } from "./pet-motion-engine.js";
 import { registerRoamingPet } from "./pet-roaming-controller.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetShowMediaOptions, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMsForPet, isPetWindowDragging, isPetWindowSnapped, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetShowMediaOptions, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugin-bubble-arbiter.js";
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
@@ -27,6 +27,7 @@ const maxPluginMoveDistance = 160;
 const minPluginMoveDurationMs = 250;
 const maxPluginMoveDurationMs = 1_500;
 let movementInProgress = false;
+let codexVisibilityGate: CodexVisibilityGateState = initialCodexVisibilityGateState;
 
 export type PetMoveOptions = { readonly x: number; readonly y: number; readonly durationMs?: number };
 export type PetWanderOptions = { readonly distance?: number; readonly durationMs?: number };
@@ -65,6 +66,12 @@ export function showDefaultPetForLan(): void {
 }
 
 function showDefaultPetWindow(source: "user" | "external-event"): void {
+  const gate = reduceCodexVisibilityGate(codexVisibilityGate, { type: "show-request" });
+  codexVisibilityGate = gate.state;
+  if (gate.action !== "show") {
+    debug("pet.default", "show deferred", { source, reason: "codex-visible" });
+    return;
+  }
   const window = getOrCreateDefaultPetWindow();
   info("pet.default", "show requested", { source, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), paused, petId: getAppStateSnapshot().preferences.defaultPetId });
 
@@ -78,11 +85,39 @@ function showDefaultPetWindow(source: "user" | "external-event"): void {
 
 export function hideDefaultPet(): void {
   updatePreferences({ openDefaultPetOnLaunch: false });
+  codexVisibilityGate = reduceCodexVisibilityGate(codexVisibilityGate, { type: "hide-request" }).state;
   hideDefaultPetWindow();
 }
 
 export function hideDefaultPetForLan(): void {
+  codexVisibilityGate = reduceCodexVisibilityGate(codexVisibilityGate, { type: "hide-request" }).state;
   hideDefaultPetWindow();
+}
+
+/**
+ * The Codex desktop app shows the same pet character; step aside while it is
+ * visible and come back when it is gone. Only suppresses the window (the
+ * user's show/hide preference is untouched) and only restores when this module
+ * was the one that hid it.
+ */
+export function applyCodexPresence(visible: boolean): void {
+  const gate = reduceCodexVisibilityGate(codexVisibilityGate, {
+    type: "codex-presence",
+    visible,
+    petVisible: isDefaultPetVisible(),
+  });
+  codexVisibilityGate = gate.state;
+  if (gate.action === "hide") {
+    info("pet.default", "codex pet visible, suppressing default pet", { windowId: defaultPetWindow?.id });
+    hideDefaultPetWindow();
+  } else if (gate.action === "show") {
+    info("pet.default", "codex pet gone, restoring default pet");
+    showDefaultPetWindow("external-event");
+  }
+}
+
+export function isCodexSuppressingDefaultPet(): boolean {
+  return codexVisibilityGate.codexVisible;
 }
 
 function hideDefaultPetWindow(): void {
@@ -331,16 +366,23 @@ function setTransientDisplay(display: PetTransientDisplay): void {
     transientAnimationTimeout = null;
   }
 
-  const animationMs = getTransientReactionAnimationMs(transientDisplay);
+  const scheduledDisplay = transientDisplay;
+  const scheduledGeneration = displayGeneration;
+  const animationStartedAt = Date.now();
   const displayDurationMs = getTransientDisplayDurationMs(transientDisplay);
-  if (animationMs !== null && animationMs < displayDurationMs) {
-    transientAnimationTimeout = setTimeout(() => {
-      if (!transientDisplay) return;
-      transientDisplay = clearTransientReaction(transientDisplay);
-      transientAnimationTimeout = null;
-      if (defaultPetWindow && !defaultPetWindow.isDestroyed()) setPetReactionState(defaultPetWindow, "idle");
-    }, animationMs);
-  }
+  void getTransientReactionAnimationMsForPet(scheduledDisplay, getAppStateSnapshot().preferences.defaultPetId)
+    .then((animationMs) => {
+      if (scheduledGeneration !== displayGeneration || !transientDisplay || transientDisplay.dismissToken !== scheduledDisplay.dismissToken) return;
+      if (animationMs === null || animationMs >= displayDurationMs) return;
+      const delayMs = Math.max(0, animationMs - (Date.now() - animationStartedAt));
+      transientAnimationTimeout = setTimeout(() => {
+        if (!transientDisplay || transientDisplay.dismissToken !== scheduledDisplay.dismissToken) return;
+        transientDisplay = clearTransientReaction(transientDisplay);
+        transientAnimationTimeout = null;
+        if (defaultPetWindow && !defaultPetWindow.isDestroyed()) setPetReactionState(defaultPetWindow, "idle");
+      }, delayMs);
+    })
+    .catch((error: unknown) => debug("pet.default", "animation timing resolution failed", { error: error instanceof Error ? error.message : String(error) }));
 
   transientDisplayTimeout = setTimeout(() => {
     transientDisplay = null;
@@ -463,6 +505,10 @@ function isBusyStatusBadgeReaction(reaction: OpenPetsReaction): boolean {
 
 /** Save position both in the flat key (backwards compat) and per-monitor map. */
 function handlePositionChanged(position: Point): void {
+  if (defaultPetWindow && isPetWindowSnapped(defaultPetWindow)) {
+    debug("pet.default", "skip persisting edge-snapped position", { windowId: defaultPetWindow.id, position });
+    return;
+  }
   setDefaultPetPosition(position);
   const displayKey = getDisplayKeyForPosition(position);
   setPerMonitorPetPosition(displayKey, position);
@@ -470,6 +516,11 @@ function handlePositionChanged(position: Point): void {
 
 function reclampDefaultPetWindow(reason: DisplayChangeReason, changedDisplay?: Display): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (isPetWindowSnapped(defaultPetWindow)) {
+    info("pet.default", "skip reclamp while edge-snapped", { windowId: defaultPetWindow.id, reason });
     return;
   }
 

@@ -35,6 +35,23 @@ import {
   planCursorMcpReplace,
   readCursorMcpConfig,
 } from "./cursor-status.js";
+
+function createTestSymlink(targetPath: string, linkPath: string, type: "file" | "dir"): boolean {
+  try {
+    symlinkSync(targetPath, linkPath, process.platform === "win32" && type === "dir" ? "junction" : type);
+    return true;
+  } catch (error) {
+    if (process.platform === "win32" && isErrnoException(error) && error.code === "EPERM") {
+      console.error(`Skipping file-symlink assertion because Windows symlink privilege is unavailable: ${linkPath}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}
 import { buildOpenPetsOnlyPreview, redactCursorConfig } from "./cursor-previews.js";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "openpets-cursor-")));
@@ -248,20 +265,21 @@ try {
   const realFile = join(symlinkDir, "real.json");
   const symlinkFile = join(symlinkDir, "symlink.json");
   writeFileSync(realFile, "{}", "utf8");
-  symlinkSync(realFile, symlinkFile);
-
-  const symlinkResult = readCursorMcpConfig(symlinkFile);
-  assert.equal(symlinkResult.ok, false);
-  if (!symlinkResult.ok) {
-    assert.equal(symlinkResult.reason, "symlink");
+  if (createTestSymlink(realFile, symlinkFile, "file")) {
+    const symlinkResult = readCursorMcpConfig(symlinkFile);
+    assert.equal(symlinkResult.ok, false);
+    if (!symlinkResult.ok) {
+      assert.equal(symlinkResult.reason, "symlink");
+    }
   }
 
   const danglingConfigSymlink = join(symlinkDir, "dangling-config.json");
-  symlinkSync(join(symlinkDir, "missing-config.json"), danglingConfigSymlink);
-  const danglingConfigResult = readCursorMcpConfig(danglingConfigSymlink);
-  assert.equal(danglingConfigResult.ok, false);
-  if (!danglingConfigResult.ok) {
-    assert.equal(danglingConfigResult.reason, "symlink");
+  if (createTestSymlink(join(symlinkDir, "missing-config.json"), danglingConfigSymlink, "file")) {
+    const danglingConfigResult = readCursorMcpConfig(danglingConfigSymlink);
+    assert.equal(danglingConfigResult.ok, false);
+    if (!danglingConfigResult.ok) {
+      assert.equal(danglingConfigResult.reason, "symlink");
+    }
   }
 
   // Test non-regular file rejection
@@ -536,7 +554,7 @@ try {
   const symlinkParentDir = join(root, "symlink-parent");
   const realParent = join(root, "real-parent");
   mkdirSync(realParent);
-  symlinkSync(realParent, symlinkParentDir);
+  assert.equal(createTestSymlink(realParent, symlinkParentDir, "dir"), true);
 
   const symlinkParentPath = join(symlinkParentDir, "mcp.json");
   const symlinkParentPlan = planCursorMcpInstall(symlinkParentPath, { mcpVersion: "2.0.6", petId: "fixer" });
@@ -549,7 +567,7 @@ try {
   const nestedReal = join(root, "nested-real");
   mkdirSync(join(nestedReal, "sub", ".cursor"), { recursive: true });
   const nestedLink = join(root, "nested-link");
-  symlinkSync(nestedReal, nestedLink);
+  assert.equal(createTestSymlink(nestedReal, nestedLink, "dir"), true);
   const nestedMissingThroughLink = join(nestedLink, "missing", ".cursor", "mcp.json");
   const nestedMissingResult = readCursorMcpConfig(nestedMissingThroughLink);
   assert.equal(nestedMissingResult.ok, false);
@@ -565,7 +583,7 @@ try {
   }
 
   const danglingLink = join(root, "dangling-link");
-  symlinkSync(join(root, "missing-target"), danglingLink);
+  assert.equal(createTestSymlink(join(root, "missing-target"), danglingLink, "dir"), true);
   const danglingPath = join(danglingLink, ".cursor", "mcp.json");
   const danglingResult = readCursorMcpConfig(danglingPath);
   assert.equal(danglingResult.ok, false);
@@ -703,7 +721,7 @@ try {
   const rulesSymlinkOutside = join(root, "rules-outside");
   mkdirSync(rulesSymlinkProject);
   mkdirSync(rulesSymlinkOutside);
-  symlinkSync(rulesSymlinkOutside, join(rulesSymlinkProject, ".cursor"));
+  assert.equal(createTestSymlink(rulesSymlinkOutside, join(rulesSymlinkProject, ".cursor"), "dir"), true);
   const rulesSymlinkResult = readCursorOpenPetsRules(rulesSymlinkProject);
   assert.equal(rulesSymlinkResult.ok, false);
   if (!rulesSymlinkResult.ok) assert.equal(rulesSymlinkResult.reason, "symlink");
@@ -712,20 +730,22 @@ try {
   mkdirSync(join(rulesFileSymlinkProject, ".cursor", "rules"), { recursive: true });
   const rulesFileSymlinkTarget = join(root, "rules-file-target.mdc");
   writeFileSync(rulesFileSymlinkTarget, expectedRule, "utf8");
-  symlinkSync(rulesFileSymlinkTarget, getCursorProjectRulesPath(rulesFileSymlinkProject));
-  const rulesFileSymlinkResult = readCursorOpenPetsRules(rulesFileSymlinkProject);
-  assert.equal(rulesFileSymlinkResult.ok, false);
-  if (!rulesFileSymlinkResult.ok) assert.equal(rulesFileSymlinkResult.reason, "symlink");
-  const rulesFileSymlinkPlan = planCursorRulesInstall(rulesFileSymlinkProject);
-  assert.equal("ok" in rulesFileSymlinkPlan, true);
-  if ("ok" in rulesFileSymlinkPlan) assert.equal(rulesFileSymlinkPlan.ok, false);
+  if (createTestSymlink(rulesFileSymlinkTarget, getCursorProjectRulesPath(rulesFileSymlinkProject), "file")) {
+    const rulesFileSymlinkResult = readCursorOpenPetsRules(rulesFileSymlinkProject);
+    assert.equal(rulesFileSymlinkResult.ok, false);
+    if (!rulesFileSymlinkResult.ok) assert.equal(rulesFileSymlinkResult.reason, "symlink");
+    const rulesFileSymlinkPlan = planCursorRulesInstall(rulesFileSymlinkProject);
+    assert.equal("ok" in rulesFileSymlinkPlan, true);
+    if ("ok" in rulesFileSymlinkPlan) assert.equal(rulesFileSymlinkPlan.ok, false);
+  }
 
   const danglingRulesSymlinkProject = join(root, "rules-dangling-symlink");
   mkdirSync(join(danglingRulesSymlinkProject, ".cursor", "rules"), { recursive: true });
-  symlinkSync(join(root, "missing-rules-target.mdc"), getCursorProjectRulesPath(danglingRulesSymlinkProject));
-  const danglingRulesResult = readCursorOpenPetsRules(danglingRulesSymlinkProject);
-  assert.equal(danglingRulesResult.ok, false);
-  if (!danglingRulesResult.ok) assert.equal(danglingRulesResult.reason, "symlink");
+  if (createTestSymlink(join(root, "missing-rules-target.mdc"), getCursorProjectRulesPath(danglingRulesSymlinkProject), "file")) {
+    const danglingRulesResult = readCursorOpenPetsRules(danglingRulesSymlinkProject);
+    assert.equal(danglingRulesResult.ok, false);
+    if (!danglingRulesResult.ok) assert.equal(danglingRulesResult.reason, "symlink");
+  }
 
   const nonRegularRulesProject = join(root, "rules-non-regular");
   mkdirSync(join(nonRegularRulesProject, ".cursor", "rules"), { recursive: true });

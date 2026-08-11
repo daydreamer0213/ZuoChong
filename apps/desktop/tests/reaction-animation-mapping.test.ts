@@ -4,12 +4,16 @@ import {
   type OpenPetsReaction,
 } from "../src/local-ipc-protocol.js";
 import {
+  applySpriteLayoutOverride,
   defaultPetSprite,
   defaultReactionToSpriteState,
+  deriveCodexSpriteLayout,
+  getSpriteAnimationDurationMs,
   normalizeReactionAnimationOverrides,
   reactionAnimationMetadata,
   resolveReactionSpriteState,
   selectableAnimationMetadata,
+  spriteLayoutMatchesImage,
   validateReactionAnimationOverrides,
   type SpriteStateDefinition,
   type UniversalSpriteState,
@@ -56,6 +60,34 @@ assert.equal(defaultPetSprite.frameWidth, 192, "sprite frame width must be 192")
 assert.equal(defaultPetSprite.frameHeight, 208, "sprite frame height must be 208");
 assert.equal(defaultPetSprite.columns, 8, "sprite columns must be 8");
 assert.equal(defaultPetSprite.rows, 9, "sprite rows must be 9");
+
+const derivedCodexLayout = deriveCodexSpriteLayout(192 * 8, 208 * 16);
+assert.ok(derivedCodexLayout, "valid Codex v2 dimensions must derive a layout");
+assert.equal(derivedCodexLayout.frameWidth, 192);
+assert.equal(derivedCodexLayout.frameHeight, 208);
+assert.equal(derivedCodexLayout.columns, 8);
+assert.equal(derivedCodexLayout.rows, 16);
+assert.equal(deriveCodexSpriteLayout(1535, 3328), undefined, "non-divisible sheet width must be rejected");
+assert.equal(deriveCodexSpriteLayout(1536, 2000), undefined, "non-divisible sheet height must be rejected");
+assert.equal(spriteLayoutMatchesImage(defaultPetSprite, 192 * 8, 208 * 9), true);
+assert.equal(spriteLayoutMatchesImage(defaultPetSprite, 192 * 8, 208 * 11), false, "declared rows must match the actual WebP");
+
+const overriddenLayout = applySpriteLayoutOverride(defaultPetSprite, {
+  columns: 10,
+  rows: 12,
+  states: {
+    idle: { frames: 10, durationMs: 900 },
+  },
+});
+assert.equal(overriddenLayout.columns, 10);
+assert.equal(overriddenLayout.rows, 12);
+assert.deepEqual(overriddenLayout.states.idle, { row: 0, frames: 10, durationMs: 900, iterations: "infinite" });
+assert.equal(defaultPetSprite.states.idle.frames, 6, "layout overrides must not mutate the base layout");
+assert.throws(() => applySpriteLayoutOverride(defaultPetSprite, { columns: 4 }), /frames/i, "all state frame counts must fit within the final column count");
+assert.throws(() => applySpriteLayoutOverride(defaultPetSprite, { rows: 4 }), /row/i, "all state rows must fit within the final row count");
+const timedLayout = applySpriteLayoutOverride(defaultPetSprite, { states: { jumping: { durationMs: 120, iterations: 3 } } });
+assert.equal(getSpriteAnimationDurationMs(timedLayout, "jumping"), 360, "custom finite animation timing must drive lifecycle cleanup");
+assert.equal(getSpriteAnimationDurationMs(timedLayout, "idle"), null);
 
 // Exact sprite state ids
 const actualStateIds = Object.keys(defaultPetSprite.states) as UniversalSpriteState[];

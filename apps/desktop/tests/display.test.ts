@@ -15,6 +15,9 @@ import {
   _setScreenForTesting,
   clampToNearestDisplayIfOffscreen,
   clampToVisibleWorkArea,
+  computeSnappedHiddenPosition,
+  detectSnapEdge,
+  fitSpriteScaleToWindow,
   invalidateDisplayCache,
   isOnAnyDisplay,
 } from "../src/display.js";
@@ -255,6 +258,131 @@ const PH = 420;
   invalidateDisplayCache();
   const result = clampToVisibleWorkArea({ x: 100, y: 100 }, { width: PW, height: PH });
   assert.deepEqual(result, { x: 100, y: 100 }, "legacy clamp — on-screen unchanged");
+}
+
+// ---------------------------------------------------------------------------
+// Edge snap (feather strip hiding) — detectSnapEdge / computeSnappedHiddenPosition
+// ---------------------------------------------------------------------------
+
+const EDGE = makeScreen([{ x: 0, y: 0, width: 1920, height: 1080 }]);
+// Sprite (192x208, bottom-center anchored, petBottom 22) offsets inside the window.
+const SPRITE_LEFT = (PW - 192) / 2; // 74
+const SPRITE_TOP = PH - 22 - 208; // 190
+
+// Sprite flush against the right work-area edge (window right edge is 74px
+// outside the screen) → snap "right". This is the "user dragged the pet flush"
+// scenario; the window edge check alone would never fire here.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: 1920 - SPRITE_LEFT - 192, y: 400 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }), "right", "sprite flush right snaps right");
+}
+
+// Sprite within threshold (<=20px) of the left edge → snap "left".
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: -SPRITE_LEFT + 15, y: 400 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }), "left", "sprite near left edge snaps left");
+}
+
+// Sprite just outside the threshold (25px) → no snap.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: -SPRITE_LEFT + 25, y: 400 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }), null, "sprite 25px from edge does not snap");
+}
+
+// Sprite flush bottom edge → NO snap (top/bottom edges never snap); horizontal
+// still wins when both are flush.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: 100, y: 1080 - SPRITE_TOP - 208 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }), null, "sprite flush bottom does not snap");
+  const both = { x: 1920 - SPRITE_LEFT - 192, y: 1080 - SPRITE_TOP - 208 };
+  assert.equal(detectSnapEdge(both, { width: PW, height: PH }), "right", "right beats bottom when both flush");
+  const top = { x: 700, y: -SPRITE_TOP };
+  assert.equal(detectSnapEdge(top, { width: PW, height: PH }), null, "sprite flush top does not snap");
+}
+
+// Middle of screen → no snap.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const result = detectSnapEdge({ x: 700, y: 400 }, { width: PW, height: PH });
+  assert.equal(result, null, "center position does not snap");
+}
+
+// Larger pet scale (1.5x) widens the sprite's visual box, so the window needs
+// to sit further out for the sprite to hug the edge.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const scaledSpriteLeft = (PW - 192 * 1.5) / 2;
+  const pos = { x: 1920 - scaledSpriteLeft - 192 * 1.5, y: 400 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }, 1.5), "right", "scaled sprite flush right snaps right");
+}
+
+// Custom sprite dimensions drive both edge detection and fixed-window fitting.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const customSprite = { frameWidth: 96, frameHeight: 104 };
+  const customLeft = (PW - customSprite.frameWidth) / 2;
+  const pos = { x: 1920 - customLeft - customSprite.frameWidth, y: 400 };
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }, 1, customSprite), "right");
+  assert.equal(fitSpriteScaleToWindow(1.5, { frameWidth: 400, frameHeight: 400 }, { width: PW, height: PH }), 0.76);
+}
+
+// Cursor at the screen edge snaps even when the sprite itself is past the edge
+// (the common "drag the mouse to the edge" drop: sprite grabbed near its center).
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: 1366, y: 400 }; // sprite right edge = 1366+266 = 1632 > 1920? no: 1632 < 1920 on this mock
+  const posRight = { x: 1366, y: 400 };
+  assert.equal(detectSnapEdge(posRight, { width: PW, height: PH }, 1, undefined, 22, { x: 1915, y: 400 }), "right", "cursor near right edge snaps right");
+  assert.equal(detectSnapEdge(pos, { width: PW, height: PH }, 1, undefined, 22, { x: 10, y: 400 }), "left", "cursor near left edge snaps left");
+  const mid = { x: 900, y: 400 };
+  assert.equal(detectSnapEdge(mid, { width: PW, height: PH }, 1, undefined, 22, { x: 950, y: 400 }), null, "cursor in the middle does not snap");
+}
+
+// Sprite center past the edge snaps even when neither sprite edge nor cursor is
+// within threshold (user dragged the pet more than half off-screen).
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const past = { x: 1920 - SPRITE_LEFT - 192 + 120, y: 400 }; // center = 1920 + 30
+  assert.equal(detectSnapEdge(past, { width: PW, height: PH }, 1, undefined, 22, { x: 1700, y: 400 }), "right", "sprite center past right edge snaps");
+  const pastLeft = { x: -SPRITE_LEFT - 120, y: 400 }; // center = -30
+  assert.equal(detectSnapEdge(pastLeft, { width: PW, height: PH }, 1, undefined, 22, { x: 300, y: 400 }), "left", "sprite center past left edge snaps");
+}
+
+// Hidden position for each edge leaves exactly the feather strip flush with the edge.
+{
+  _setScreenForTesting(EDGE);
+  invalidateDisplayCache();
+  const pos = { x: 1580, y: 400 };
+  const feather = { width: 28, height: 100 };
+
+  const right = computeSnappedHiddenPosition(pos, "right", { width: PW, height: PH }, feather);
+  assert.equal(right.x, 1920 - feather.width, "right hidden x flushes feather strip to edge");
+  assert.equal(right.y, pos.y, "right hidden keeps y");
+
+  const left = computeSnappedHiddenPosition(pos, "left", { width: PW, height: PH }, feather);
+  assert.equal(left.x, 0 - PW + feather.width, "left hidden x flushes feather strip to edge");
+  assert.equal(left.y, pos.y, "left hidden keeps y");
+
+  const bottom = computeSnappedHiddenPosition(pos, "bottom", { width: PW, height: PH }, feather);
+  assert.equal(bottom.y, 1080 - feather.height, "bottom hidden y flushes feather strip to edge");
+  assert.equal(bottom.x, pos.x, "bottom hidden keeps x");
+
+  const top = computeSnappedHiddenPosition(pos, "top", { width: PW, height: PH }, feather);
+  assert.equal(top.y, 0 - PH + feather.height, "top hidden y flushes feather strip to edge");
+  assert.equal(top.x, pos.x, "top hidden keeps x");
 }
 
 // ---------------------------------------------------------------------------

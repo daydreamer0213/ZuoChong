@@ -29,6 +29,7 @@ const behaviorTests = [
   ".test-dist/tests/reaction-animation-mapping.test.js",
   ".test-dist/tests/zip-safety.test.js",
   ".test-dist/tests/codex-pets.test.js",
+  ".test-dist/tests/codex-presence.test.js",
   ".test-dist/tests/claude-memory.test.js",
   ".test-dist/tests/plugin-config.test.js",
   ".test-dist/tests/plugin-assets.test.js",

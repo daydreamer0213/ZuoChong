@@ -15,7 +15,7 @@ try {
   const project = join(root, "project");
   mkdirSync(project);
   const paths = getProjectOpenCodeConfigPaths(project);
-  assert.deepEqual(paths.candidates.map((path) => path.slice(project.length + 1)), ["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc"]);
+  assert.deepEqual(paths.candidates.map((path) => path.slice(project.length + 1)), ["opencode.json", "opencode.jsonc", join(".opencode", "opencode.json"), join(".opencode", "opencode.jsonc")]);
   assert.equal(selectProjectOpenCodeConfigPath(project), join(project, ".opencode", "opencode.jsonc"));
   mkdirSync(join(project, ".opencode"));
   writeFileSync(join(project, ".opencode", "opencode.jsonc"), "{}\n");
@@ -117,15 +117,16 @@ try {
   assert.equal("ok" in outsidePlan ? outsidePlan.ok : true, false);
   const linkTarget = join(root, "link-target");
   mkdirSync(linkTarget);
-  symlinkSync(linkTarget, join(root, "link-parent"));
+  assert.equal(createTestSymlink(linkTarget, join(root, "link-parent"), "dir"), true);
   const linkParentPlan = planOpenCodeConfigWrite(root, join(root, "link-parent", "opencode.jsonc"), "{}\n");
   assert.equal("ok" in linkParentPlan ? linkParentPlan.ok : true, false);
   const linkedFile = join(root, "linked-file.jsonc");
   writeFileSync(join(root, "real-file.jsonc"), "{}\n");
-  symlinkSync(join(root, "real-file.jsonc"), linkedFile);
-  const linkedFilePlan = planOpenCodeConfigWrite(root, linkedFile, "{}\n");
-  assert.equal("ok" in linkedFilePlan ? linkedFilePlan.ok : true, false);
-  symlinkSync(project, join(root, "project-link"));
+  if (createTestSymlink(join(root, "real-file.jsonc"), linkedFile, "file")) {
+    const linkedFilePlan = planOpenCodeConfigWrite(root, linkedFile, "{}\n");
+    assert.equal("ok" in linkedFilePlan ? linkedFilePlan.ok : true, false);
+  }
+  assert.equal(createTestSymlink(project, join(root, "project-link"), "dir"), true);
   assert.throws(() => getProjectOpenCodeConfigPaths(join(root, "project-link")));
 
   const globalDir = join(root, "global-missing");
@@ -267,7 +268,7 @@ try {
   const globalOutside = join(root, "global-outside");
   mkdirSync(globalOutside);
   writeFileSync(join(globalOutside, "opencode.jsonc"), "{}\n", "utf8");
-  symlinkSync(globalOutside, globalSymlink);
+  assert.equal(createTestSymlink(globalOutside, globalSymlink, "dir"), true);
   assert.equal(doctorOpenCodeGlobalSetup(globalSymlink).status, "error");
 
   for (const [category, messages] of Object.entries(hookSpeechPools) as Array<[string, readonly string[]]>) {
@@ -278,6 +279,23 @@ try {
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+function createTestSymlink(targetPath: string, linkPath: string, type: "file" | "dir"): boolean {
+  try {
+    symlinkSync(targetPath, linkPath, process.platform === "win32" && type === "dir" ? "junction" : type);
+    return true;
+  } catch (error) {
+    if (process.platform === "win32" && isErrnoException(error) && error.code === "EPERM") {
+      console.error(`Skipping file-symlink assertion because Windows symlink privilege is unavailable: ${linkPath}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 console.error("OpenCode foundation validation passed.");

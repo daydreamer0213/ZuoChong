@@ -36,9 +36,9 @@ Docs here are the *narrative* layer on top of those maps.
 
 ## Agent integrations
 
-- **[agent-integrations.md](agent-integrations.md)** — how Claude Code, MCP,
-  OpenCode, Cursor, and Pi are configured and how each turns agent activity into
-  pet reactions, plus the CLI that ties them together.
+- **[agent-integrations.md](agent-integrations.md)** — how Claude Code, Codex,
+  MCP, OpenCode, Cursor, and Pi are configured and how each turns agent activity
+  into pet reactions, plus the CLI that ties them together.
 
 ## Plugins & SDK
 
@@ -65,6 +65,9 @@ Docs here are the *narrative* layer on top of those maps.
   gate: behavior tests, contract tests, runtime checks, plugin release
   validators (`validate-release` / `validate-live`), catalog verification, and
   what "production-valid" means before shipping.
+- **[research/2026-08-11-github-reuse-survey.md](research/2026-08-11-github-reuse-survey.md)** —
+  ranked GitHub projects, reusable components, licensing boundaries, and the
+  next low-risk experiments.
 
 ## How to keep these docs healthy
 

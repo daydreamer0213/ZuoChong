@@ -3,8 +3,9 @@
 OpenPets reacts to coding agents. Each supported agent has an integration
 package that does two jobs: **configure** the agent to talk to OpenPets, and at
 runtime **translate** the agent's activity into safe pet reactions sent over
-local IPC. This doc covers all five integrations (Claude Code, MCP, OpenCode,
-Cursor, Pi), the shared speech-safety layer, and the CLI that orchestrates them.
+local IPC. This doc covers all six integrations (Claude Code, Codex, MCP,
+OpenCode, Cursor, Pi), the shared speech-safety layer, and the CLI that
+orchestrates them.
 
 For the wire protocol they all use, see [ipc.md](ipc.md). Source maps live in
 each `packages/*/codemap.md`.
@@ -156,6 +157,33 @@ writes with backup, recursive redaction of sensitive keys/values, and refusal of
 unpinned versions (`@latest`). Rules ownership requires an exact
 `OPENPETS:CURSOR_RULES:START/END` marker pair. The desktop uses preview/copy;
 the CLI writes project rules.
+
+## Codex — `@open-pets/codex`
+
+Codex lifecycle-hook integration. It appends a marker-owned TOML block to
+`~/.codex/config.toml` using Codex's documented array-table shape
+(`[[hooks.Event]]` plus `[[hooks.Event.hooks]]`) and translates events into pet
+reactions:
+
+| Codex event | Reaction |
+|-------------|----------|
+| `SessionStart` | `waving` |
+| `UserPromptSubmit` | `thinking` |
+| `PreToolUse` (Edit/Write/apply_patch) | `editing` |
+| `PreToolUse` (Bash running tests) | `testing` |
+| `PermissionRequest` | `waiting` |
+| `Stop` | `success` |
+
+Command handlers run the local `cli.js` (`hook --openpets-managed`) with a
+10 s reaction / 20 s speech throttle. Windows entries include
+`commandWindows`; hooks remain synchronous because Codex currently parses but
+does not support `async`. `install-hooks` / `uninstall-hooks` / `doctor-hooks`
+manage only the marker-owned block with atomic writes and timestamped backups,
+preserving all other TOML. Setup parses the complete TOML before writing and
+refuses malformed or conflicting managed markers. After installation, review
+active hooks with Codex's `/hooks` command. Payload parsing accepts
+`hook_event_name`, `event_name`, or `event`, so minor payload drift degrades to
+no reaction rather than a broken agent session.
 
 ## Pi — `@open-pets/pi`
 

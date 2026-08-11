@@ -50,6 +50,7 @@ coding agent  ──(hook/MCP/plugin event)──▶  @open-pets/client
 | `@open-pets/cli` | User-facing CLI: configure agents, manage pets, run MCP, scaffold/validate plugins | [agent-integrations.md](agent-integrations.md), [development.md](development.md) |
 | `@open-pets/mcp` | Stdio MCP server exposing `openpets_status` / `react` / `say` to MCP agents | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/claude` | Claude Code hooks + MCP/settings/memory management | [agent-integrations.md](agent-integrations.md) |
+| `@open-pets/codex` | Codex lifecycle hooks + safe TOML config management | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/opencode` | OpenCode plugin runtime + config management | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/cursor` | Cursor MCP config + project rules management | [agent-integrations.md](agent-integrations.md) |
 | `@open-pets/pi` | Pi coding-agent extension + `/openpets` commands | [agent-integrations.md](agent-integrations.md) |
@@ -59,8 +60,8 @@ coding agent  ──(hook/MCP/plugin event)──▶  @open-pets/client
 | `pet-format` | Tiny marker/identity type for pet packages | — |
 
 The dependency spine: every integration depends on `@open-pets/client`; the
-`cli` composes `claude`, `opencode`, `cursor`, and `mcp`; `claude`/`opencode`/`pi`
-depend on `agent-events` for safe speech.
+`cli` composes `claude`, `opencode`, `cursor`, and `mcp`; `codex`, `claude`,
+`opencode`, and `pi` depend on `agent-events` for safe speech.
 
 ## End-to-end flows
 

@@ -14,6 +14,8 @@ Core TypeScript source for the OpenPets desktop application. Organized into: lif
 - **Sandboxed Renderers**: Control Center loads the Vite React/Tailwind bundle through a hardened BrowserWindow and narrow preload bridge; transparent pet windows and plugin SDK host windows stay separate
 - **Structured Logging**: Scoped logging (app, ipc, lease, pet.*, state, tray, ui) with log rotation and redaction
 - **Reaction Animation Mapping**: User-configurable mapping from reaction types to sprite animation states
+- **Codex Sprite Compatibility**: Installed pets may derive Codex-format sheet dimensions or apply validated `pet.json` layout overrides.
+- **Edge-Snap Coexistence**: Pet windows can hide behind left/right display edges, while Codex desktop presence temporarily suppresses only the default pet window.
 - **Plugin Runtimes**: Plugins use validated manifests, approved permissions, persisted config, safe path checks, declarative timer-triggered actions, or sandboxed JavaScript entry modules through the SDK bridge.
 - **Capability-Oriented SDK Surface**: The plugin bridge is split into focused SDK modules for audio, bus, config, events, quotas, routes, state, storage, types, and UI so permission checks and host effects stay localized.
 - **Host-Rendered Plugin UI**: Plugins describe bubbles, alerts, commands, panels, assets, and pet behavior; the host validates descriptors and renders them through pet windows, Control Center IPC, or sandboxed panel windows.
@@ -220,6 +222,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `pet-paths.ts`: Safe path resolution for pet directories
 - `codex-pets.ts`: Import from `~/.codex/pets/` with validation
 - `codex-pets-core.ts`: Codex metadata validation constants
+- `codex-presence.ts`: Windows polling lifecycle that gates/restores the default pet around a verified Codex desktop window
+- `codex-presence-core.ts`: Electron-free `tasklist /v` CSV parsing and window matching
 - `catalog.ts`: Remote catalog fetch with V3 pagination support, search, fixture fallback
 - `catalog-validation.ts`: CatalogV2/V3 schema validation
 - `zip-safety.ts`: ZIP entry path validation (traversal prevention, case collision detection)

@@ -12,6 +12,29 @@ export interface SpriteStateDefinition {
   readonly iterations?: number | "infinite";
 }
 
+export interface PetSpriteLayout {
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly columns: number;
+  readonly rows: number;
+  readonly states: Record<UniversalSpriteState, SpriteStateDefinition>;
+}
+
+export type SpriteStatePatch = {
+  row?: number;
+  frames?: number;
+  durationMs?: number;
+  iterations?: number | "infinite";
+};
+
+export type PetSpriteLayoutOverride = {
+  frameWidth?: number;
+  frameHeight?: number;
+  columns?: number;
+  rows?: number;
+  states?: Partial<Record<UniversalSpriteState, SpriteStatePatch>>;
+};
+
 export const motionToSpriteState = {
   idle: "idle",
   "run-right": "running-right",
@@ -32,6 +55,8 @@ export const defaultReactionToSpriteState = {
   celebrating: "jumping",
 } as const satisfies Record<OpenPetsReaction, UserSelectableAnimationState>;
 
+export type BuiltInPetSprite = PetSpriteLayout & { readonly fileName: string };
+
 export const defaultPetSprite = {
   fileName: "default-pet-spritesheet.webp",
   frameWidth: 192,
@@ -49,7 +74,57 @@ export const defaultPetSprite = {
     running: { row: 7, frames: 6, durationMs: 820 },
     review: { row: 8, frames: 6, durationMs: 1030 },
   } satisfies Record<UniversalSpriteState, SpriteStateDefinition>,
-} as const;
+} as const satisfies BuiltInPetSprite;
+
+/**
+ * Derive a sprite layout for a Codex v2 pet from its spritesheet dimensions.
+ * Codex v2 sheets are 8 columns wide, use 192x208 frames, and may carry extra
+ * rows (e.g. 16-direction look rows) beyond the 9 standard state rows.
+ */
+export function deriveCodexSpriteLayout(imageWidth: number, imageHeight: number): PetSpriteLayout | undefined {
+  const columns = 8;
+  if (imageWidth <= 0 || imageHeight <= 0 || imageWidth % columns !== 0) return undefined;
+  const frameWidth = imageWidth / columns;
+  const frameHeight = Math.round(frameWidth * (208 / 192));
+  if (frameHeight <= 0 || imageHeight % frameHeight !== 0) return undefined;
+  const rows = imageHeight / frameHeight;
+  if (rows < 9 || !Number.isInteger(rows)) return undefined;
+  return { frameWidth, frameHeight, columns, rows, states: defaultPetSprite.states };
+}
+
+/** Merge an optional per-pet layout override over the universal default. */
+export function applySpriteLayoutOverride(base: PetSpriteLayout, override: PetSpriteLayoutOverride | undefined): PetSpriteLayout {
+  if (!override) return base;
+  const states: Record<UniversalSpriteState, SpriteStateDefinition> = { ...base.states };
+  for (const state of Object.keys(states) as UniversalSpriteState[]) {
+    const patch = override.states?.[state];
+    if (patch) states[state] = { ...states[state], ...patch };
+  }
+  const layout: PetSpriteLayout = {
+    frameWidth: override.frameWidth ?? base.frameWidth,
+    frameHeight: override.frameHeight ?? base.frameHeight,
+    columns: override.columns ?? base.columns,
+    rows: override.rows ?? base.rows,
+    states,
+  };
+  for (const [state, definition] of Object.entries(layout.states)) {
+    if (definition.row < 0 || definition.row >= layout.rows) throw new Error(`Sprite state ${state} row is outside the final layout.`);
+    if (definition.frames <= 0 || definition.frames > layout.columns) throw new Error(`Sprite state ${state} frames exceed the final column count.`);
+  }
+  return layout;
+}
+
+export function spriteLayoutMatchesImage(layout: PetSpriteLayout, imageWidth: number, imageHeight: number): boolean {
+  return Number.isInteger(imageWidth)
+    && Number.isInteger(imageHeight)
+    && imageWidth === layout.frameWidth * layout.columns
+    && imageHeight === layout.frameHeight * layout.rows;
+}
+
+export function getSpriteAnimationDurationMs(layout: PetSpriteLayout, state: UniversalSpriteState): number | null {
+  const definition = layout.states[state];
+  return typeof definition.iterations === "number" ? definition.durationMs * definition.iterations : null;
+}
 
 export const selectableAnimationMetadata = [
   { id: "idle", label: "Idle", description: "Neutral/no special movement." },
