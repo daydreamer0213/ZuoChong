@@ -95,10 +95,6 @@ those choices as accessible radio cards, with animation only for the selected,
 hovered, or keyboard-focused card. `prefers-reduced-motion` keeps the first frame
 static.
 
-Calendar Airmail uses this for its courier choice. The couriers are bundled
-plugin assets, not installed pets: changing the selection never reads the pet
-catalog, changes the default pet, or depends on a user-installed companion.
-
 ### Manifest reading is hardened
 
 `plugin-manifest-reader.ts` enforces realpath/allowed-root checks, requires the
@@ -178,8 +174,8 @@ can be dismissed and can observe `click`, `manual`, `expired`, or
 removes that plugin's pending and active deliveries without calling handlers in
 the stopped host. See [Plugin SDK v3](/sdk) for the author contract.
 
-This surface is intended for time-sensitive companion messages such as Calendar
-Airmail, not as a general custom-overlay API.
+This surface is intended for time-sensitive companion messages, not as a
+general custom-overlay API.
 
 ## Runtime & sandbox
 
@@ -271,12 +267,10 @@ repo dev build still supports maintainer-only env paths with
    caps, entry files, and HTML panels. (`packages/cli/src/plugin-validate.ts`.)
 5. **Package & publish**: see below.
 
-Official plugins are the best worked examples for this workflow. Calendar
-Airmail demonstrates OAuth, network allowlists, scheduled work, durable plugin
-storage, status rows, and the host-owned `ui:delivery` surface; Quick Reminders
-demonstrates reminder state, snooze/done actions, optional notifications, and
-sound assets. See [Official plugins](/official-plugins) for the current
-reviewed lineup.
+Official plugins are the best worked examples for this workflow. Quick
+Reminders demonstrates reminder state, snooze/done actions, optional
+notifications, and sound assets. See [Official plugins](/official-plugins) for
+the current reviewed lineup.
 
 ## Packaging, catalog & release validation
 

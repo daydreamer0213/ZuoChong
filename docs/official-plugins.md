@@ -25,11 +25,10 @@ see [Plugin platform](/plugins). For the author-facing API, see
 ## Current catalog lineup
 
 The public plugin catalog is `web/public/plugins/catalog.v2.json`. The current
-catalog contains ten official plugins and three community plugins.
+catalog contains nine official plugins and three community plugins.
 
 | Plugin | Type | What it does |
 | --- | --- | --- |
-| Calendar Airmail | Official | Delivers Google Calendar event reminders through a selected bundled courier sprite. |
 | Morning & Evening Routine | Official | Runs morning and evening check-ins. |
 | Focus Buddy | Official | Starts focus sessions and reports timer progress through the pet. |
 | Daily Fortune Cookie | Official | Shows scheduled or command-triggered fortune messages. |

@@ -244,12 +244,6 @@ expiry, dismissal, display removal, plugin reload/disable/uninstall, and app
 shutdown are host lifecycle events. The host animates the declared courier strip
 and owns its layout; plugins only supply a trusted sprite reference and text.
 
-Calendar Airmail's configuration is a plugin-exclusive courier picker. It is an
-accessible animated sprite grid whose selected/hovered/focused cards animate,
-while reduced-motion users see a static first frame. It does not select, preview,
-or validate installed pets; its bundled courier sprites remain available wherever
-the plugin is installed.
-
 ### Agent setup
 
 `agent-setup.ts` detects installed agents and runs configuration actions (MCP

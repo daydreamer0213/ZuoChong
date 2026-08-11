@@ -73,8 +73,8 @@ in `AGENTS.md` under "Cloned Dependency Source".
 
 ## Plugin OAuth on KDE/Wayland
 
-Two separate issues block plugin OAuth (`ctx.auth.oauth`, e.g. Calendar Airmail)
-on KDE Plasma/Wayland sessions, independent of the pet-dragging behavior above.
+Two separate issues block plugin OAuth (`ctx.auth.oauth`) on KDE Plasma/Wayland
+sessions, independent of the pet-dragging behavior above.
 Verified on real hardware: CachyOS Linux, KDE Plasma 6.7.4, KWin 6.7.4, Wayland
 session, `--ozone-platform=x11` forced (see "Accepted Wayland trade-offs" above
 for why x11/XWayland is forced at all).
