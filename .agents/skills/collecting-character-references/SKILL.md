@@ -47,13 +47,13 @@ Do not summarize the record as a different schema. Copy `assets/sources.yaml` un
 | `unknown` | Record the URL only. Includes unattributed reposts without a primary source. Do not download, study as an internal visual reference, or use as generation input until the primary source or permission is found. |
 | `prohibited` | Do not download or use. Includes leaks, ripped game assets, and paywall bypasses. |
 
-5. Download only when the user requests collection and the source is eligible. Store media under `art/reference-packs/<character-id>/private/` on the project drive. Never place it on `C:` or stage it in Git.
+5. Save local copies only when the user requests collection and the source is eligible. Store media under `art/reference-packs/<character-id>/private/` on the project drive. Never place it on `C:` or stage it in Git. This Skill installs and invokes no downloader or generation tool.
 6. Copy `assets/character-brief.md` beside `sources.yaml`. Describe only observations supported by recorded sources; move uncertain details to the uncertainty section.
 7. Report separately:
    - what is safe for internal reference;
    - what may be included in the repository;
    - unresolved permission questions.
-8. Pass the brief and selected local references to `imagegen`. Use `hatch-pet` only after the base character design is approved.
+8. Hand the brief and selected local references to the user's chosen image-generation or sprite-production workflow only after the base character design is approved.
 
 ## Required Output
 
