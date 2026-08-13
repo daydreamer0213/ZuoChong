@@ -23,11 +23,11 @@
 
 ## Must-Preserve Features
 
-- 
+- Add only features confirmed by recorded sources.
 
 ## Safe Animation Simplifications
 
-- 
+- List details that may be simplified without losing character identity.
 
 ## Uncertain or Conflicting Details
 
