@@ -1,0 +1,45 @@
+pack:
+  character_id: "hoshimi-miyabi"
+  character_name: "Hoshimi Miyabi / 星见雅"
+  franchise: "Zenless Zone Zero / 绝区零"
+  region: "Chinese mainland"
+  intended_output: "OpenPets desktop-pet character study"
+  intended_use: "internal-reference-for-non-commercial-prototype"
+  reviewed_at: "2026-08-13"
+
+sources:
+  - id: "zzz-cn-agent-record"
+    title: "代理人档案 | 星见雅"
+    url: "https://zzz.mihoyo.com/news/126843"
+    publisher: "米哈游 / 绝区零"
+    accessed: "2026-08-13"
+    material_type: "official character record"
+    classification: "official-reference"
+    allowed_use: "internal-reference-only"
+    redistribute_original: false
+    permission_evidence: "Published on the official Chinese mainland Zenless Zone Zero website."
+    notes: "Primary source for identity, title, faction cues, and official character presentation. Do not copy its images into the repository."
+
+  - id: "zzz-cn-character-demo"
+    title: "星见雅角色展示 | 无尽修行"
+    url: "https://zzz.mihoyo.com/news/127465"
+    publisher: "米哈游 / 绝区零"
+    accessed: "2026-08-13"
+    material_type: "official character demo video page"
+    classification: "official-reference"
+    allowed_use: "internal-reference-only"
+    redistribute_original: false
+    permission_evidence: "Published on the official Chinese mainland Zenless Zone Zero website."
+    notes: "Primary motion reference for sword handling, reserved body language, attack rhythm, and brief lighter character beats. Do not store downloaded video or frames in Git."
+
+  - id: "zzz-cn-production-feature"
+    title: "1.4版本「星流霆击」特刊 | 星见雅项目组制作幕后"
+    url: "https://zzz.mihoyo.com/news/127436"
+    publisher: "米哈游 / 绝区零"
+    accessed: "2026-08-13"
+    material_type: "official production feature"
+    classification: "official-reference"
+    allowed_use: "internal-reference-only"
+    redistribute_original: false
+    permission_evidence: "Published on the official Chinese mainland Zenless Zone Zero website."
+    notes: "Use to understand official design intent and movement emphasis. Treat embedded images and video as non-redistributable reference material."
