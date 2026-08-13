@@ -1,0 +1,4 @@
+interface:
+  display_name: "Collect Character References"
+  short_description: "Build traceable, Git-safe reference packs"
+  default_prompt: "Use $collecting-character-references to build a traceable character reference pack while keeping downloaded media out of Git."

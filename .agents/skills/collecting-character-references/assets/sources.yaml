@@ -1,0 +1,21 @@
+pack:
+  character_id: ""
+  character_name: ""
+  franchise: ""
+  region: ""
+  intended_output: ""
+  intended_use: "internal-reference-for-non-commercial-prototype"
+  reviewed_at: ""
+
+sources:
+  - id: ""
+    title: ""
+    url: ""
+    publisher: ""
+    accessed: ""
+    material_type: ""
+    classification: "unknown"
+    allowed_use: "record-only"
+    redistribute_original: false
+    permission_evidence: ""
+    notes: ""
